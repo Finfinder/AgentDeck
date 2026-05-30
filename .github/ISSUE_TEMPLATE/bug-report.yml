@@ -1,0 +1,68 @@
+name: Zg³oszenie b³êdu
+description: Zg³oœ powtarzalny b³¹d lub regresjê.
+title: "[B³¹d]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Dziêkujemy za zg³oszenie b³êdu w AgentDeck. Podaj jak najwiêcej szczegó³ów, abyœmy mogli szybko zweryfikowaæ i odtworzyæ problem.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Obszar
+      description: Wybierz najbli¿szy obszar problemu.
+      options:
+        - apps/desktop
+        - packages/workbench
+        - packages/services
+        - agent-runtime
+        - model-gateway
+        - mcp-manager
+        - local-store
+        - docs
+        - inne
+    validations:
+      required: true
+  - type: textarea
+    id: bug_description
+    attributes:
+      label: Opis b³êdu
+      placeholder: Krótki opis problemu.
+    validations:
+      required: true
+  - type: textarea
+    id: steps_to_reproduce
+    attributes:
+      label: Kroki do odtworzenia
+      placeholder: |
+        1. npm install
+        2. npm run dev
+        3. Otwórz aplikacjê i wykonaj akcjê X
+    validations:
+      required: true
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Oczekiwane zachowanie
+    validations:
+      required: true
+  - type: textarea
+    id: actual_behavior
+    attributes:
+      label: Rzeczywiste zachowanie
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Œrodowisko
+      description: Podaj OS / Node / pnpm/npm / commit lub branch
+      placeholder: np. Windows 11, Node 18.16.0, pnpm 8.0.0, branch feat/xyz
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Potwierdzenie
+      options:
+        - label: Sprawdzi³em istniej¹ce issues i nie znalaz³em duplikatu.
+          required: true
