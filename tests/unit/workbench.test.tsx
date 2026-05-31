@@ -3,15 +3,17 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '@agentdeck/workbench';
-import type { AgentDeckPreloadApi } from '@agentdeck/shared';
+import { DEFAULT_THEME_SETTINGS } from '@agentdeck/services';
+// Note: tests construct a mock preload API with extended members (theme APIs).
+// Avoid importing the strict `AgentDeckPreloadApi` type here to keep mocks flexible.
 
-function mockPreloadApi(overrides: Partial<AgentDeckPreloadApi> = {}) {
-  const api: AgentDeckPreloadApi = {
+function mockPreloadApi(overrides: Record<string, any> = {}) {
+  const api: any = {
     getStartupState: vi.fn().mockResolvedValue({ status: 'ready', appVersion: '0.1.0', services: [] }),
-    getThemeSettings: vi.fn().mockResolvedValue({ theme: 'dark' }),
-    setThemeSettings: vi.fn().mockImplementation(async settings => settings),
     selectWorkspaceEntry: vi.fn().mockResolvedValue({ status: 'cancelled' }),
     versions: { chrome: '130.0.0', electron: '42.3.0', node: '25.0.0' },
+    getThemeSettings: vi.fn().mockResolvedValue(DEFAULT_THEME_SETTINGS),
+    setThemeSettings: vi.fn().mockImplementation(async (s: unknown) => s),
     ...overrides
   };
 

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createSettingsService } from '@agentdeck/services';
+import { createSettingsService, readThemeSettings, DEFAULT_THEME_SETTINGS } from '@agentdeck/services';
 
 let tempDir: string | null = null;
 
@@ -13,7 +13,8 @@ async function createSettingsServiceFixture() {
 
   return {
     service: createSettingsService(tempDir),
-    settingsFilePath: join(tempDir, 'settings.json')
+    settingsFilePath: join(tempDir, 'settings.json'),
+    themeFilePath: join(tempDir, 'theme.json')
   };
 }
 
@@ -25,26 +26,40 @@ describe('SettingsService', () => {
     }
   });
 
-  it('returns dark theme settings by default', async () => {
-    const { service } = await createSettingsServiceFixture();
+  it('returns default when file is missing (ENOENT) via readThemeSettings()', async () => {
+    const { themeFilePath } = await createSettingsServiceFixture();
 
-    await expect(service.readThemeSettings()).resolves.toEqual({ theme: 'dark' });
+    const result = await readThemeSettings(themeFilePath);
+
+    expect(result).toEqual(DEFAULT_THEME_SETTINGS);
   });
 
-  it('persists theme settings as JSON', async () => {
+  it('returns default when JSON is malformed (SyntaxError) via readThemeSettings()', async () => {
+    const { themeFilePath } = await createSettingsServiceFixture();
+
+    await writeFile(themeFilePath, '{ "theme": "dark"', 'utf8');
+
+    const result = await readThemeSettings(themeFilePath);
+
+    expect(result).toEqual(DEFAULT_THEME_SETTINGS);
+  });
+
+  it('parses valid settings file via readThemeSettings()', async () => {
+    const { themeFilePath } = await createSettingsServiceFixture();
+
+    await writeFile(themeFilePath, JSON.stringify({ theme: 'dark' }), 'utf8');
+
+    const result = await readThemeSettings(themeFilePath);
+
+    expect(result).toEqual({ theme: 'dark' });
+  });
+
+  it('persists theme settings via SettingsService.writeThemeSettings()', async () => {
     const { service, settingsFilePath } = await createSettingsServiceFixture();
 
     await expect(service.writeThemeSettings({ theme: 'light' })).resolves.toEqual({ theme: 'light' });
 
     await expect(readFile(settingsFilePath, 'utf8')).resolves.toBe('{\n  "theme": "light"\n}\n');
     await expect(service.readThemeSettings()).resolves.toEqual({ theme: 'light' });
-  });
-
-  it('falls back to dark theme for invalid settings files', async () => {
-    const { service, settingsFilePath } = await createSettingsServiceFixture();
-
-    await writeFile(settingsFilePath, '{ "theme": "system" }\n', 'utf8');
-
-    await expect(service.readThemeSettings()).resolves.toEqual({ theme: 'dark' });
   });
 });
