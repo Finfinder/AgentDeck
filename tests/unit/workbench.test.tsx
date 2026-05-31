@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '@agentdeck/workbench';
@@ -7,6 +8,9 @@ import type { AgentDeckPreloadApi } from '@agentdeck/shared';
 function mockPreloadApi(overrides: Partial<AgentDeckPreloadApi> = {}) {
   const api: AgentDeckPreloadApi = {
     getStartupState: vi.fn().mockResolvedValue({ status: 'ready', appVersion: '0.1.0', services: [] }),
+    getThemeSettings: vi.fn().mockResolvedValue({ theme: 'dark' }),
+    setThemeSettings: vi.fn().mockImplementation(async settings => settings),
+    selectWorkspaceEntry: vi.fn().mockResolvedValue({ status: 'cancelled' }),
     versions: { chrome: '130.0.0', electron: '42.3.0', node: '25.0.0' },
     ...overrides
   };
@@ -22,11 +26,14 @@ describe('Workbench startup surface', () => {
     mockPreloadApi();
   });
 
-  it('renders a ready startup state from preload IPC', async () => {
+  it('renders a ready workbench shell from preload IPC', async () => {
     render(<App />);
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Ready');
-    expect(screen.getByRole('heading', { name: 'Workbench' })).toBeInTheDocument();
+    expect(await screen.findByRole('status', { name: 'Startup state' })).toHaveTextContent('Ready');
+    expect(screen.getByRole('navigation', { name: 'Primary activity' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Explorer' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open workspace' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open folder' })).toBeInTheDocument();
   });
 
   it('renders controlled startup errors', async () => {
@@ -41,7 +48,7 @@ describe('Workbench startup surface', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Required desktop services failed to start.');
+    expect(await screen.findByRole('alert', { name: 'Startup state' })).toHaveTextContent('Required desktop services failed to start.');
   });
 
   it('renders sanitized preload read failures', async () => {
@@ -51,7 +58,7 @@ describe('Workbench startup surface', () => {
 
     render(<App />);
 
-    const alert = await screen.findByRole('alert');
+  const alert = await screen.findByRole('alert', { name: 'Startup state' });
 
     expect(alert).toHaveTextContent(/^Unable to read startup state\.$/);
     expect(alert).not.toHaveTextContent(/IPC unavailable/);
@@ -64,6 +71,55 @@ describe('Workbench startup surface', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to read startup state.');
+    expect(await screen.findByRole('alert', { name: 'Startup state' })).toHaveTextContent('Unable to read startup state.');
+  });
+
+  it('uses dark theme as the first render and loads persisted theme settings', async () => {
+    mockPreloadApi({
+      getThemeSettings: vi.fn().mockResolvedValue({ theme: 'light' })
+    });
+
+    render(<App />);
+
+    const workbench = screen.getByRole('main');
+
+    expect(workbench).toHaveAttribute('data-theme', 'dark');
+
+    await waitFor(() => expect(workbench).toHaveAttribute('data-theme', 'light'));
+  });
+
+  it('persists theme changes through preload settings IPC', async () => {
+    const user = userEvent.setup();
+    const setThemeSettings = vi.fn().mockImplementation(async settings => settings);
+
+    mockPreloadApi({ setThemeSettings });
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Light' }));
+
+    expect(setThemeSettings).toHaveBeenCalledWith({ theme: 'light' });
+    expect(screen.getByRole('main')).toHaveAttribute('data-theme', 'light');
+    expect(await screen.findByRole('status', { name: 'Theme settings' })).toHaveTextContent('Theme settings saved.');
+  });
+
+  it('opens workspace files through preload workspace IPC', async () => {
+    const user = userEvent.setup();
+    const selectWorkspaceEntry = vi.fn().mockResolvedValue({
+      status: 'selected',
+      kind: 'workspace-file',
+      path: String.raw`C:\Workspaces\AgentDeck.code-workspace`,
+      name: 'AgentDeck.code-workspace'
+    });
+
+    mockPreloadApi({ selectWorkspaceEntry });
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Open workspace' }));
+
+    expect(selectWorkspaceEntry).toHaveBeenCalledWith({ kind: 'workspace-file' });
+    expect(await screen.findByRole('heading', { name: 'AgentDeck.code-workspace' })).toBeInTheDocument();
+    expect(screen.getByText('AgentDeck.code-workspace selected.')).toBeInTheDocument();
   });
 });

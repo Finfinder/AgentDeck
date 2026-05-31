@@ -1,6 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
-import { IPC_CHANNELS, isStartupState, type AgentDeckPreloadApi, type StartupState } from '@agentdeck/shared';
+import {
+  DEFAULT_THEME_SETTINGS,
+  IPC_CHANNELS,
+  isStartupState,
+  isThemeSettings,
+  isWorkspaceSelection,
+  type AgentDeckPreloadApi,
+  type StartupState
+} from '@agentdeck/shared';
 
 const invalidStartupState: StartupState = {
   status: 'error',
@@ -13,6 +21,18 @@ const api: AgentDeckPreloadApi = {
   getStartupState: async () => {
     const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.getStartupState);
     return isStartupState(value) ? value : invalidStartupState;
+  },
+  getThemeSettings: async () => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.getThemeSettings);
+    return isThemeSettings(value) ? value : DEFAULT_THEME_SETTINGS;
+  },
+  setThemeSettings: async settings => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.setThemeSettings, settings);
+    return isThemeSettings(value) ? value : DEFAULT_THEME_SETTINGS;
+  },
+  selectWorkspaceEntry: async request => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.selectWorkspaceEntry, request);
+    return isWorkspaceSelection(value) ? value : { status: 'cancelled' };
   },
   versions: {
     chrome: process.versions.chrome ?? 'unknown',

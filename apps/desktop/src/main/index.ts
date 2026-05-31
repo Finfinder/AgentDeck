@@ -1,9 +1,16 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
-import { dirname, join } from 'node:path';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { bootstrapDesktopServices, createStartupErrorState } from '@agentdeck/services';
-import { IPC_CHANNELS, type StartupState } from '@agentdeck/shared';
+import { bootstrapDesktopServices, createSettingsService, createStartupErrorState, type SettingsService } from '@agentdeck/services';
+import {
+  DEFAULT_THEME_SETTINGS,
+  IPC_CHANNELS,
+  isThemeSettings,
+  isWorkspaceOpenRequest,
+  type StartupState,
+  type WorkspaceSelection
+} from '@agentdeck/shared';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
@@ -14,8 +21,13 @@ let startupState: StartupState = {
   message: 'Application services have not been initialized yet.'
 };
 
-function registerIpcHandlers(): void {
+function registerIpcHandlers(settingsService: SettingsService): void {
   ipcMain.handle(IPC_CHANNELS.getStartupState, () => startupState);
+  ipcMain.handle(IPC_CHANNELS.getThemeSettings, () => settingsService.readThemeSettings());
+  ipcMain.handle(IPC_CHANNELS.setThemeSettings, (_event, value: unknown) => {
+    return isThemeSettings(value) ? settingsService.writeThemeSettings(value) : DEFAULT_THEME_SETTINGS;
+  });
+  ipcMain.handle(IPC_CHANNELS.selectWorkspaceEntry, (_event, value: unknown) => selectWorkspaceEntry(value));
 }
 
 async function resolveStartupState(): Promise<StartupState> {
@@ -55,9 +67,42 @@ function createMainWindow(): BrowserWindow {
   return mainWindow;
 }
 
+async function selectWorkspaceEntry(value: unknown): Promise<WorkspaceSelection> {
+  if (!isWorkspaceOpenRequest(value)) {
+    return { status: 'cancelled' };
+  }
+
+  const result = await dialog.showOpenDialog(
+    value.kind === 'folder'
+      ? { properties: ['openDirectory'] }
+      : {
+          filters: [{ name: 'VS Code Workspace', extensions: ['code-workspace'] }],
+          properties: ['openFile']
+        }
+  );
+
+  if (result.canceled) {
+    return { status: 'cancelled' };
+  }
+
+  const selectedPath = result.filePaths[0];
+  if (!selectedPath) {
+    return { status: 'cancelled' };
+  }
+
+  return {
+    status: 'selected',
+    kind: value.kind,
+    path: selectedPath,
+    name: basename(selectedPath)
+  };
+}
+
 async function start(): Promise<void> {
+  const settingsService = createSettingsService(app.getPath('userData'));
+
   startupState = await resolveStartupState();
-  registerIpcHandlers();
+  registerIpcHandlers(settingsService);
   createMainWindow();
 }
 

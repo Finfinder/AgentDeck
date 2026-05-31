@@ -41,7 +41,7 @@ npm run build
 Notes:
 
 - If Electron reports a missing binary after install, run `npm rebuild electron` and start the app again.
-- The Phase 1 scaffold intentionally contains only the startup workbench shell, preload IPC contract, package boundaries and domain documentation.
+- The current Phase 2 shell starts as a functional dark workbench with activity bar, explorer, editor area, bottom panel, status bar, typed preload IPC, Settings Service-backed theme persistence, and a workspace/folder picker entry point.
 
 ## Code Quality
 
@@ -150,7 +150,7 @@ AgentDeck/
 │  └─ desktop/               # Electron main + preload + packaging
 ├─ packages/
 │  ├─ workbench/             # React renderer, UI components, Monaco integration
-│  ├─ services/              # Node/TS services: workspace, auth, runtime, model-gateway
+│  ├─ services/              # Node/TS services: settings, workspace, auth, runtime, model-gateway
 │  ├─ agent-runtime/         # session workers, chat tabs, tool loop
 │  └─ shared/                # shared types, IPC contracts
 ├─ tests/                    # unit tests and contract tests
@@ -195,7 +195,7 @@ C4Context
 
 Full ADRs live in `docs/adr/`.
 
--## Development & contribution
+## Development & contribution
 
 - Follow the monorepo conventions defined in the parent workspace's `AI_Instruction/monorepo.yaml` file and the branch strategy.
 - Add ADRs under `docs/` and implement the minimal contract for services before expanding APIs.
