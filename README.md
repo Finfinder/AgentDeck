@@ -1,6 +1,6 @@
 # AgentDeck — Agentic Desktop IDE (MVP)
 
-[![Status](https://img.shields.io/badge/status-MVP%20green)](.) [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/status-MVP%20green)](.) [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE) [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=Finfinder_AgentDeck&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Finfinder_AgentDeck)
 
 AgentDeck is a desktop-first, agentic IDE prototype inspired by the VS Code workbench UX. The MVP focuses on a tightly-scoped, local-first workbench built with Electron, React and Monaco, backed by Node/TypeScript services (Agent Runtime, MCP manager, indexer) and a small, auditable local datastore (SQLite + sqlite-vec).
 
@@ -15,28 +15,110 @@ Quick summary:
 
 Prerequisites:
 
-- Node.js 18+ (or LTS), npm or pnpm
+- Node.js 22+ or a current LTS compatible with Vite 7
+- npm
 - Git
 
-Typical developer workflow (suggested):
+Typical developer workflow:
 
 ```bash
 # from repo root
 cd AgentDeck
-npm install        # or `pnpm install`
-npm run dev        # runs electron + renderer in dev mode (project scripts TBD)
+npm install
+npm run dev
 ```
 
-If you prefer pnpm:
+Validation commands:
 
 ```bash
-pnpm install
-pnpm dev
+npm run typecheck
+npm run lint
+npm run test:coverage
+npm run test
+npm run build
 ```
 
 Notes:
 
-- This repository is an MVP scaffold: project scripts, package.json and workspace layout are a suggested starting point. See the **Project layout** section below.
+- If Electron reports a missing binary after install, run `npm rebuild electron` and start the app again.
+- The Phase 1 scaffold intentionally contains only the startup workbench shell, preload IPC contract, package boundaries and domain documentation.
+
+## Code Quality
+
+AgentDeck is configured for [SonarCloud](https://sonarcloud.io/summary/new_code?id=Finfinder_AgentDeck) analysis under project key `Finfinder_AgentDeck` in the `finfinder` organization.
+
+Agent-managed repository setup:
+
+- The [`sonar.yml`](.github/workflows/sonar.yml) workflow runs on pushes to `main` and semver branches, and on pull requests targeting those branches.
+- The workflow runs `npm ci`, `npm run typecheck`, `npm run lint`, `npm run test:coverage`, `npm run test:architecture`, and `npm run build` before scanning.
+- Vitest writes V8 coverage reports to `coverage/`, including LCOV at `coverage/lcov.info`, which is imported by SonarCloud.
+- SonarCloud PR decoration reports new issues, coverage changes, and Quality Gate status on pull requests.
+- The workflow waits for the SonarCloud Quality Gate with `sonar.qualitygate.wait=true`; branch protection should require the resulting status check after the first successful run.
+
+Manual repository owner setup:
+
+- The SonarCloud project and the GitHub Actions repository secret `SONAR_TOKEN` are managed outside this repository.
+- The recommended project key is `Finfinder_AgentDeck`; the recommended Quality Gate is `Sonar way` with New Code Definition set to `Previous version`.
+- Do not commit Sonar tokens, paste them into chat, or store them in README, workflow files, logs, issue text, or local project settings.
+
+### SonarQube for IDE Connected Mode
+
+[SonarQube for IDE](https://marketplace.visualstudio.com/items?itemName=SonarSource.sonarlint-vscode) provides local analysis in VS Code. The shared binding in `.sonarlint/connectedMode.json` connects the workspace to the SonarCloud project without storing credentials.
+
+Developer setup:
+
+1. Install Java 17+.
+2. Install the VS Code extension:
+
+   ```bash
+   code --install-extension SonarSource.sonarlint-vscode
+   ```
+
+3. Open AgentDeck in VS Code and accept the Connected Mode configuration when prompted.
+4. Generate a personal User Token in SonarCloud and provide it to the extension locally.
+
+Each developer uses their own token. Tokens must not be committed or shared with agents in chat.
+
+### SonarQube MCP Server (Optional)
+
+The [SonarQube MCP Server](https://github.com/SonarSource/sonarqube-mcp-server) lets AI agents query SonarCloud Quality Gate, metrics, issues, and hotspots when the local MCP server is configured by the developer.
+
+Example local VS Code MCP configuration:
+
+```json
+{
+  "servers": {
+    "sonarqube": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "SONAR_TOKEN",
+        "-e",
+        "SONAR_HOST_URL=https://sonarcloud.io",
+        "-e",
+        "SONAR_ORGANIZATION=finfinder",
+        "mcp/sonarqube"
+      ],
+      "env": {
+        "SONAR_TOKEN": "${input:sonarToken}"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "id": "sonarToken",
+      "type": "promptString",
+      "description": "SonarCloud user token",
+      "password": true
+    }
+  ]
+}
+```
+
+Alternatively, provide `SONAR_TOKEN` through your local environment. The MCP server configuration is optional and should stay local unless it contains only secret-free placeholders.
 
 ## What this MVP contains (scope)
 
@@ -60,21 +142,23 @@ Out of scope for MVP:
 
 Suggested repository layout for the AgentDeck monorepo package:
 
-```
+```text
 AgentDeck/
+├─ package.json              # npm workspaces, dev/build/test scripts
+├─ VERSION                   # current development version
 ├─ apps/
 │  └─ desktop/               # Electron main + preload + packaging
 ├─ packages/
 │  ├─ workbench/             # React renderer, UI components, Monaco integration
 │  ├─ services/              # Node/TS services: workspace, auth, runtime, model-gateway
 │  ├─ agent-runtime/         # session workers, chat tabs, tool loop
-│  ├─ extension-host/        # isolated process for compatible extensions
 │  └─ shared/                # shared types, IPC contracts
-├─ scripts/                   # dev helpers, build and packaging scripts
-├─ docs/                      # design docs, domain.md, ADRs
-├─ LICENSE
+├─ tests/                    # unit tests and contract tests
+├─ docs/                     # domain.md and ADRs
 └─ README.md
 ```
+
+Future phases add `packages/extension-host`, Monaco editor services, MCP, memory/indexing and compatibility fixtures.
 
 ## Architecture (short)
 
@@ -94,12 +178,12 @@ See `docs/domain.md` for the domain model (ChatTab, AgentDefinition, Worker, Age
 
 ```mermaid
 C4Context
-		title AgentDeck - context (MVP)
-		Person(dev, "Developer", "Local user of the IDE")
-		System(agentDeck, "AgentDeck", "Desktop agentic IDE")
-		System_Ext(models, "Model Providers", "OpenRouter, Ollama, LM Studio, local OpenAI-compatible")
-		Rel(dev, agentDeck, "Use workspace, chat with agents, apply patches")
-		Rel(agentDeck, models, "LLM requests via Model Gateway")
+    title AgentDeck - context (MVP)
+    Person(dev, "Developer", "Local user of the IDE")
+    System(agentDeck, "AgentDeck", "Desktop agentic IDE")
+    System_Ext(models, "Model Providers", "OpenRouter, Ollama, LM Studio, local OpenAI-compatible")
+    Rel(dev, agentDeck, "Use workspace, chat with agents, apply patches")
+    Rel(agentDeck, models, "LLM requests via Model Gateway")
 ```
 
 ## Design decisions & ADR highlights
@@ -109,7 +193,7 @@ C4Context
 - Runtime: isolated worker per session for robustness and permission scoping
 - Memory: Markdown as source-of-truth + SQLite + sqlite-vec for embeddings and retrieval
 
-Full ADRs live in `docs/adrs/` (or `docs/` as `adr-*.md`).
+Full ADRs live in `docs/adr/`.
 
 ## Development & contribution
 
@@ -117,17 +201,20 @@ Full ADRs live in `docs/adrs/` (or `docs/` as `adr-*.md`).
 - Add ADRs under `docs/` and implement the minimal contract for services before expanding APIs.
 - Use typed IPC contracts; renderer must not access Node APIs directly.
 
-Suggested npm scripts (to be implemented in `package.json`):
+Implemented npm scripts:
 
 ```json
 {
-	"scripts": {
-		"dev": "concurrently \"npm:dev:main\" \"npm:dev:renderer\"",
-		"dev:main": "electron --watch ./apps/desktop/main --...",
-		"dev:renderer": "vite --config packages/workbench/vite.config.ts",
-		"build": "# build and package steps...",
-		"test": "pnpm test"
-	}
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "typecheck": "npm run typecheck:main && npm run typecheck:preload && npm run typecheck:shared && npm run typecheck:services && npm run typecheck:agent-runtime && npm run typecheck:workbench && npm run typecheck:tests && npm run typecheck:build",
+    "lint": "eslint .",
+    "test": "npm run test:unit && npm run test:architecture",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:coverage": "vitest run --config vitest.config.ts --coverage",
+    "test:architecture": "depcruise --config .dependency-cruiser.cjs apps packages"
+  }
 }
 ```
 
@@ -139,7 +226,3 @@ Suggested npm scripts (to be implemented in `package.json`):
 ## License
 
 MIT
-
----
-
-If you want, I can commit this README and push the change; would you like me to do that? 

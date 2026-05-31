@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "useUnknownInCatchVariables": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "paths": {
+      "@agentdeck/agent-runtime": ["packages/agent-runtime/src/index.ts"],
+      "@agentdeck/services": ["packages/services/src/index.ts"],
+      "@agentdeck/shared": ["packages/shared/src/index.ts"],
+      "@agentdeck/workbench": ["packages/workbench/src/index.ts"]
+    }
+  }
+}

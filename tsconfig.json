@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "files": [],
+  "references": [
+    { "path": "./apps/desktop/tsconfig.main.json" },
+    { "path": "./apps/desktop/tsconfig.preload.json" },
+    { "path": "./packages/agent-runtime/tsconfig.json" },
+    { "path": "./packages/services/tsconfig.json" },
+    { "path": "./packages/shared/tsconfig.json" },
+    { "path": "./packages/workbench/tsconfig.json" },
+    { "path": "./tsconfig.test.json" }
+  ]
+}
