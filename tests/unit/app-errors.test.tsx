@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '@agentdeck/workbench';
 
-function mockPreloadApi(overrides: Partial<any> = {}) {
+// Updated to avoid explicit any type, using unknown for overrides
+function mockPreloadApi(overrides: Partial<Record<string, unknown>> = {}) {
   const api = {
     getStartupState: vi.fn().mockResolvedValue({ status: 'ready', appVersion: '0.1.0', services: [] }),
     selectWorkspaceEntry: vi.fn().mockResolvedValue({ status: 'cancelled' }),
