@@ -6,8 +6,8 @@ import { App } from '@agentdeck/workbench';
 import { DEFAULT_THEME_SETTINGS } from '@agentdeck/services';
 import type { AgentDeckPreloadApi } from '@agentdeck/shared';
 
-function mockPreloadApi(overrides: Partial<AgentDeckPreloadApi> = {}) {
-  const api: AgentDeckPreloadApi = {
+function mockPreloadApi(overrides: Record<string, any> = {}) {
+  const api: any = {
     getStartupState: vi.fn().mockResolvedValue({ status: 'ready', appVersion: '0.1.0', services: [] }),
     getThemeSettings: vi.fn().mockResolvedValue({ theme: 'dark' }),
     setThemeSettings: vi.fn().mockImplementation(async settings => settings),
