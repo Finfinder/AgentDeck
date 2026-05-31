@@ -61,11 +61,13 @@ export function createSettingsService(userDataPath: string): SettingsService {
   return new SettingsService(join(userDataPath, 'settings.json'));
 }
 
+type StartupGlobal = typeof globalThis & Readonly<{ AGENTDECK_FAIL_BOOTSTRAP?: string }>;
+
 export async function bootstrapDesktopServices(options: BootstrapDesktopServicesOptions): Promise<StartupState> {
   // Avoid direct reference to `process` in environments without Node typings.
   // Use a global flag if present, or the explicit option to force failure.
-  const shouldFail =
-    options.forceFailure ?? ((globalThis as any).AGENTDECK_FAIL_BOOTSTRAP === '1');
+  const startupGlobal = globalThis as StartupGlobal;
+  const shouldFail = options.forceFailure ?? startupGlobal.AGENTDECK_FAIL_BOOTSTRAP === '1';
   if (shouldFail) {
     throw new StartupServiceError('Required desktop services failed to start.');
   }

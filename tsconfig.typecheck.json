@@ -13,6 +13,7 @@
     "tests/**/*.tsx",
     "electron.vite.config.ts",
     "eslint.config.js",
+    "remote_App.tsx",
     "vitest.config.ts"
   ]
 }

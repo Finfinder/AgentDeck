@@ -1,16 +1,26 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
-import type { StartupState, AgentDeckPreloadApi } from '@agentdeck/shared';
-import { DEFAULT_THEME_SETTINGS, type ThemeSettings } from '@agentdeck/services';
+import { DEFAULT_THEME_SETTINGS, type AgentDeckPreloadApi, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
 
 const STARTUP_STATE_READ_ERROR_MESSAGE = 'Unable to read startup state.';
 const THEME_SETTINGS_READ_ERROR_MESSAGE = 'Unable to read theme settings.';
 const THEME_SETTINGS_WRITE_ERROR_MESSAGE = 'Unable to save theme settings.';
 const WORKSPACE_OPEN_ERROR_MESSAGE = 'Unable to open workspace picker.';
 
-type ThemePreference = 'light' | 'dark';
+const DEV_PRELOAD_API: AgentDeckPreloadApi = {
+  getStartupState: async () => ({ status: 'ready', appVersion: '0.1.0', services: [] }),
+  versions: { chrome: 'dev', electron: 'dev', node: 'dev' },
+  getThemeSettings: async () => DEFAULT_THEME_SETTINGS,
+  setThemeSettings: async settings => settings,
+  selectWorkspaceEntry: async () => ({ status: 'cancelled' })
+};
+
+function getPreloadApi(): AgentDeckPreloadApi {
+  return (globalThis as unknown as { agentDeck?: AgentDeckPreloadApi }).agentDeck ?? DEV_PRELOAD_API;
+}
 
 export function App() {
+  const agent = useMemo(getPreloadApi, []);
   const [startupState, setStartupState] = useState<StartupState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -18,25 +28,8 @@ export function App() {
   const [themeSettings, setThemeSettings] = useState<ThemeSettings>({ theme: 'dark' });
   const [settingsStatus, setSettingsStatus] = useState('Theme settings ready.');
 
-  const [workspaceSelection, setWorkspaceSelection] = useState<any | null>(null);
+  const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelection | null>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState('No workspace opened.');
-
-  // Defensive agent API: when running the Vite dev server in a browser
-  // (not inside Electron) `globalThis.agentDeck` may be undefined. Provide
-  // a minimal dev fallback so the UI doesn't crash during development.
-  type PreloadApi = AgentDeckPreloadApi & {
-    getThemeSettings: () => Promise<ThemeSettings>;
-    setThemeSettings: (s: ThemeSettings) => Promise<ThemeSettings>;
-    selectWorkspaceEntry: (opts?: { kind?: 'folder' | 'workspace-file' }) => Promise<{ status: 'selected' | 'cancelled'; name?: string }>;
-  };
-
-  const agent: PreloadApi = ((globalThis as unknown) as { agentDeck?: PreloadApi }).agentDeck ?? {
-    getStartupState: async () => ({ status: 'ready', appVersion: '0.1.0', services: [] }),
-    versions: { chrome: 'dev', electron: 'dev', node: 'dev' },
-    getThemeSettings: async () => DEFAULT_THEME_SETTINGS,
-    setThemeSettings: async (settings: ThemeSettings) => settings,
-    selectWorkspaceEntry: async () => ({ status: 'cancelled' })
-  };
 
   useEffect(() => {
     let isActive = true;
@@ -59,7 +52,7 @@ export function App() {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [agent]);
 
   useEffect(() => {
     let isActive = true;
@@ -82,7 +75,7 @@ export function App() {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [agent]);
 
   async function updateTheme(theme: ThemePreference): Promise<void> {
     const nextSettings = { theme } satisfies ThemeSettings;
@@ -98,7 +91,7 @@ export function App() {
     }
   }
 
-  async function openWorkspace(kind: 'folder' | 'workspace-file'): Promise<void> {
+  async function openWorkspace(kind: WorkspaceOpenKind): Promise<void> {
     try {
       const selection = await agent.selectWorkspaceEntry({ kind });
       setWorkspaceSelection(selection);
@@ -123,9 +116,9 @@ export function App() {
 
         <p className="theme">Theme: {themeSettings.theme}</p>
 
-        <p className="settings-status" role="status" aria-label="Theme settings">{settingsStatus}</p>
+        <output className="settings-status" aria-label="Theme settings">{settingsStatus}</output>
 
-        <p className="workspace-status" role="status" aria-label="Workspace status">{workspaceStatus}</p>
+        <output className="workspace-status" aria-label="Workspace status">{workspaceStatus}</output>
 
         <p className="startup-status" role={startupState?.status === 'error' || loadError ? 'alert' : 'status'} aria-label="Startup state">
           {statusText}

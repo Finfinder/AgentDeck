@@ -282,12 +282,12 @@ Lista nowych komponentów, funkcji i narzędzi, które trzeba zbudować od podst
 
 **Opis**: Wykonawca: agent, po manualnym utworzeniu projektu i pierwszej analizie. Użyć narzędzi SonarQube MCP do potwierdzenia Quality Gate i metryk projektu.
 
-**Status bieżący**: MCP znajduje projekt `Finfinder_AgentDeck` i metryki projektu, ale Quality Gate nadal ma status `NONE`. Ostatnia analiza SonarCloud zgłasza `0` bugs, `0` vulnerabilities, `0` security hotspots, coverage `92.9`, duplicated lines density `0.0` oraz `1` otwarty code smell `typescript:S7764` w `packages/workbench/src/App.tsx`; lokalna poprawka usuwa przyczynę tego code smell i wymaga potwierdzenia w kolejnej analizie SonarCloud.
+**Status bieżący**: MCP znajduje projekt `Finfinder_AgentDeck`, Quality Gate ma status `OK`, a metryki projektu zgłaszają coverage `86.9`, duplicated lines density `0.0`, `0` bugs, `0` vulnerabilities, `0` security hotspots i `0` code smells. Lokalna poprawka `npm run lint` usuwa także zgłoszenia SonarQube for IDE dla `packages/workbench/src/App.tsx` (`typescript:S6819`) i `.github/workflows/sonar.yml` (`githubactions:S6505`).
 
 **Definicja Ukończenia (Definition of Done)**:
 
 - [x] MCP `search_my_sonarqube_projects` znajduje `Finfinder_AgentDeck`.
-- [ ] MCP `get_project_quality_gate_status` zwraca status Quality Gate dla `Finfinder_AgentDeck`.
+- [x] MCP `get_project_quality_gate_status` zwraca status Quality Gate dla `Finfinder_AgentDeck`.
 - [x] MCP `get_component_measures` zwraca co najmniej coverage, duplicated lines density, bugs, vulnerabilities i code smells.
 - [x] Jeżeli MCP lub projekt nie są dostępne, ograniczenie jest odnotowane jako `Wymaga narzędzia/danych`, a workflow CI pozostaje źródłem prawdy.
 
@@ -347,7 +347,7 @@ Lista kontrolna kryteriów akceptacji do weryfikacji, że implementacja spełnia
 - [x] Workflow SonarCloud uruchamia lokalne quality gates AgentDeck przed skanem i importuje coverage LCOV.
 - [x] README rozdziela działania agenta od manualnych kroków właściciela repozytorium i dewelopera.
 - [x] `.sonarlint/connectedMode.json` umożliwia Connected Mode bez commitowania sekretów.
-- [ ] Po manualnym utworzeniu projektu SonarCloud pierwsza analiza może zostać zweryfikowana przez workflow i SonarQube MCP.
+- [x] Po manualnym utworzeniu projektu SonarCloud pierwsza analiza może zostać zweryfikowana przez workflow i SonarQube MCP.
 
 ### Planowane quality gates z kontraktu `code-reviewing`
 
@@ -379,6 +379,7 @@ Potencjalne usprawnienia zidentyfikowane podczas planowania, które nie są czę
 
 | Data | Opis Zmiany |
 | --- | --- |
+| 2026-05-31 | Wykonano code review poprawki `npm run lint`; uwzględniono i naprawiono zgłoszenia SonarQube for IDE dla semantyki statusów UI oraz `npm ci --ignore-scripts`, a także potwierdzono zielony build. |
 | 2026-05-31 | Odnotowano lokalną poprawkę przyczyny SonarCloud `typescript:S7764`; zamknięcie issue wymaga kolejnej analizy SonarCloud. |
 | 2026-05-31 | Zaktualizowano wyniki SonarCloud MCP: metryki są dostępne, Quality Gate ma status `NONE`, a projekt ma 1 otwarty code smell. |
 | 2026-05-31 | Utworzono wstępny plan wdrożenia SonarQube/SonarCloud dla AgentDeck. |
@@ -387,6 +388,51 @@ Potencjalne usprawnienia zidentyfikowane podczas planowania, które nie są czę
 | 2026-05-31 | Wykonano code review implementacji SonarCloud względem planu i kontraktu weryfikacyjnego. |
 
 ## Code Review Findings
+
+### Przegląd poprawki `npm run lint` z 2026-05-31
+
+#### Status przeglądu
+
+Poprawka usuwa błędy lintingu z GitHub Actions oraz dodatkowe zgłoszenia SonarQube for IDE przekazane podczas review. Po zmianach lokalne quality gates `npm ci --ignore-scripts`, `npm run lint`, `npm run typecheck`, `npm run test:unit`, `npm run test:coverage`, `npm run test:architecture` i `npm run build` przechodzą. SonarCloud MCP zwraca Quality Gate `OK`, `0` bugs, `0` vulnerabilities, `0` security hotspots i `0` code smells.
+
+#### Ustalenia
+
+| ID | Waga | Status | Ustalenie | Rekomendacja |
+| --- | --- | --- | --- | --- |
+| CR-05 | Wysoka | Naprawione | `npm run build` przed poprawką kończył się błędem, ponieważ renderer Workbencha importował `DEFAULT_THEME_SETTINGS` z `@agentdeck/services`, co wymuszało bundlowanie Node-only importów `node:fs` i `node:path`. | Workbench powinien importować współdzielone DTO i stałe z `@agentdeck/shared`; po poprawce `npm run build` przechodzi. |
+| CR-06 | Średnia | Naprawione | SonarQube for IDE zgłaszał `typescript:S6819` dla `packages/workbench/src/App.tsx`, gdzie statusy były renderowane jako `<p role="status">`. | Zastąpiono je semantycznym `<output>` z zachowaniem accessible name; `get_errors` dla pliku nie zgłasza problemów. |
+| CR-07 | Średnia | Naprawione | SonarQube for IDE zgłaszał `githubactions:S6505` dla `.github/workflows/sonar.yml`, ponieważ `npm ci` uruchamiał potencjalne lifecycle scripts zależności. | Workflow używa `npm ci --ignore-scripts`; lokalnie potwierdzono, że instalacja i kolejne quality gates nadal przechodzą. |
+| CR-08 | Informacyjne | Sprawdzone | AgentDeck nie jest jeszcze objęty `AI_Instruction/.github/compliance/dependency-manifests.json`, więc pomocniczy raport dependency freshness z promptu review nie został wygenerowany. | Dodać AgentDeck do manifestu compliance w osobnym zadaniu, jeśli repo ma być objęte cyklicznym raportem SCA/freshness. |
+
+#### Kontrakt weryfikacyjny
+
+| Obszar | Status | Uzasadnienie / ograniczenie |
+| --- | --- | --- |
+| OWASP Top 10 | Sprawdzone | Zmiana ogranicza ryzyko supply-chain w CI przez `npm ci --ignore-scripts`; nie dodaje endpointów, auth ani przetwarzania danych użytkownika. |
+| Clean Architecture i granice modułów | Sprawdzone | Renderer nie importuje już `@agentdeck/services`; `npm run test:architecture` potwierdza brak naruszeń dependency-cruiser. |
+| Secure by Design | Sprawdzone | Workflow nadal używa przypiętych SHA akcji, minimalnych uprawnień i sekretów z `env`; dodatkowo ogranicza lifecycle scripts podczas instalacji. |
+| Najlepsze praktyki TypeScript/React | Sprawdzone | Usunięto `any`, ustabilizowano zależności hooków, użyto shared contracts i semantycznego `<output>` dla statusów. |
+| KISS i SOLID | Sprawdzone | Poprawka pozostaje mała i usuwa przyczynę problemów bez dodawania nowych abstrakcji. |
+| Performance | Sprawdzone | Zmniejszono zależności renderera przez usunięcie importu Node-only service package; build renderer przechodzi bez externalizacji `node:*`. |
+| Reliability | Sprawdzone | Lokalnie przechodzą lint, typecheck, testy, coverage, test architektury i build; SonarCloud Quality Gate ma status `OK`. |
+| Martwy i zbędny kod | Sprawdzone | Nie wykryto zbędnych importów w zmienionych plikach; grep potwierdza brak importu `@agentdeck/services` z Workbencha. |
+| Zero Trust dla danych zewnętrznych | Nie dotyczy | Poprawka nie przetwarza danych z API, plików użytkownika ani wejścia zewnętrznego poza utwardzeniem instalacji zależności w CI. |
+| Security scanning | Sprawdzone | `npm ci --ignore-scripts` raportuje `0` vulnerabilities; SonarCloud MCP raportuje `0` vulnerabilities i `0` security hotspots. |
+| Bazy danych / SQL | Nie dotyczy | Brak zmian w schemacie, migracjach, ORM i zapytaniach SQL. |
+| UI / dostępność | Sprawdzone | SonarQube for IDE wskazał semantykę statusów; statusy zmieniono na `<output>`, a testy RTL nadal znajdują role `status`. |
+
+#### Uruchomione kontrole
+
+- `npm ci --ignore-scripts` - OK, `0` vulnerabilities.
+- `npm run lint` - OK.
+- `npm run typecheck` - OK.
+- `npm run test:unit` - OK, 3 pliki testowe i 20 testów.
+- `npm run test:coverage` - OK, LCOV wygenerowany.
+- `npm run test:architecture` - OK, brak naruszeń dependency-cruiser.
+- `npm run build` - OK.
+- `get_errors` dla `packages/workbench/src/App.tsx` i `.github/workflows/sonar.yml` - brak błędów.
+- SonarQube MCP `get_project_quality_gate_status` - `OK`.
+- SonarQube MCP measures - coverage `86.9`, duplicated lines density `0.0`, bugs `0`, vulnerabilities `0`, security hotspots `0`, code smells `0`.
 
 ### Status przeglądu
 
