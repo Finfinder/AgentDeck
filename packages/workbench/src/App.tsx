@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 
 import type { StartupState } from '@agentdeck/shared';
 
+const STARTUP_STATE_READ_ERROR_MESSAGE = 'Unable to read startup state.';
+
 export function App() {
   const [startupState, setStartupState] = useState<StartupState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -9,19 +11,19 @@ export function App() {
   useEffect(() => {
     let isActive = true;
 
-    window.agentDeck
+    globalThis.agentDeck
       .getStartupState()
       .then(state => {
         if (isActive) {
           setStartupState(state);
         }
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         if (!isActive) {
           return;
         }
 
-        setLoadError(error instanceof Error ? error.message : 'Unable to read startup state.');
+        setLoadError(STARTUP_STATE_READ_ERROR_MESSAGE);
       });
 
     return () => {

@@ -44,14 +44,17 @@ describe('Workbench startup surface', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Required desktop services failed to start.');
   });
 
-  it('renders preload read failures', async () => {
+  it('renders sanitized preload read failures', async () => {
     mockPreloadApi({
       getStartupState: vi.fn().mockRejectedValue(new Error('IPC unavailable'))
     });
 
     render(<App />);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('IPC unavailable');
+    const alert = await screen.findByRole('alert');
+
+    expect(alert).toHaveTextContent(/^Unable to read startup state\.$/);
+    expect(alert).not.toHaveTextContent(/IPC unavailable/);
   });
 
   it('renders a fallback message for unknown preload failures', async () => {

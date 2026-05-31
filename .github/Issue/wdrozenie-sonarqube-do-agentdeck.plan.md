@@ -282,13 +282,13 @@ Lista nowych komponentów, funkcji i narzędzi, które trzeba zbudować od podst
 
 **Opis**: Wykonawca: agent, po manualnym utworzeniu projektu i pierwszej analizie. Użyć narzędzi SonarQube MCP do potwierdzenia Quality Gate i metryk projektu.
 
-**Status bieżący**: MCP znajduje projekt `Finfinder_AgentDeck`, ale przed pierwszą analizą CI Quality Gate ma status `NONE`, a metryki projektu są puste. Pełna weryfikacja wymaga pierwszego uruchomienia workflow `.github/workflows/sonar.yml`.
+**Status bieżący**: MCP znajduje projekt `Finfinder_AgentDeck` i metryki projektu, ale Quality Gate nadal ma status `NONE`. Ostatnia analiza SonarCloud zgłasza `0` bugs, `0` vulnerabilities, `0` security hotspots, coverage `92.9`, duplicated lines density `0.0` oraz `1` otwarty code smell `typescript:S7764` w `packages/workbench/src/App.tsx`; lokalna poprawka usuwa przyczynę tego code smell i wymaga potwierdzenia w kolejnej analizie SonarCloud.
 
 **Definicja Ukończenia (Definition of Done)**:
 
 - [x] MCP `search_my_sonarqube_projects` znajduje `Finfinder_AgentDeck`.
 - [ ] MCP `get_project_quality_gate_status` zwraca status Quality Gate dla `Finfinder_AgentDeck`.
-- [ ] MCP `get_component_measures` zwraca co najmniej coverage, duplicated lines density, bugs, vulnerabilities i code smells.
+- [x] MCP `get_component_measures` zwraca co najmniej coverage, duplicated lines density, bugs, vulnerabilities i code smells.
 - [x] Jeżeli MCP lub projekt nie są dostępne, ograniczenie jest odnotowane jako `Wymaga narzędzia/danych`, a workflow CI pozostaje źródłem prawdy.
 
 ## Aspekty Bezpieczeństwa
@@ -379,6 +379,8 @@ Potencjalne usprawnienia zidentyfikowane podczas planowania, które nie są czę
 
 | Data | Opis Zmiany |
 | --- | --- |
+| 2026-05-31 | Odnotowano lokalną poprawkę przyczyny SonarCloud `typescript:S7764`; zamknięcie issue wymaga kolejnej analizy SonarCloud. |
+| 2026-05-31 | Zaktualizowano wyniki SonarCloud MCP: metryki są dostępne, Quality Gate ma status `NONE`, a projekt ma 1 otwarty code smell. |
 | 2026-05-31 | Utworzono wstępny plan wdrożenia SonarQube/SonarCloud dla AgentDeck. |
 | 2026-05-31 | Uzupełniono numer i link do utworzonego GitHub Issue #16. |
 | 2026-05-31 | Zaimplementowano repozytoryjną konfigurację SonarCloud, coverage LCOV, workflow analizy, Connected Mode i dokumentację Code Quality. |
@@ -394,7 +396,7 @@ Brak ustaleń blokujących. Implementacja jest zgodna z planem w zakresie konfig
 
 | ID | Waga | Status | Ustalenie | Rekomendacja |
 | --- | --- | --- | --- | --- |
-| CR-01 | Informacyjne | Wymaga danych CI | SonarCloud MCP znajduje projekt `Finfinder_AgentDeck`, nie zwraca otwartych issues ani hotspots, ale Quality Gate ma status `NONE`, a metryki są puste przed pierwszą analizą. | Po pierwszym uruchomieniu `.github/workflows/sonar.yml` ponownie sprawdzić Quality Gate, coverage, duplications, bugs, vulnerabilities i code smells przez SonarCloud/MCP. |
+| CR-01 | Informacyjne | Częściowo sprawdzone | SonarCloud MCP znajduje projekt `Finfinder_AgentDeck` i metryki: coverage `92.9`, bugs `0`, vulnerabilities `0`, security hotspots `0`, duplicated lines density `0.0`, code smells `1`; Quality Gate nadal ma status `NONE`. Lokalna poprawka usuwa przyczynę code smell `typescript:S7764`, ale remote metryki wymagają kolejnej analizy. | Ustawić/potwierdzić Quality Gate projektu po stronie SonarCloud i po kolejnym skanie potwierdzić zamknięcie `typescript:S7764`. |
 | CR-02 | Informacyjne | Wymaga manualnego kroku | Branch protection dla checka `SonarCloud Analysis / sonar` nie może zostać zweryfikowane przed pojawieniem się checka w historii GitHub Actions. | Po pierwszym zielonym runie dodać wymagany status check w `Settings -> Branches -> Branch protection rules`. |
 | CR-03 | Informacyjne | Wymaga weryfikacji dewelopera | Agent nie ma bezpośredniego dostępu do lokalnych wyników SonarQube for IDE Connected Mode w panelu Problems. | Deweloper powinien sprawdzić VS Code Problems dla zmienionych plików i potwierdzić brak nierozwiązanych bugs, vulnerabilities oraz security hotspots. |
 | CR-04 | Informacyjne | Nie dotyczy | Pomocniczy raport `dependency-freshness-report.md` nie został wygenerowany, ponieważ `AI_Instruction/.github/compliance/dependency-manifests.json` nie zawiera jeszcze repozytorium `AgentDeck`. | Rozważyć dodanie `AgentDeck` do manifestu compliance w osobnym zadaniu, jeśli repo ma być objęte cyklicznym raportem dependency freshness. |

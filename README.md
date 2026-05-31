@@ -195,9 +195,9 @@ C4Context
 
 Full ADRs live in `docs/adr/`.
 
-## Development & contribution
+-## Development & contribution
 
-- Follow the monorepo `monorepo.yaml` conventions and branch strategy.
+- Follow the monorepo conventions defined in the parent workspace's `AI_Instruction/monorepo.yaml` file and the branch strategy.
 - Add ADRs under `docs/` and implement the minimal contract for services before expanding APIs.
 - Use typed IPC contracts; renderer must not access Node APIs directly.
 
