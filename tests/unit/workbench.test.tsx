@@ -10,8 +10,6 @@ import { DEFAULT_THEME_SETTINGS } from '@agentdeck/services';
 function mockPreloadApi(overrides: Record<string, any> = {}) {
   const api: any = {
     getStartupState: vi.fn().mockResolvedValue({ status: 'ready', appVersion: '0.1.0', services: [] }),
-    getThemeSettings: vi.fn().mockResolvedValue({ theme: 'dark' }),
-    setThemeSettings: vi.fn().mockImplementation(async settings => settings),
     selectWorkspaceEntry: vi.fn().mockResolvedValue({ status: 'cancelled' }),
     versions: { chrome: '130.0.0', electron: '42.3.0', node: '25.0.0' },
     getThemeSettings: vi.fn().mockResolvedValue(DEFAULT_THEME_SETTINGS),

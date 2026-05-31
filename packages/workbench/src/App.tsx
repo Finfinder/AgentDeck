@@ -14,9 +14,11 @@ export function App() {
   const [startupState, setStartupState] = useState<StartupState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [themeSettings, setThemeSettings] = useState<ThemeSettings>(DEFAULT_THEME_SETTINGS);
+  // Render with a dark-first flash to avoid a white flash in dark-mode workflows
+  const [themeSettings, setThemeSettings] = useState<ThemeSettings>({ theme: 'dark' });
   const [settingsStatus, setSettingsStatus] = useState('Theme settings ready.');
 
+  const [workspaceSelection, setWorkspaceSelection] = useState<any | null>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState('No workspace opened.');
 
   // Defensive agent API: when running the Vite dev server in a browser
@@ -28,15 +30,13 @@ export function App() {
     selectWorkspaceEntry: (opts?: { kind?: 'folder' | 'workspace-file' }) => Promise<{ status: 'selected' | 'cancelled'; name?: string }>;
   };
 
-  const globalAgent = (globalThis as unknown as { agentDeck?: PreloadApi } | undefined)?.agentDeck;
-  const agent: PreloadApi =
-    globalAgent ?? {
-      getStartupState: async () => ({ status: 'ready', appVersion: '0.1.0', services: [] }),
-      versions: { chrome: 'dev', electron: 'dev', node: 'dev' },
-      getThemeSettings: async () => DEFAULT_THEME_SETTINGS,
-      setThemeSettings: async (settings: ThemeSettings) => settings,
-      selectWorkspaceEntry: async () => ({ status: 'cancelled' })
-    };
+  const agent: PreloadApi = ((globalThis as unknown) as { agentDeck?: PreloadApi }).agentDeck ?? {
+    getStartupState: async () => ({ status: 'ready', appVersion: '0.1.0', services: [] }),
+    versions: { chrome: 'dev', electron: 'dev', node: 'dev' },
+    getThemeSettings: async () => DEFAULT_THEME_SETTINGS,
+    setThemeSettings: async (settings: ThemeSettings) => settings,
+    selectWorkspaceEntry: async () => ({ status: 'cancelled' })
+  };
 
   useEffect(() => {
     let isActive = true;
@@ -101,7 +101,8 @@ export function App() {
   async function openWorkspace(kind: 'folder' | 'workspace-file'): Promise<void> {
     try {
       const selection = await agent.selectWorkspaceEntry({ kind });
-      setWorkspaceStatus(selection.status === 'selected' ? `${selection.name ?? 'Workspace'} selected.` : 'No workspace opened.');
+      setWorkspaceSelection(selection);
+      setWorkspaceStatus(selection.status === 'selected' ? `${selection.name} selected.` : 'No workspace opened.');
     } catch {
       setWorkspaceStatus(WORKSPACE_OPEN_ERROR_MESSAGE);
     }
@@ -111,20 +112,42 @@ export function App() {
   const appVersion = startupState?.appVersion ?? '0.1.0';
 
   return (
-    <main className="startup-shell" aria-busy={startupState === null && loadError === null}>
+    <main className="startup-shell" aria-busy={startupState === null && loadError === null} data-theme={themeSettings.theme} role="main">
       <section className="startup-surface" aria-labelledby="agentdeck-title">
         <div>
           <p className="eyebrow">AgentDeck</p>
           <h1 id="agentdeck-title">Workbench</h1>
         </div>
+
         <p className="version">v{appVersion}</p>
+
         <p className="theme">Theme: {themeSettings.theme}</p>
-        <p className="settings-status">{settingsStatus}</p>
-        <p className="workspace-status">{workspaceStatus}</p>
-        <p className="startup-status" role={startupState?.status === 'error' || loadError ? 'alert' : 'status'}>
+
+        <p className="settings-status" role="status" aria-label="Theme settings">{settingsStatus}</p>
+
+        <p className="workspace-status" role="status" aria-label="Workspace status">{workspaceStatus}</p>
+
+        <p className="startup-status" role={startupState?.status === 'error' || loadError ? 'alert' : 'status'} aria-label="Startup state">
           {statusText}
         </p>
+
+        <nav aria-label="Primary activity">
+          <button onClick={() => openWorkspace('workspace-file')}>Open workspace</button>
+          <button onClick={() => openWorkspace('folder')}>Open folder</button>
+        </nav>
+
+        <section aria-label="Explorer">
+          <h2>Explorer</h2>
+          {workspaceSelection?.status === 'selected' ? <h3>{workspaceSelection.name}</h3> : null}
+        </section>
+
+        <div className="theme-controls">
+          <button onClick={() => updateTheme('dark')}>Dark</button>
+          <button onClick={() => updateTheme('light')}>Light</button>
+        </div>
       </section>
     </main>
   );
 }
+
+export default App;
