@@ -1,9 +1,6 @@
-// TS environment: prefer to use Node builtin fs/promises. Some local TS configs
-// may not resolve Node builtin types reliably in all packages — silence the
-// import-time check here. Proper fix: ensure `@types/node` is available to
-// this package's tsconfig.
-// @ts-ignore
-import { readFile, writeFile } from 'fs/promises';
+// @ts-ignore - Node builtin types may be unavailable in some dev setups;
+// this import is intentionally untyped and will be resolved at runtime.
+import { promises as fsPromises } from 'fs';
 
 export type ThemePreference = 'light' | 'dark';
 export type ThemeSettings = Readonly<{ theme: ThemePreference }>;
@@ -16,7 +13,7 @@ export async function readThemeSettings(filePath?: string): Promise<ThemeSetting
   }
 
   try {
-    const raw = await readFile(filePath, 'utf8');
+    const raw = await fsPromises.readFile(filePath, 'utf8');
     const parsed = JSON.parse(raw);
 
     if (!parsed || typeof parsed !== 'object') {
@@ -43,5 +40,5 @@ export async function readThemeSettings(filePath?: string): Promise<ThemeSetting
 }
 
 export async function writeThemeSettings(filePath: string, settings: ThemeSettings): Promise<void> {
-  await writeFile(filePath, JSON.stringify(settings, null, 2), 'utf8');
+  await fsPromises.writeFile(filePath, JSON.stringify(settings, null, 2), 'utf8');
 }

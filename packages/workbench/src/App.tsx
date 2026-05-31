@@ -14,11 +14,11 @@ export function App() {
   const [startupState, setStartupState] = useState<StartupState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [, setThemeSettings] = useState<ThemeSettings>(DEFAULT_THEME_SETTINGS);
-  const [, setSettingsStatus] = useState('Theme settings ready.');
+  const [themeSettings, setThemeSettings] = useState<ThemeSettings>(DEFAULT_THEME_SETTINGS);
+  const [settingsStatus, setSettingsStatus] = useState('Theme settings ready.');
 
-  const [, setWorkspaceSelection] = useState<any | null>(null);
-  const [, setWorkspaceStatus] = useState('No workspace opened.');
+  const [workspaceSelection, setWorkspaceSelection] = useState<any | null>(null);
+  const [workspaceStatus, setWorkspaceStatus] = useState('No workspace opened.');
 
   // Defensive agent API: when running the Vite dev server in a browser
   // (not inside Electron) `globalThis.agentDeck` may be undefined. Provide
@@ -118,6 +118,9 @@ export function App() {
           <h1 id="agentdeck-title">Workbench</h1>
         </div>
         <p className="version">v{appVersion}</p>
+        <p className="theme">Theme: {themeSettings.theme}</p>
+        <p className="settings-status">{settingsStatus}</p>
+        <p className="workspace-status">{workspaceStatus}</p>
         <p className="startup-status" role={startupState?.status === 'error' || loadError ? 'alert' : 'status'}>
           {statusText}
         </p>

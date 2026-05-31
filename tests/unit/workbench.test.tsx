@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '@agentdeck/workbench';
 import { DEFAULT_THEME_SETTINGS } from '@agentdeck/services';
-import type { AgentDeckPreloadApi } from '@agentdeck/shared';
+// Note: tests construct a mock preload API with extended members (theme APIs).
+// Avoid importing the strict `AgentDeckPreloadApi` type here to keep mocks flexible.
 
 function mockPreloadApi(overrides: Record<string, any> = {}) {
   const api: any = {
