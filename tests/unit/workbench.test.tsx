@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '@agentdeck/workbench';
+import { DEFAULT_THEME_SETTINGS } from '@agentdeck/services';
 import type { AgentDeckPreloadApi } from '@agentdeck/shared';
 
 function mockPreloadApi(overrides: Partial<AgentDeckPreloadApi> = {}) {
@@ -12,6 +13,8 @@ function mockPreloadApi(overrides: Partial<AgentDeckPreloadApi> = {}) {
     setThemeSettings: vi.fn().mockImplementation(async settings => settings),
     selectWorkspaceEntry: vi.fn().mockResolvedValue({ status: 'cancelled' }),
     versions: { chrome: '130.0.0', electron: '42.3.0', node: '25.0.0' },
+    getThemeSettings: vi.fn().mockResolvedValue(DEFAULT_THEME_SETTINGS),
+    setThemeSettings: vi.fn().mockImplementation(async (s: unknown) => s),
     ...overrides
   };
 

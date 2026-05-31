@@ -82,3 +82,6 @@ export function createStartupErrorState(appVersion: string): StartupState {
     message: SAFE_STARTUP_ERROR_MESSAGE
   };
 }
+
+export { readThemeSettings, writeThemeSettings, DEFAULT_THEME_SETTINGS } from './settings';
+export type { ThemeSettings } from './settings';
