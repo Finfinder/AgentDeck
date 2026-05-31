@@ -1,7 +1,5 @@
-// Prefer explicit Node builtin import. Keep a targeted ts-ignore for
-// developer setups that don't have @types/node installed yet.
-// @ts-ignore
-import { readFile, writeFile } from 'node:fs/promises';
+// Prefer explicit Node builtin import.
+import { promises as fsPromises } from 'node:fs';
 
 export type ThemePreference = 'light' | 'dark';
 export type ThemeSettings = Readonly<{ theme: ThemePreference }>;
@@ -14,7 +12,7 @@ export async function readThemeSettings(filePath?: string): Promise<ThemeSetting
   }
 
   try {
-    const raw = await readFile(filePath, 'utf8');
+    const raw = await fsPromises.readFile(filePath, 'utf8');
     const parsed = JSON.parse(raw) as unknown;
 
     if (!parsed || typeof parsed !== 'object') {
@@ -40,5 +38,5 @@ export async function readThemeSettings(filePath?: string): Promise<ThemeSetting
 }
 
 export async function writeThemeSettings(filePath: string, settings: ThemeSettings): Promise<void> {
-  await writeFile(filePath, JSON.stringify(settings, null, 2), 'utf8');
+  await fsPromises.writeFile(filePath, JSON.stringify(settings, null, 2), 'utf8');
 }
