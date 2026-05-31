@@ -62,7 +62,10 @@ export function createSettingsService(userDataPath: string): SettingsService {
 }
 
 export async function bootstrapDesktopServices(options: BootstrapDesktopServicesOptions): Promise<StartupState> {
-  const shouldFail = options.forceFailure ?? process.env.AGENTDECK_FAIL_BOOTSTRAP === '1';
+  // Avoid direct reference to `process` in environments without Node typings.
+  // Use a global flag if present, or the explicit option to force failure.
+  const shouldFail =
+    options.forceFailure ?? ((globalThis as any).AGENTDECK_FAIL_BOOTSTRAP === '1');
   if (shouldFail) {
     throw new StartupServiceError('Required desktop services failed to start.');
   }
@@ -82,3 +85,6 @@ export function createStartupErrorState(appVersion: string): StartupState {
     message: SAFE_STARTUP_ERROR_MESSAGE
   };
 }
+
+export { readThemeSettings, writeThemeSettings, DEFAULT_THEME_SETTINGS } from './settings';
+export type { ThemeSettings } from './settings';

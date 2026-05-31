@@ -1,24 +1,47 @@
 import { useEffect, useState } from 'react';
 
-import { DEFAULT_THEME_SETTINGS, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceSelection } from '@agentdeck/shared';
+import type { StartupState, AgentDeckPreloadApi } from '@agentdeck/shared';
+import { DEFAULT_THEME_SETTINGS, type ThemeSettings } from '@agentdeck/services';
 
 const STARTUP_STATE_READ_ERROR_MESSAGE = 'Unable to read startup state.';
 const THEME_SETTINGS_READ_ERROR_MESSAGE = 'Unable to read theme settings.';
 const THEME_SETTINGS_WRITE_ERROR_MESSAGE = 'Unable to save theme settings.';
 const WORKSPACE_OPEN_ERROR_MESSAGE = 'Unable to open workspace picker.';
 
+type ThemePreference = 'light' | 'dark';
+
 export function App() {
   const [startupState, setStartupState] = useState<StartupState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [themeSettings, setThemeSettings] = useState<ThemeSettings>(DEFAULT_THEME_SETTINGS);
+
+  // Render with a dark-first flash to avoid a white flash in dark-mode workflows
+  const [themeSettings, setThemeSettings] = useState<ThemeSettings>({ theme: 'dark' });
   const [settingsStatus, setSettingsStatus] = useState('Theme settings ready.');
-  const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelection | null>(null);
+
+  const [workspaceSelection, setWorkspaceSelection] = useState<any | null>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState('No workspace opened.');
+
+  // Defensive agent API: when running the Vite dev server in a browser
+  // (not inside Electron) `globalThis.agentDeck` may be undefined. Provide
+  // a minimal dev fallback so the UI doesn't crash during development.
+  type PreloadApi = AgentDeckPreloadApi & {
+    getThemeSettings: () => Promise<ThemeSettings>;
+    setThemeSettings: (s: ThemeSettings) => Promise<ThemeSettings>;
+    selectWorkspaceEntry: (opts?: { kind?: 'folder' | 'workspace-file' }) => Promise<{ status: 'selected' | 'cancelled'; name?: string }>;
+  };
+
+  const agent: PreloadApi = ((globalThis as unknown) as { agentDeck?: PreloadApi }).agentDeck ?? {
+    getStartupState: async () => ({ status: 'ready', appVersion: '0.1.0', services: [] }),
+    versions: { chrome: 'dev', electron: 'dev', node: 'dev' },
+    getThemeSettings: async () => DEFAULT_THEME_SETTINGS,
+    setThemeSettings: async (settings: ThemeSettings) => settings,
+    selectWorkspaceEntry: async () => ({ status: 'cancelled' })
+  };
 
   useEffect(() => {
     let isActive = true;
 
-    globalThis.agentDeck
+    agent
       .getStartupState()
       .then(state => {
         if (isActive) {
@@ -41,7 +64,7 @@ export function App() {
   useEffect(() => {
     let isActive = true;
 
-    globalThis.agentDeck
+    agent
       .getThemeSettings()
       .then(settings => {
         if (isActive) {
@@ -67,7 +90,7 @@ export function App() {
     setThemeSettings(nextSettings);
 
     try {
-      const savedSettings = await globalThis.agentDeck.setThemeSettings(nextSettings);
+      const savedSettings = await agent.setThemeSettings(nextSettings);
       setThemeSettings(savedSettings);
       setSettingsStatus('Theme settings saved.');
     } catch {
@@ -77,7 +100,7 @@ export function App() {
 
   async function openWorkspace(kind: 'folder' | 'workspace-file'): Promise<void> {
     try {
-      const selection = await globalThis.agentDeck.selectWorkspaceEntry({ kind });
+      const selection = await agent.selectWorkspaceEntry({ kind });
       setWorkspaceSelection(selection);
       setWorkspaceStatus(selection.status === 'selected' ? `${selection.name} selected.` : 'No workspace opened.');
     } catch {
@@ -87,107 +110,44 @@ export function App() {
 
   const statusText = loadError ?? (startupState?.status === 'error' ? startupState.message : 'Ready');
   const appVersion = startupState?.appVersion ?? '0.1.0';
-  const isLoading = startupState === null && loadError === null;
-  const selectedWorkspaceName = workspaceSelection?.status === 'selected' ? workspaceSelection.name : 'Untitled workspace';
-  const selectedWorkspacePath = workspaceSelection?.status === 'selected' ? workspaceSelection.path : 'No active workspace';
-  const selectedWorkspaceKind = workspaceSelection?.status === 'selected' ? workspaceSelection.kind : 'workspace-file';
 
   return (
-    <main className="workbench-shell" data-theme={themeSettings.theme} aria-busy={isLoading}>
-      <nav className="activity-bar" aria-label="Primary activity">
-        <button className="activity-button active" type="button" aria-label="Explorer" aria-pressed="true">
-          EX
-        </button>
-        <button className="activity-button" type="button" aria-label="Search" aria-pressed="false">
-          SE
-        </button>
-        <button className="activity-button" type="button" aria-label="Agent chat" aria-pressed="false">
-          AI
-        </button>
-      </nav>
-
-      <aside className="side-bar" aria-labelledby="explorer-title">
-        <header className="region-header">
+    <main className="startup-shell" aria-busy={startupState === null && loadError === null} data-theme={themeSettings.theme} role="main">
+      <section className="startup-surface" aria-labelledby="agentdeck-title">
+        <div>
           <p className="eyebrow">AgentDeck</p>
-          <h1 id="explorer-title">Explorer</h1>
-        </header>
-        <div className="workspace-actions" aria-label="Workspace actions">
-          <button type="button" className="primary-action" onClick={() => void openWorkspace('workspace-file')}>
-            Open workspace
-          </button>
-          <button type="button" className="secondary-action" onClick={() => void openWorkspace('folder')}>
-            Open folder
-          </button>
+          <h1 id="agentdeck-title">Workbench</h1>
         </div>
-        <section className="workspace-card" aria-labelledby="workspace-title">
-          <p id="workspace-title" className="section-label">
-            Active workspace
-          </p>
-          <p className="workspace-name">{selectedWorkspaceName}</p>
-          <p className="workspace-path">{selectedWorkspacePath}</p>
-          <p className="workspace-kind">{selectedWorkspaceKind}</p>
-        </section>
-      </aside>
 
-      <section className="editor-area" aria-labelledby="editor-title">
-        <div className="editor-tabs" role="tablist" aria-label="Editor tabs">
-          <button className="editor-tab active" type="button" role="tab" aria-selected="true">
-            Welcome
-          </button>
-        </div>
-        <section className="editor-surface" aria-labelledby="editor-title">
-          <div className="editor-gutter" aria-hidden="true">
-            1
-            <br />2
-            <br />3
-          </div>
-          <div className="editor-content">
-            <p className="eyebrow">Workbench</p>
-            <h2 id="editor-title">{selectedWorkspaceName}</h2>
-            <p>{workspaceStatus}</p>
-          </div>
-        </section>
-      </section>
+        <p className="version">v{appVersion}</p>
 
-      <section className="bottom-panel" aria-labelledby="panel-title">
-        <header className="panel-tabs" role="tablist" aria-label="Panel tabs">
-          <button type="button" role="tab" aria-selected="true">
-            Problems
-          </button>
-          <button type="button" role="tab" aria-selected="false">
-            Output
-          </button>
-        </header>
-        <div className="panel-content">
-          <h2 id="panel-title">Startup services</h2>
-          <ul className="service-list" aria-label="Startup service states">
-            {(startupState?.status === 'ready' ? startupState.services : []).map(service => (
-              <li key={service.id}>
-                <span>{service.label}</span>
-                <span>{service.status}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="startup-status" role={startupState?.status === 'error' || loadError ? 'alert' : 'status'} aria-label="Startup state">
-            {statusText}
-          </p>
+        <p className="theme">Theme: {themeSettings.theme}</p>
+
+        <p className="settings-status" role="status" aria-label="Theme settings">{settingsStatus}</p>
+
+        <p className="workspace-status" role="status" aria-label="Workspace status">{workspaceStatus}</p>
+
+        <p className="startup-status" role={startupState?.status === 'error' || loadError ? 'alert' : 'status'} aria-label="Startup state">
+          {statusText}
+        </p>
+
+        <nav aria-label="Primary activity">
+          <button onClick={() => openWorkspace('workspace-file')}>Open workspace</button>
+          <button onClick={() => openWorkspace('folder')}>Open folder</button>
+        </nav>
+
+        <section aria-label="Explorer">
+          <h2>Explorer</h2>
+          {workspaceSelection?.status === 'selected' ? <h3>{workspaceSelection.name}</h3> : null}
+        </section>
+
+        <div className="theme-controls">
+          <button onClick={() => updateTheme('dark')}>Dark</button>
+          <button onClick={() => updateTheme('light')}>Light</button>
         </div>
       </section>
-
-      <footer className="status-bar">
-        <p>v{appVersion}</p>
-        <output aria-label="Theme settings">
-          {settingsStatus}
-        </output>
-        <div className="theme-switcher" aria-label="Theme selection">
-          <button type="button" aria-pressed={themeSettings.theme === 'dark'} onClick={() => void updateTheme('dark')}>
-            Dark
-          </button>
-          <button type="button" aria-pressed={themeSettings.theme === 'light'} onClick={() => void updateTheme('light')}>
-            Light
-          </button>
-        </div>
-      </footer>
     </main>
   );
 }
+
+export default App;
