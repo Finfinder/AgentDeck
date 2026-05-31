@@ -17,8 +17,6 @@ export function App() {
   const [themeSettings, setThemeSettings] = useState<ThemeSettings>(DEFAULT_THEME_SETTINGS);
   const [settingsStatus, setSettingsStatus] = useState('Theme settings ready.');
 
-  type WorkspaceSelection = { status: 'selected' | 'cancelled'; name?: string } | null;
-  const [, setWorkspaceSelection] = useState<WorkspaceSelection>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState('No workspace opened.');
 
   // Defensive agent API: when running the Vite dev server in a browser
@@ -103,8 +101,7 @@ export function App() {
   async function openWorkspace(kind: 'folder' | 'workspace-file'): Promise<void> {
     try {
       const selection = await agent.selectWorkspaceEntry({ kind });
-      setWorkspaceSelection(selection);
-      setWorkspaceStatus(selection.status === 'selected' ? `${selection.name} selected.` : 'No workspace opened.');
+      setWorkspaceStatus(selection.status === 'selected' ? `${selection.name ?? 'Workspace'} selected.` : 'No workspace opened.');
     } catch {
       setWorkspaceStatus(WORKSPACE_OPEN_ERROR_MESSAGE);
     }

@@ -24,7 +24,7 @@ export async function readThemeSettings(filePath?: string): Promise<ThemeSetting
     // Best-effort shape check without unnecessary assertions
     const themeCandidate = (parsed as Record<string, unknown>)['theme'];
     if (themeCandidate === 'dark' || themeCandidate === 'light') {
-      return { theme: themeCandidate } as ThemeSettings;
+      return { theme: themeCandidate };
     }
 
     return DEFAULT_THEME_SETTINGS;
