@@ -103,42 +103,115 @@ export function App() {
 
   const statusText = loadError ?? (startupState?.status === 'error' ? startupState.message : 'Ready');
   const appVersion = startupState?.appVersion ?? '0.1.0';
+  const startupServices = startupState?.status === 'ready' ? startupState.services : [];
 
   return (
-    <main className="startup-shell" aria-busy={startupState === null && loadError === null} data-theme={themeSettings.theme} role="main">
-      <section className="startup-surface" aria-labelledby="agentdeck-title">
-        <div>
+    <main className="workbench-shell" aria-busy={startupState === null && loadError === null} data-theme={themeSettings.theme} role="main">
+      <nav className="activity-bar" aria-label="Primary activity">
+        <button className="activity-button" type="button" aria-label="Explorer" aria-pressed="true" title="Explorer">
+          EX
+        </button>
+        <button className="activity-button" type="button" aria-label="Search" title="Search" disabled>
+          SR
+        </button>
+        <button className="activity-button" type="button" aria-label="Source control" title="Source control" disabled>
+          SC
+        </button>
+      </nav>
+
+      <aside className="side-bar" aria-label="Explorer">
+        <header className="region-header">
           <p className="eyebrow">AgentDeck</p>
           <h1 id="agentdeck-title">Workbench</h1>
+          <p className="version">v{appVersion}</p>
+        </header>
+
+        <div className="workspace-actions" aria-label="Workspace actions">
+          <button className="primary-action" type="button" onClick={() => openWorkspace('workspace-file')}>
+            Open workspace
+          </button>
+          <button className="secondary-action" type="button" onClick={() => openWorkspace('folder')}>
+            Open folder
+          </button>
         </div>
 
-        <p className="version">v{appVersion}</p>
-
-        <p className="theme">Theme: {themeSettings.theme}</p>
-
-        <output className="settings-status" aria-label="Theme settings">{settingsStatus}</output>
-
-        <output className="workspace-status" aria-label="Workspace status">{workspaceStatus}</output>
-
-        <p className="startup-status" role={startupState?.status === 'error' || loadError ? 'alert' : 'status'} aria-label="Startup state">
-          {statusText}
-        </p>
-
-        <nav aria-label="Primary activity">
-          <button onClick={() => openWorkspace('workspace-file')}>Open workspace</button>
-          <button onClick={() => openWorkspace('folder')}>Open folder</button>
-        </nav>
-
-        <section aria-label="Explorer">
-          <h2>Explorer</h2>
-          {workspaceSelection?.status === 'selected' ? <h3>{workspaceSelection.name}</h3> : null}
+        <section className="workspace-card" aria-labelledby="explorer-title">
+          <p className="section-label">Explorer</p>
+          <h2 id="explorer-title">Explorer</h2>
+          {workspaceSelection?.status === 'selected' ? (
+            <>
+              <p className="workspace-kind">{workspaceSelection.kind === 'workspace-file' ? 'Workspace file' : 'Folder'}</p>
+              <h3 className="workspace-name">{workspaceSelection.name}</h3>
+              <p className="workspace-path">{workspaceSelection.path}</p>
+            </>
+          ) : (
+            <p className="workspace-path">No workspace opened.</p>
+          )}
         </section>
+      </aside>
 
-        <div className="theme-controls">
-          <button onClick={() => updateTheme('dark')}>Dark</button>
-          <button onClick={() => updateTheme('light')}>Light</button>
+      <section className="editor-area" aria-labelledby="agentdeck-title">
+        <div className="editor-tabs" role="tablist" aria-label="Open editors">
+          <button className="editor-tab active" type="button" role="tab" aria-selected="true">
+            Welcome
+          </button>
+        </div>
+
+        <section className="editor-surface" aria-label="Editor">
+          <div className="editor-gutter" aria-hidden="true">
+            <span>1</span>
+            <span>2</span>
+            <span>3</span>
+            <span>4</span>
+          </div>
+          <div className="editor-content">
+            <p className="eyebrow">AgentDeck</p>
+            <h2>Workbench</h2>
+            <p>{workspaceSelection?.status === 'selected' ? workspaceSelection.path : 'No workspace opened.'}</p>
+            <p>{statusText}</p>
+          </div>
+        </section>
+      </section>
+
+      <section className="bottom-panel" aria-label="Panel">
+        <div className="panel-tabs" role="tablist" aria-label="Panel views">
+          <button type="button" role="tab" aria-selected="true">
+            Services
+          </button>
+          <button type="button" role="tab" aria-selected="false">
+            Output
+          </button>
+        </div>
+
+        <div className="panel-content">
+          <p className="startup-status" role={startupState?.status === 'error' || loadError ? 'alert' : 'status'} aria-label="Startup state">
+            {statusText}
+          </p>
+          {startupServices.length > 0 ? (
+            <ul className="service-list" aria-label="Startup services">
+              {startupServices.map(service => (
+                <li key={service.id}>
+                  <span>{service.label}</span>
+                  <span>{service.status}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </section>
+
+      <footer className="status-bar">
+        <output aria-label="Workspace status">{workspaceStatus}</output>
+        <output aria-label="Theme settings">{settingsStatus}</output>
+        <div className="theme-switcher" aria-label="Theme">
+          <button type="button" onClick={() => updateTheme('dark')} aria-pressed={themeSettings.theme === 'dark'}>
+            Dark
+          </button>
+          <button type="button" onClick={() => updateTheme('light')} aria-pressed={themeSettings.theme === 'light'}>
+            Light
+          </button>
+        </div>
+      </footer>
     </main>
   );
 }

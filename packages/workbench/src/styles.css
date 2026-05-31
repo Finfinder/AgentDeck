@@ -66,6 +66,16 @@ button:hover {
   background: color-mix(in srgb, var(--color-panel-raised) 82%, var(--color-accent) 18%);
 }
 
+button:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
+button:disabled:hover {
+  border-color: var(--color-border);
+  background: var(--color-panel-raised);
+}
+
 button[aria-pressed="true"],
 button[aria-selected="true"] {
   border-color: var(--color-accent);
@@ -185,6 +195,7 @@ button[aria-selected="true"] {
   margin: 0;
   overflow: hidden;
   color: var(--color-text);
+  font-size: 1rem;
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -245,6 +256,10 @@ button[aria-selected="true"] {
   font-family: "Cascadia Code", Consolas, monospace;
   line-height: 1.7;
   text-align: right;
+}
+
+.editor-gutter span {
+  display: block;
 }
 
 .editor-content {

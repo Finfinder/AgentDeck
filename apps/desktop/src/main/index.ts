@@ -106,8 +106,30 @@ async function start(): Promise<void> {
   createMainWindow();
 }
 
-await app.whenReady();
-await start();
+async function startSafely(): Promise<void> {
+  try {
+    await start();
+  } catch (error) {
+    console.error('[main] Failed to start AgentDeck:', error);
+    startupState = createStartupErrorState(app.getVersion());
+    createMainWindow();
+  }
+}
+
+function startWhenReady(): void {
+  if (app.isReady()) {
+    setImmediate(() => {
+      void startSafely();
+    });
+    return;
+  }
+
+  app.once('ready', () => {
+    void startSafely();
+  });
+}
+
+startWhenReady();
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
