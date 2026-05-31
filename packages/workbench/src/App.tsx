@@ -17,7 +17,8 @@ export function App() {
   const [themeSettings, setThemeSettings] = useState<ThemeSettings>(DEFAULT_THEME_SETTINGS);
   const [settingsStatus, setSettingsStatus] = useState('Theme settings ready.');
 
-  const [workspaceSelection, setWorkspaceSelection] = useState<any | null>(null);
+  type WorkspaceSelection = { status: 'selected' | 'cancelled'; name?: string } | null;
+  const [, setWorkspaceSelection] = useState<WorkspaceSelection>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState('No workspace opened.');
 
   // Defensive agent API: when running the Vite dev server in a browser
@@ -29,13 +30,15 @@ export function App() {
     selectWorkspaceEntry: (opts?: { kind?: 'folder' | 'workspace-file' }) => Promise<{ status: 'selected' | 'cancelled'; name?: string }>;
   };
 
-  const agent: PreloadApi = ((globalThis as unknown) as { agentDeck?: PreloadApi }).agentDeck ?? {
-    getStartupState: async () => ({ status: 'ready', appVersion: '0.1.0', services: [] }),
-    versions: { chrome: 'dev', electron: 'dev', node: 'dev' },
-    getThemeSettings: async () => DEFAULT_THEME_SETTINGS,
-    setThemeSettings: async (settings: ThemeSettings) => settings,
-    selectWorkspaceEntry: async () => ({ status: 'cancelled' })
-  };
+  const globalAgent = (globalThis as unknown as { agentDeck?: PreloadApi } | undefined)?.agentDeck;
+  const agent: PreloadApi =
+    globalAgent ?? {
+      getStartupState: async () => ({ status: 'ready', appVersion: '0.1.0', services: [] }),
+      versions: { chrome: 'dev', electron: 'dev', node: 'dev' },
+      getThemeSettings: async () => DEFAULT_THEME_SETTINGS,
+      setThemeSettings: async (settings: ThemeSettings) => settings,
+      selectWorkspaceEntry: async () => ({ status: 'cancelled' })
+    };
 
   useEffect(() => {
     let isActive = true;

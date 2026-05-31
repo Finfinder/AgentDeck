@@ -1,6 +1,7 @@
-// @ts-ignore - Node builtin types may be unavailable in some dev setups;
-// this import is intentionally untyped and will be resolved at runtime.
-import { promises as fsPromises } from 'fs';
+// Prefer explicit Node builtin import. Keep a targeted ts-ignore for
+// developer setups that don't have @types/node installed yet.
+// @ts-ignore
+import { readFile, writeFile } from 'node:fs/promises';
 
 export type ThemePreference = 'light' | 'dark';
 export type ThemeSettings = Readonly<{ theme: ThemePreference }>;
@@ -13,18 +14,17 @@ export async function readThemeSettings(filePath?: string): Promise<ThemeSetting
   }
 
   try {
-    const raw = await fsPromises.readFile(filePath, 'utf8');
-    const parsed = JSON.parse(raw);
+    const raw = await readFile(filePath, 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
 
     if (!parsed || typeof parsed !== 'object') {
       return DEFAULT_THEME_SETTINGS;
     }
 
-    // Best-effort shape check
-    const asAny = parsed as { theme?: unknown };
-    if (asAny.theme === 'dark' || asAny.theme === 'light') {
-      const theme = asAny.theme as ThemePreference;
-      return { theme };
+    // Best-effort shape check without unnecessary assertions
+    const themeCandidate = (parsed as Record<string, unknown>)['theme'];
+    if (themeCandidate === 'dark' || themeCandidate === 'light') {
+      return { theme: themeCandidate } as ThemeSettings;
     }
 
     return DEFAULT_THEME_SETTINGS;
@@ -40,5 +40,5 @@ export async function readThemeSettings(filePath?: string): Promise<ThemeSetting
 }
 
 export async function writeThemeSettings(filePath: string, settings: ThemeSettings): Promise<void> {
-  await fsPromises.writeFile(filePath, JSON.stringify(settings, null, 2), 'utf8');
+  await writeFile(filePath, JSON.stringify(settings, null, 2), 'utf8');
 }
