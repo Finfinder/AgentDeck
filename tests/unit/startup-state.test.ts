@@ -2,11 +2,17 @@ import { describe, expect, it } from 'vitest';
 
 import { describeAgentRuntime } from '@agentdeck/agent-runtime';
 import { bootstrapDesktopServices, createStartupErrorState } from '@agentdeck/services';
-import { IPC_CHANNELS, isStartupState } from '@agentdeck/shared';
+import { IPC_CHANNELS, isStartupState, isThemeSettings, isWorkspaceOpenRequest, isWorkspaceSelection } from '@agentdeck/shared';
 
 describe('startup IPC contract', () => {
   it('uses a versioned startup state channel', () => {
     expect(IPC_CHANNELS.getStartupState).toBe('agentdeck:v1:startup:get-state');
+  });
+
+  it('uses versioned settings and workspace channels', () => {
+    expect(IPC_CHANNELS.getThemeSettings).toBe('agentdeck:v1:settings:get-theme');
+    expect(IPC_CHANNELS.setThemeSettings).toBe('agentdeck:v1:settings:set-theme');
+    expect(IPC_CHANNELS.selectWorkspaceEntry).toBe('agentdeck:v1:workspace:select-entry');
   });
 
   it('accepts ready startup state payloads', async () => {
@@ -47,5 +53,29 @@ describe('startup IPC contract', () => {
     expect(isStartupState({ status: 'error', appVersion: '0.1.0', code: 'UNKNOWN', message: 'x' })).toBe(false);
     expect(isStartupState({ status: 'ready', appVersion: '0.1.0', services: 'ready' })).toBe(false);
     expect(isStartupState({ status: 'ready', appVersion: '0.1.0', services: [{ id: 'fs', status: 'ready' }] })).toBe(false);
+  });
+
+  it('validates theme settings payloads', () => {
+    expect(isThemeSettings({ theme: 'dark' })).toBe(true);
+    expect(isThemeSettings({ theme: 'light' })).toBe(true);
+    expect(isThemeSettings({ theme: 'system' })).toBe(false);
+    expect(isThemeSettings(null)).toBe(false);
+  });
+
+  it('validates workspace open requests and selections', () => {
+    expect(isWorkspaceOpenRequest({ kind: 'folder' })).toBe(true);
+    expect(isWorkspaceOpenRequest({ kind: 'workspace-file' })).toBe(true);
+    expect(isWorkspaceOpenRequest({ kind: 'project' })).toBe(false);
+
+    expect(isWorkspaceSelection({ status: 'cancelled' })).toBe(true);
+    expect(
+      isWorkspaceSelection({
+        status: 'selected',
+        kind: 'workspace-file',
+        path: String.raw`C:\AgentDeck.code-workspace`,
+        name: 'AgentDeck.code-workspace'
+      })
+    ).toBe(true);
+    expect(isWorkspaceSelection({ status: 'selected', kind: 'workspace-file', path: String.raw`C:\AgentDeck.code-workspace` })).toBe(false);
   });
 });

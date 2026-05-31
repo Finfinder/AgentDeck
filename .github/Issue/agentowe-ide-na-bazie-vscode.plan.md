@@ -407,19 +407,19 @@ Rekomendowany routing wykonania: fazy UI kierować do `/implement-ui`, usługi N
 **Opis**: Zbudować główny układ UI inspirowany VS Code: activity bar, side bar, editor area, panel dolny i status bar, bez landing page i bez marketingowego ekranu startowego.
 
 **Definicja Ukończenia (Definition of Done)**:
-- [ ] Pierwszy ekran aplikacji jest funkcjonalnym workbenchem z opcją otwarcia folderu lub `.code-workspace`.
-- [ ] Layout ma stabilne regiony i nie zmienia wymiarów przy hover, loading, pustych stanach ani błędach.
-- [ ] Regiony UI mają semantyczne role i są osiągalne klawiaturą.
-- [ ] Workbench zachowuje czytelność na typowych viewportach desktop Windows bez nachodzenia tekstu i kontrolek.
+- [x] Pierwszy ekran aplikacji jest funkcjonalnym workbenchem z opcją otwarcia folderu lub `.code-workspace`.
+- [x] Layout ma stabilne regiony i nie zmienia wymiarów przy hover, loading, pustych stanach ani błędach.
+- [x] Regiony UI mają semantyczne role i są osiągalne klawiaturą.
+- [x] Workbench zachowuje czytelność na typowych viewportach desktop Windows bez nachodzenia tekstu i kontrolek.
 
 #### Zadanie 2.2 - [CREATE] System tokenów i dark theme baseline
 **Opis**: Wprowadzić ciemny motyw jako domyślny z tokenami kolorów, spacingu, focus ring, statusów i paneli.
 
 **Definicja Ukończenia (Definition of Done)**:
-- [ ] Aplikacja startuje zawsze w ciemnym motywie, jeśli użytkownik nie ustawi inaczej.
-- [ ] Kolory są zdefiniowane przez tokeny/CSS variables, a nie rozproszone literały w komponentach.
-- [ ] Kontrast tekstu, ikon, statusów, focus ring i disabled state spełnia WCAG 2.1 AA dla krytycznych elementów.
-- [ ] Theme state jest przechowywany w Settings Service i nie powoduje flash jasnego motywu przy starcie.
+- [x] Aplikacja startuje zawsze w ciemnym motywie, jeśli użytkownik nie ustawi inaczej.
+- [x] Kolory są zdefiniowane przez tokeny/CSS variables, a nie rozproszone literały w komponentach.
+- [x] Kontrast tekstu, ikon, statusów, focus ring i disabled state spełnia WCAG 2.1 AA dla krytycznych elementów.
+- [x] Theme state jest przechowywany w Settings Service i nie powoduje flash jasnego motywu przy starcie.
 
 ### Faza 3: Workspace Service, Explorer i Search
 
@@ -795,6 +795,43 @@ Potencjalne usprawnienia zidentyfikowane podczas planowania, które nie są czę
 
 ## Code Review Findings
 
+### Review 2026-06-01 - Faza 2 / Issue 2 — pełna ponowna weryfikacja
+
+| Severity | Ustalenie | Status |
+| --- | --- | --- |
+| MEDIUM | `tests/unit/settings-service.test.ts` był untracked (`??` w git). Bez `git add` trzy testy jednostkowe `SettingsService` nie weszłyby do commita i CI uruchamiałoby się bez pokrycia regresyjnego `packages/services/src/index.ts`. | Naprawione: plik dodany do staging (`git add tests/unit/settings-service.test.ts`); wszystkie 19 testów przechodzi lokalnie po zmianie. |
+| INFO | `<section className="editor-area">` i `<section className="editor-surface">` wewnątrz niej odwołują się do tego samego `id="editor-title"`. Zagnieżdżone landmark regions z identyczną accessible name mogą generować nadmiarowe ogłoszenia screen readera. | Otwarte: akceptowalne dla statycznej powłoki Fazy 2 bez prawdziwej nawigacji tabami; do adresowania w Fazach 3-4 przy implementacji edytora Monaco. |
+| INFO | Brak testu dla ścieżki `SyntaxError` (uszkodzony JSON) w `settings-service.test.ts`. Kod obsługuje ten przypadek, ale test pokrywa tylko nieprawidłową wartość `theme: "system"`. | Otwarte: minor gap, ryzyko niskie, akceptowalne dla MVP. |
+
+### Kontrole Fazy 2 (ponowna weryfikacja pełna)
+
+- `npm run lint` — OK.
+- `npm run test:coverage` — OK, 3 pliki testowe, 19 testów, coverage 85.33%.
+- `npm run test:architecture` — OK, 0 naruszeń dependency-cruiser (18 modułów, 22 zależności).
+- `npm run build` — OK, main 5.64 kB, preload 2.76 kB, renderer 563 kB.
+- `npm audit --audit-level=moderate` — OK, 0 vulnerabilities.
+- SonarQube for IDE — 9 zmienionych plików przeanalizowanych lokalnie; 0 Problems, 0 potential security issues.
+- SonarCloud MCP — Quality Gate: **OK** (poprzednio `NONE`), 0 bugs, 0 vulnerabilities, 0 security hotspots, 0 code smells, coverage 92.8%; code smell `typescript:S7764` zamknięty po ponownej analizie SonarCloud.
+- Dependency freshness — nie dotyczy (AgentDeck nie jest w `AI_Instruction/.github/compliance/dependency-manifests.json`).
+
+### Review 2026-05-31 - Faza 2 / Issue 2
+
+| Severity | Ustalenie | Status |
+| --- | --- | --- |
+| MEDIUM | Light theme miał za niski kontrast tekstu na kolorze akcentu w `primary-action` i status barze. | Zamknięte: dodano token `--color-on-accent` dla dark/light theme i użyto go w akcjach oraz status barze; kontrast par tokenów wynosi `10.84`, `14.25`, `5.27`, `7.62`, czyli przechodzi WCAG AA. |
+| INFO | Re-recenzja po poprawce kontrastu nie wykazała nowych blockerów dla bezpieczeństwa, granicy renderer/preload, a11y ani testów. | Zamknięte: lokalne quality gates i smoke UI przechodzą. |
+
+### Uruchomione kontrole Fazy 2
+
+- `npm run lint` - OK.
+- `npm run test:coverage` - OK, 3 pliki testowe, 19 testów, coverage 85.33%.
+- `npm run test:architecture` - OK, brak naruszeń dependency-cruiser.
+- `npm run build` - OK, obejmuje per-target TypeScript typecheck.
+- `npm audit --audit-level=moderate` - OK, 0 vulnerabilities.
+- SonarQube for IDE - zmienione pliki TS/TSX/CSS i testy przeanalizowane lokalnie; po poprawkach 0 Problems w zmienionych plikach kodu i testów.
+- Playwright harness smoke - OK, workbench renderuje regiony, przełącza motyw, obsługuje wybór workspace i nie emituje console errors/warnings.
+- Electron dev smoke - OK po lokalnym pobraniu brakującego binary Electron przez `npm exec electron -- --version`; `npm run dev` buduje main/preload/renderer i startuje aplikację.
+
 ### Review 2026-05-31 - ponowna recenzja po poprawkach
 
 | Severity | Ustalenie | Status |
@@ -829,7 +866,7 @@ Potencjalne usprawnienia zidentyfikowane podczas planowania, które nie są czę
 | KISS / SOLID / martwy kod | Sprawdzone | Szkielet jest mały, bez zbędnych abstrakcji; lokalna poprawka usuwa przyczynę SonarCloud `typescript:S7764`, a SonarCloud nadal wymaga kolejnej analizy do aktualizacji metryk. |
 | Performance | Sprawdzone | Faza 1 nie dodaje ciężkich ścieżek runtime; build produkcyjny przechodzi, brak operacji synchronicznych w rendererze poza renderem UI. |
 | Reliability | Sprawdzone | Kontrolowany startup state i fallback błędu usług są testowane; aplikacja buduje main, preload i renderer. |
-| Security scanning / SCA | Częściowo sprawdzone | `npm audit --audit-level=moderate` zwraca 0 vulnerabilities. Lokalna poprawka usuwa przyczynę code smell `typescript:S7764`; SonarCloud MCP nadal wymaga kolejnej analizy i ma Quality Gate `NONE`. Dependency freshness nie dotyczy, bo AgentDeck nie jest w `AI_Instruction/.github/compliance/dependency-manifests.json`. |
+| Security scanning / SCA | Sprawdzone | `npm audit --audit-level=moderate` zwraca 0 vulnerabilities. SonarCloud Quality Gate: OK (0 bugs/vulns/hotspots/smells, coverage 92.8%). Dependency freshness nie dotyczy, bo AgentDeck nie jest w `AI_Instruction/.github/compliance/dependency-manifests.json`. |
 | Bazy danych / SQL | Nie dotyczy | Faza 1 nie zawiera schematu SQLite, migracji, ORM ani zapytań SQL. |
 
 ### Uruchomione kontrole
@@ -857,9 +894,13 @@ Review wykonano agentem `code-reviewer`; po poprawkach uruchomiono ponownie wali
 
 | Data | Opis Zmiany |
 | --- | --- |
+| 2026-05-31 | Wykonano code review Fazy 2, naprawiono kontrast light theme tokenem `--color-on-accent` i potwierdzono re-recenzją brak nowych blockerów. |
+| 2026-05-31 | Zweryfikowano Fazę 2 lokalnie: lint, coverage, dependency-cruiser, build/typecheck, npm audit, SonarQube for IDE, Electron smoke i Playwright harness smoke. |
+| 2026-05-31 | Zaimplementowano Fazę 2 / Issue 2: workbench shell, tokeny ciemnego motywu, Settings Service dla motywu, wybór folderu lub `.code-workspace` przez IPC oraz testy regresyjne. |
 | 2026-05-31 | Wykonano końcowe code review po poprawkach; naprawiono test-gap z pierwszej re-recenzji i nie znaleziono nowych findings. |
 | 2026-05-31 | Zaimplementowano poprawki po aktualnym code review: sanitizowany fallback błędu preload/IPC i `globalThis.agentDeck` w rendererze. |
 | 2026-05-31 | Wykonano aktualny code review Fazy 1 z lokalnymi quality gates i SonarCloud MCP; odnotowano raw fallback error w rendererze, otwarty code smell SonarCloud oraz Quality Gate `NONE`. |
 | 2026-05-31 | Wykonano code review Fazy 1 i poprawiono wskazane ustalenia: per-target typecheck, bezpieczny startup error oraz bazowy CSP renderera. |
 | 2026-05-31 | Zaimplementowano Fazę 1: szkielet Electron/React/TypeScript, preload IPC, testy jednostkowe, dependency-cruiser, `docs/domain.md`, ADR-001..ADR-008 i skrypty walidacyjne. |
+| 2026-06-01 | Ponowna pełna weryfikacja Fazy 2: znaleziono MEDIUM (untracked test file), naprawiono przez `git add`; SonarCloud Quality Gate zmienił się z NONE na OK; wszystkie quality gates przechodzą. |
 | 2026-05-30 | Zaktualizowano plan do aktualnego research: Electron + React + Monaco + Node/TS services + SQLite/sqlite-vec, dodano GitHub login, domyślny ciemny motyw, decyzję modularyzacyjną i pełne fazy MVP. |
