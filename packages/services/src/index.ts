@@ -1,4 +1,7 @@
-import type { StartupServiceDescriptor, StartupState } from '@agentdeck/shared';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+
+import { DEFAULT_THEME_SETTINGS, isThemeSettings, type StartupServiceDescriptor, type StartupState, type ThemeSettings } from '@agentdeck/shared';
 
 export type BootstrapDesktopServicesOptions = Readonly<{
   appVersion: string;
@@ -19,6 +22,44 @@ const REQUIRED_SERVICES = [
 ] as const satisfies readonly StartupServiceDescriptor[];
 
 const SAFE_STARTUP_ERROR_MESSAGE = 'Required desktop services failed to start.';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return isRecord(error) && error.code === 'ENOENT';
+}
+
+export class SettingsService {
+  constructor(private readonly settingsFilePath: string) {}
+
+  async readThemeSettings(): Promise<ThemeSettings> {
+    try {
+      const content = await readFile(this.settingsFilePath, 'utf8');
+      const value: unknown = JSON.parse(content);
+
+      return isThemeSettings(value) ? value : DEFAULT_THEME_SETTINGS;
+    } catch (error) {
+      if (isMissingFileError(error) || error instanceof SyntaxError) {
+        return DEFAULT_THEME_SETTINGS;
+      }
+
+      return DEFAULT_THEME_SETTINGS;
+    }
+  }
+
+  async writeThemeSettings(settings: ThemeSettings): Promise<ThemeSettings> {
+    await mkdir(dirname(this.settingsFilePath), { recursive: true });
+    await writeFile(this.settingsFilePath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+
+    return settings;
+  }
+}
+
+export function createSettingsService(userDataPath: string): SettingsService {
+  return new SettingsService(join(userDataPath, 'settings.json'));
+}
 
 export async function bootstrapDesktopServices(options: BootstrapDesktopServicesOptions): Promise<StartupState> {
   const shouldFail = options.forceFailure ?? process.env.AGENTDECK_FAIL_BOOTSTRAP === '1';
