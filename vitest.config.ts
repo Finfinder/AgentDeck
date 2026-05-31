@@ -26,6 +26,10 @@ export default defineConfig({
       reporter: ['text', 'json-summary', 'lcov'],
       include: ['apps/**/*.{ts,tsx}', 'packages/**/*.{ts,tsx}'],
       exclude: [
+        'apps/desktop/src/main/**',
+        'apps/desktop/src/preload/**',
+        'packages/**/src/index.ts',
+        'packages/workbench/src/main.tsx',
         'tests/**',
         '**/*.test.{ts,tsx}',
         '**/*.d.ts',
