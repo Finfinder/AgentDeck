@@ -1,7 +1,7 @@
 # Raport swiezosci zaleznosci
 
 - Repozytorium: AgentDeck
-- Wygenerowano: 2026-05-31T15:47:26.3338415Z
+- Wygenerowano: 2026-05-31T21:36:58.2193017Z
 - Liczba zaleznosci: 21
 - Findings: 2
 - Deprecated: 0
