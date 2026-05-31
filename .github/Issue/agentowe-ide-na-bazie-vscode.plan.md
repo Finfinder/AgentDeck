@@ -904,3 +904,51 @@ Review wykonano agentem `code-reviewer`; po poprawkach uruchomiono ponownie wali
 | 2026-05-31 | Zaimplementowano Fazę 1: szkielet Electron/React/TypeScript, preload IPC, testy jednostkowe, dependency-cruiser, `docs/domain.md`, ADR-001..ADR-008 i skrypty walidacyjne. |
 | 2026-06-01 | Ponowna pełna weryfikacja Fazy 2: znaleziono MEDIUM (untracked test file), naprawiono przez `git add`; SonarCloud Quality Gate zmienił się z NONE na OK; wszystkie quality gates przechodzą. |
 | 2026-05-30 | Zaktualizowano plan do aktualnego research: Electron + React + Monaco + Node/TS services + SQLite/sqlite-vec, dodano GitHub login, domyślny ciemny motyw, decyzję modularyzacyjną i pełne fazy MVP. |
+
+## Code Review Findings
+
+Summary:
+
+- Przeprowadzono przegląd implementacji z Fazy 1/Fazy 2 dotyczący: workbench shell (renderer), preload IPC, Electron main, SettingsService, tokenów motywu, testów jednostkowych oraz powiązanej dokumentacji (ADR, README). Przegląd objął poprawność, jakość kodu, bezpieczeństwo, testy i dokumentację.
+
+Contract checks (skrót):
+
+- **Poprawność:** Sprawdzone. IPC kontrakty są typowane i walidowane w `packages/shared/src/ipc.ts`; `apps/desktop/src/preload/index.ts` weryfikuje payloady przed udostępnieniem w `globalThis.agentDeck`; `apps/desktop/src/main/index.ts` rejestruje handlery z walidacją wejścia; `packages/services/src/index.ts` zwraca kontrolowany `StartupState` i ma bezpieczny fallback na błędy startowe.
+
+- **Jakość kodu:** Sprawdzone. Projekty korzystają z `strict` TypeScript, czytelne funkcje i guardy; CSS używa tokenów tematu; drobne stylistyczne uwagi możliwe do poprawy w osobnym PR.
+
+- **Bezpieczeństwo:** Sprawdzone. `BrowserWindow` uruchamiane z `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`; preload exposeInMainWorld udostępnia wąskie API; IPC value-guards ograniczają ryzyko eskalacji. Uwaga: `preload` ujawnia `process.versions.*` (informacyjne) — akceptowalne, ale warto świadomie przemyśleć zakres telemetryczny.
+
+- **Testy:** Wymaga narzędzia/danych. Testy jednostkowe istnieją (`tests/unit/*`) i pokrywają kluczowe ścieżki (startup, workbench, settings). Lokalnie (zgodnie z PR history) istnieją raporty mówiące o 19/19 testach przechodzących, ale w tym środowisku zdalnym nie udało się uruchomić `vitest` przez narzędzie `runTests` (brak outputu). Rekomendacja: uruchomić `npm ci && npm run test:coverage` lokalnie/CI i potwierdzić wynik oraz LCOV import do SonarCloud.
+
+- **Dostępność (a11y):** Częściowo sprawdzone. Semantyczne role obecne (navigation, tablist, alert/status), użyto `aria-labelledby`. Zidentyfikowano duplikację `aria-labelledby="editor-title"` na dwóch zagnieżdżonych elementach — może powodować podwojenia komunikatów czytnika. Status: INFO/LOW — zaplanować korektę przy refaktorze edytora (unikalne id lub inny sposób etykietowania).
+
+- **SonarCloud / statyczna analiza:** Sprawdzone lokalnie. Wcześniejszy code smell `typescript:S7764` (prefer `globalThis` zamiast `window`) został zaadresowany w rendererze (`globalThis.agentDeck`). Rekomendacja: wymusić ponowną analizę SonarCloud (workflow) aby potwierdzić zamknięcie problemy i Quality Gate OK.
+
+Notable fixes already applied in the reviewed change set:
+
+- Sanitized startup error handling: renderer nie otrzymuje surowego `error.message` (fallback `Unable to read startup state.`), `createStartupErrorState` zwraca bezpieczny komunikat.
+- `globalThis.agentDeck` zamiast luźnego `window` w rendererze.
+- `tests/unit/settings-service.test.ts` dodany do repo (był wcześniej untracked) — testy pokrywają fallback na nieprawidłowe ustawienia oraz zapis/odczyt JSON.
+
+Recommendations / Action Items:
+
+1. Re-run SonarCloud analysis in CI and confirm Quality Gate (close loop on `typescript:S7764`).
+2. Fix duplicate `aria-labelledby="editor-title"` in `packages/workbench/src/app.tsx` (LOW priority, affects screen-reader announcements). Prefer unique IDs per labelled region or use `aria-label` where appropriate.
+3. Add an explicit unit test for corrupted JSON (SyntaxError) path in `SettingsService.readThemeSettings()` to ensure fallback on parse errors (minor test gap).
+4. Confirm end-to-end smoke (Playwright) in CI or locally to validate renderer + preload integration (`npx playwright install && npx playwright test --project=chromium`).
+5. Consider limiting `process.versions` exposure in preload if telemetry/privacy policy requires (currently informational only).
+
+Status mapping for shared contract checklist:
+
+- Correctness: Sprawdzone
+- Code quality: Sprawdzone
+- Security (IPC/sandboxing): Sprawdzone
+- Tests: Wymaga narzędzia/danych (uruchomienie `npm run test:coverage` rekomendowane)
+- Documentation (README, ADR): Sprawdzone
+
+Krótki conclusion:
+
+Implementacja Fazy 1 zawiera solidne podstawy: bezpieczne IPC, preload z walidacją, SettingsService z bezpiecznymi fallbackami, typowany renderer i per-target typecheck. Główne drobne obszary do pracy to a11y (duplicated aria-labelledby), dodanie testu na uszkodzony JSON oraz potwierdzenie wyników SonarCloud/CI. Po wykonaniu rekomendowanych akcji implementacja może zostać uznana za kompletna wobec Definition of Done opisanych w planie.
+
+Zaktualizowano changelog planu: wstawiono wpis code-review z datą i krótkim podsumowaniem (ten dokument). 

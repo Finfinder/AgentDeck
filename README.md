@@ -43,6 +43,59 @@ Notes:
 - If Electron reports a missing binary after install, run `npm rebuild electron` and start the app again.
 - The current Phase 2 shell starts as a functional dark workbench with activity bar, explorer, editor area, bottom panel, status bar, typed preload IPC, Settings Service-backed theme persistence, and a workspace/folder picker entry point.
 
+## Getting Started (Windows)
+
+Prerequisites:
+
+- Node.js (recommended LTS, e.g., 18+ or newer compatible with Vite)
+- npm
+- Git
+
+1) Install dependencies:
+
+```powershell
+cd AgentDeck
+npm ci
+```
+
+2) Start development (live reload):
+
+```powershell
+npm run dev
+```
+
+3) Build and run a local production preview:
+
+```powershell
+npm run build
+npx electron .
+```
+
+4) Tests and quality checks:
+
+```powershell
+npm run typecheck
+npm run lint
+npm run test:coverage
+npm run test
+npm run test:architecture
+```
+
+5) Playwright (optional E2E smoke):
+
+```powershell
+npx playwright install
+npx playwright test --project=chromium
+```
+
+Troubleshooting tips:
+
+- If Electron reports a missing binary, run `npm rebuild electron` and retry.
+- Check the terminal running `npm run dev` for main/preload logs; open DevTools in the renderer (Ctrl+Shift+I) for renderer logs.
+- To reset theme/settings, remove the local settings file (the path is logged at startup).
+
+If you want, I can run `npm run dev` locally and inspect logs, or run the Playwright smoke tests for you.
+
 ## Code Quality
 
 AgentDeck is configured for [SonarCloud](https://sonarcloud.io/summary/new_code?id=Finfinder_AgentDeck) analysis under project key `Finfinder_AgentDeck` in the `finfinder` organization.
