@@ -31,6 +31,7 @@ npm run dev
 Validation commands:
 
 ```bash
+npm run audit:security
 npm run typecheck
 npm run lint
 npm run test:coverage
@@ -51,29 +52,30 @@ Prerequisites:
 - npm
 - Git
 
-1) Install dependencies:
+1. Install dependencies:
 
 ```powershell
 cd AgentDeck
 npm ci
 ```
 
-2) Start development (live reload):
+1. Start development (live reload):
 
 ```powershell
 npm run dev
 ```
 
-3) Build and run a local production preview:
+1. Build and run a local production preview:
 
 ```powershell
 npm run build
 npx electron .
 ```
 
-4) Tests and quality checks:
+1. Tests and quality checks:
 
 ```powershell
+npm run audit:security
 npm run typecheck
 npm run lint
 npm run test:coverage
@@ -81,7 +83,7 @@ npm run test
 npm run test:architecture
 ```
 
-5) Playwright (optional E2E smoke):
+1. Playwright (optional E2E smoke):
 
 ```powershell
 npx playwright install
@@ -100,10 +102,15 @@ If you want, I can run `npm run dev` locally and inspect logs, or run the Playwr
 
 AgentDeck is configured for [SonarCloud](https://sonarcloud.io/summary/new_code?id=Finfinder_AgentDeck) analysis under project key `Finfinder_AgentDeck` in the `finfinder` organization.
 
+Security scanning complements SonarCloud with Dependabot, `npm audit`, and CodeQL. The remediation and triage policy is documented in [SECURITY.md](SECURITY.md).
+
 Agent-managed repository setup:
 
 - The [`sonar.yml`](.github/workflows/sonar.yml) workflow runs on pushes to `main` and semver branches, and on pull requests targeting those branches.
-- The workflow runs `npm ci`, `npm run typecheck`, `npm run lint`, `npm run test:coverage`, `npm run test:architecture`, and `npm run build` before scanning.
+- The workflow runs `npm ci --ignore-scripts`, `npm run audit:security`, `npm run typecheck`, `npm run lint`, `npm run test:coverage`, `npm run test:architecture`, and `npm run build` before scanning.
+- The npm audit gate fails CI for vulnerabilities at `moderate` severity or higher and uploads the machine-readable `npm-audit.json` report as a workflow artifact.
+- The [`codeql.yml`](.github/workflows/codeql.yml) workflow runs CodeQL for JavaScript and TypeScript and publishes results to GitHub Code Scanning.
+- The [`dependabot.yml`](.github/dependabot.yml) configuration opens weekly npm dependency update pull requests labeled for security triage.
 - Vitest writes V8 coverage reports to `coverage/`, including LCOV at `coverage/lcov.info`, which is imported by SonarCloud.
 - SonarCloud PR decoration reports new issues, coverage changes, and Quality Gate status on pull requests.
 - The workflow waits for the SonarCloud Quality Gate with `sonar.qualitygate.wait=true`; branch protection should require the resulting status check after the first successful run.
@@ -112,6 +119,7 @@ Manual repository owner setup:
 
 - The SonarCloud project and the GitHub Actions repository secret `SONAR_TOKEN` are managed outside this repository.
 - The recommended project key is `Finfinder_AgentDeck`; the recommended Quality Gate is `Sonar way` with New Code Definition set to `Previous version`.
+- GitHub Code Scanning must be enabled by repository settings or plan capabilities before CodeQL results are visible.
 - Do not commit Sonar tokens, paste them into chat, or store them in README, workflow files, logs, issue text, or local project settings.
 
 ### SonarQube for IDE Connected Mode

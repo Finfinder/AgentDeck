@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "06:00"
+      timezone: "Europe/Warsaw"
+    labels:
+      - "dependabot"
+      - "security"
+      - "priority:high"
+    open-pull-requests-limit: 5

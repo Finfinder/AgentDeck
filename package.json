@@ -22,6 +22,7 @@
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "typecheck:build": "tsc --noEmit -p tsconfig.build.json",
     "lint": "eslint .",
+    "audit:security": "npm audit --audit-level=moderate --json",
     "test": "npm run test:unit && npm run test:architecture",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:coverage": "vitest run --config vitest.config.ts --coverage",
