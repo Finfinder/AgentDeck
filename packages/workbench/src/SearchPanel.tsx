@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { pathBasename } from '@agentdeck/shared';
 import type { AgentDeckPreloadApi, SearchResult, WorkspaceModel } from '@agentdeck/shared';
 
 interface SearchPanelProps {
@@ -7,11 +8,6 @@ interface SearchPanelProps {
   readonly workspaceModel: WorkspaceModel & { status: 'ok' };
 }
 
-function pathBasename(p: string): string {
-  const normalized = p.replaceAll('\\', '/');
-  const idx = normalized.lastIndexOf('/');
-  return idx === -1 ? normalized : normalized.slice(idx + 1);
-}
 
 export function SearchPanel({ agent, workspaceModel }: SearchPanelProps) {
   const [pattern, setPattern] = useState('');

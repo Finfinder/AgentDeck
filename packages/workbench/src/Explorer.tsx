@@ -1,27 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { pathBasename, normalizePathStr } from '@agentdeck/shared';
 import type { AgentDeckPreloadApi, DirectoryListing, WorkspaceModel } from '@agentdeck/shared';
 
-// Normalise path separators and remove trailing slashes without a ReDoS-prone regex.
-function normalizePathStr(p: string): string {
-  const s = p.replaceAll('\\', '/');
-  let end = s.length;
-  while (end > 1 && s[end - 1] === '/') end--;
-  return s.slice(0, end);
-}
-
-// Resolve the parent path without node:path — works for both '/' and '\' separators.
+// Resolve the parent path without node:path — works for both '/' and '\\' separators.
 function parentPath(p: string): string {
   const normalized = normalizePathStr(p);
   const idx = normalized.lastIndexOf('/');
   return idx <= 0 ? normalized : normalized.slice(0, idx);
-}
-
-// Returns the last segment of a path for breadcrumb display.
-function pathBasename(p: string): string {
-  const normalized = normalizePathStr(p);
-  const idx = normalized.lastIndexOf('/');
-  return idx === -1 ? normalized : normalized.slice(idx + 1);
 }
 
 interface ExplorerProps {

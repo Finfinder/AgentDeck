@@ -10,6 +10,7 @@ export {
 	isWorkspaceOpenRequest,
 	isWorkspaceSelection
 } from './ipc';
+export { pathBasename, normalizePathStr } from './path';
 export type { DomainEntityName, DomainOwnership, ModuleName } from './domain';
 export type {
 	AgentDeckPreloadApi,
