@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { DEFAULT_THEME_SETTINGS, type AgentDeckPreloadApi, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
+import { DEFAULT_THEME_SETTINGS, type AgentDeckPreloadApi, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
+
+import { Explorer } from './Explorer';
+import { SearchPanel } from './SearchPanel';
 
 const STARTUP_STATE_READ_ERROR_MESSAGE = 'Unable to read startup state.';
 const THEME_SETTINGS_READ_ERROR_MESSAGE = 'Unable to read theme settings.';
@@ -12,7 +15,12 @@ const DEV_PRELOAD_API: AgentDeckPreloadApi = {
   versions: { chrome: 'dev', electron: 'dev', node: 'dev' },
   getThemeSettings: async () => DEFAULT_THEME_SETTINGS,
   setThemeSettings: async settings => settings,
-  selectWorkspaceEntry: async () => ({ status: 'cancelled' })
+  selectWorkspaceEntry: async () => ({ status: 'cancelled' }),
+  openWorkspace: async () => ({ status: 'error', code: 'FILE_NOT_FOUND', message: 'Dev mode — no workspace.' }),
+  listDirectory: async path => ({ path, entries: [] }),
+  searchFiles: async () => [],
+  getRecentWorkspaces: async () => [],
+  onFsEvent: () => () => undefined
 };
 
 function getPreloadApi(): AgentDeckPreloadApi {
@@ -29,7 +37,9 @@ export function App() {
   const [settingsStatus, setSettingsStatus] = useState('Theme settings ready.');
 
   const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelection | null>(null);
+  const [workspaceModel, setWorkspaceModel] = useState<WorkspaceModel | null>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState('No workspace opened.');
+  const [activePanel, setActivePanel] = useState<'explorer' | 'search'>('explorer');
 
   useEffect(() => {
     let isActive = true;
@@ -95,7 +105,13 @@ export function App() {
     try {
       const selection = await agent.selectWorkspaceEntry({ kind });
       setWorkspaceSelection(selection);
-      setWorkspaceStatus(selection.status === 'selected' ? `${selection.name} selected.` : 'No workspace opened.');
+      if (selection.status === 'selected') {
+        const model = await agent.openWorkspace(selection.path, selection.kind);
+        setWorkspaceModel(model);
+        setWorkspaceStatus(model.status === 'ok' ? `${selection.name} opened.` : model.message);
+      } else {
+        setWorkspaceStatus('No workspace opened.');
+      }
     } catch {
       setWorkspaceStatus(WORKSPACE_OPEN_ERROR_MESSAGE);
     }
@@ -108,10 +124,10 @@ export function App() {
   return (
     <main className="workbench-shell" aria-busy={startupState === null && loadError === null} data-theme={themeSettings.theme} role="main">
       <nav className="activity-bar" aria-label="Primary activity">
-        <button className="activity-button" type="button" aria-label="Explorer" aria-pressed="true" title="Explorer">
+        <button className="activity-button" type="button" aria-label="Explorer" aria-pressed={activePanel === 'explorer'} title="Explorer" onClick={() => { setActivePanel('explorer'); }}>
           EX
         </button>
-        <button className="activity-button" type="button" aria-label="Search" title="Search" disabled>
+        <button className="activity-button" type="button" aria-label="Search" title="Search" aria-pressed={activePanel === 'search'} disabled={workspaceModel?.status !== 'ok'} onClick={() => { setActivePanel('search'); }}>
           SR
         </button>
         <button className="activity-button" type="button" aria-label="Source control" title="Source control" disabled>
@@ -119,7 +135,7 @@ export function App() {
         </button>
       </nav>
 
-      <aside className="side-bar" aria-label="Explorer">
+      <aside className="side-bar" aria-label={activePanel === 'search' ? 'Search' : 'Explorer'}>
         <header className="region-header">
           <p className="eyebrow">AgentDeck</p>
           <h1 id="agentdeck-title">Workbench</h1>
@@ -127,27 +143,31 @@ export function App() {
         </header>
 
         <div className="workspace-actions" aria-label="Workspace actions">
-          <button className="primary-action" type="button" onClick={() => openWorkspace('workspace-file')}>
+          <button className="primary-action" type="button" onClick={() => { void openWorkspace('workspace-file'); }}>
             Open workspace
           </button>
-          <button className="secondary-action" type="button" onClick={() => openWorkspace('folder')}>
+          <button className="secondary-action" type="button" onClick={() => { void openWorkspace('folder'); }}>
             Open folder
           </button>
         </div>
 
-        <section className="workspace-card" aria-labelledby="explorer-title">
-          <p className="section-label">Explorer</p>
-          <h2 id="explorer-title">Explorer</h2>
-          {workspaceSelection?.status === 'selected' ? (
-            <>
-              <p className="workspace-kind">{workspaceSelection.kind === 'workspace-file' ? 'Workspace file' : 'Folder'}</p>
-              <h3 className="workspace-name">{workspaceSelection.name}</h3>
-              <p className="workspace-path">{workspaceSelection.path}</p>
-            </>
-          ) : (
-            <p className="workspace-path">No workspace opened.</p>
-          )}
-        </section>
+        {workspaceModel?.status === 'ok' && activePanel === 'explorer' && (
+          <Explorer agent={agent} workspaceModel={workspaceModel} />
+        )}
+        {workspaceModel?.status === 'ok' && activePanel === 'search' && (
+          <SearchPanel agent={agent} workspaceModel={workspaceModel} />
+        )}
+        {workspaceModel?.status !== 'ok' && (
+          <section className="workspace-card" aria-labelledby="explorer-title">
+            <p className="section-label">Explorer</p>
+            <h2 id="explorer-title">Explorer</h2>
+            {workspaceSelection?.status === 'selected' && workspaceModel?.status === 'error' ? (
+              <p className="workspace-path" role="alert">{workspaceModel.message}</p>
+            ) : (
+              <p className="workspace-path">No workspace opened.</p>
+            )}
+          </section>
+        )}
       </aside>
 
       <section className="editor-area" aria-labelledby="agentdeck-title">

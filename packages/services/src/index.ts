@@ -90,3 +90,4 @@ export function createStartupErrorState(appVersion: string): StartupState {
 
 export { readThemeSettings, writeThemeSettings, DEFAULT_THEME_SETTINGS } from './settings';
 export type { ThemeSettings } from './settings';
+export { createWorkspaceService, isSensitivePath, parseCodeWorkspace, stripJsoncComments, WorkspaceService } from './workspace-service';

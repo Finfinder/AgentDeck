@@ -3,10 +3,14 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
+  isDirectoryListing,
+  isFsChangeEvent,
   isStartupState,
   isThemeSettings,
+  isWorkspaceModel,
   isWorkspaceSelection,
   type AgentDeckPreloadApi,
+  type FsChangeEvent,
   type StartupState
 } from '@agentdeck/shared';
 
@@ -33,6 +37,29 @@ const api: AgentDeckPreloadApi = {
   selectWorkspaceEntry: async request => {
     const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.selectWorkspaceEntry, request);
     return isWorkspaceSelection(value) ? value : { status: 'cancelled' };
+  },
+  openWorkspace: async (path, kind) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.openWorkspace, path, kind);
+    return isWorkspaceModel(value) ? value : { status: 'error', code: 'INVALID_JSONC', message: 'Unexpected response from main process.' };
+  },
+  listDirectory: async path => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.listDirectory, path);
+    return isDirectoryListing(value) ? value : { path, entries: [] };
+  },
+  searchFiles: async query => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.searchFiles, query);
+    return Array.isArray(value) ? value : [];
+  },
+  getRecentWorkspaces: async () => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.getRecentWorkspaces);
+    return Array.isArray(value) ? value : [];
+  },
+  onFsEvent: (handler: (event: FsChangeEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (isFsChangeEvent(value)) handler(value);
+    };
+    ipcRenderer.on(IPC_CHANNELS.fsEvent, listener);
+    return () => { ipcRenderer.off(IPC_CHANNELS.fsEvent, listener); };
   },
   versions: {
     chrome: process.versions.chrome ?? 'unknown',

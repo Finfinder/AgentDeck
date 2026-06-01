@@ -2,12 +2,13 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { bootstrapDesktopServices, createSettingsService, createStartupErrorState, type SettingsService } from '@agentdeck/services';
+import { bootstrapDesktopServices, createSettingsService, createStartupErrorState, createWorkspaceService, type SettingsService, type WorkspaceService } from '@agentdeck/services';
 import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
   isThemeSettings,
   isWorkspaceOpenRequest,
+  type SearchQuery,
   type StartupState,
   type WorkspaceSelection
 } from '@agentdeck/shared';
@@ -21,13 +22,47 @@ let startupState: StartupState = {
   message: 'Application services have not been initialized yet.'
 };
 
-function registerIpcHandlers(settingsService: SettingsService): void {
+function registerIpcHandlers(settingsService: SettingsService, workspaceService: WorkspaceService, mainWindow: BrowserWindow): void {
   ipcMain.handle(IPC_CHANNELS.getStartupState, () => startupState);
   ipcMain.handle(IPC_CHANNELS.getThemeSettings, () => settingsService.readThemeSettings());
   ipcMain.handle(IPC_CHANNELS.setThemeSettings, (_event, value: unknown) => {
     return isThemeSettings(value) ? settingsService.writeThemeSettings(value) : DEFAULT_THEME_SETTINGS;
   });
   ipcMain.handle(IPC_CHANNELS.selectWorkspaceEntry, (_event, value: unknown) => selectWorkspaceEntry(value));
+
+  ipcMain.handle(IPC_CHANNELS.openWorkspace, (_event, path: unknown, kind: unknown) => {
+    if (typeof path !== 'string' || (kind !== 'folder' && kind !== 'workspace-file')) {
+      return { status: 'error', code: 'INVALID_JSONC', message: 'Invalid workspace open request.' };
+    }
+    return workspaceService.openWorkspace(path, kind);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.listDirectory, (_event, path: unknown) => {
+    if (typeof path !== 'string') return { path: '', entries: [] };
+    return workspaceService.listDirectory(path);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.searchFiles, (_event, value: unknown) => {
+    if (!isSearchQuery(value)) return [];
+    return workspaceService.searchFiles(value);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getRecentWorkspaces, () => workspaceService.getRecentWorkspaces());
+
+  workspaceService.on('fs-event', event => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.fsEvent, event);
+    }
+  });
+}
+
+function isSearchQuery(value: unknown): value is SearchQuery {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as Record<string, unknown>).pattern === 'string' &&
+    Array.isArray((value as Record<string, unknown>).workspaceRoots)
+  );
 }
 
 async function resolveStartupState(): Promise<StartupState> {
@@ -100,10 +135,11 @@ async function selectWorkspaceEntry(value: unknown): Promise<WorkspaceSelection>
 
 async function start(): Promise<void> {
   const settingsService = createSettingsService(app.getPath('userData'));
+  const workspaceService = createWorkspaceService(app.getPath('userData'));
 
   startupState = await resolveStartupState();
-  registerIpcHandlers(settingsService);
-  createMainWindow();
+  const mainWindow = createMainWindow();
+  registerIpcHandlers(settingsService, workspaceService, mainWindow);
 }
 
 async function startSafely(): Promise<void> {
