@@ -85,7 +85,7 @@ function createMainWindow(): BrowserWindow {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: join(currentDir, '../preload/index.mjs'),
+      preload: join(currentDir, '../../../out/preload/index.mjs'),
       sandbox: false
     }
   });

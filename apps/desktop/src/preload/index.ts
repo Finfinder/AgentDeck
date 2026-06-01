@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { ipcRenderer } from 'electron';
 
 import {
   DEFAULT_THEME_SETTINGS,
@@ -68,4 +68,35 @@ const api: AgentDeckPreloadApi = {
   }
 };
 
-contextBridge.exposeInMainWorld('agentDeck', api);
+// Allow runtime mock overrides for E2E testing
+// Store original methods and check for mocks before each call
+const _mocks: Record<string, Function> = {};
+if (typeof window !== 'undefined') {
+  (window as any).__setAgentDeckMock = (method: string, fn: Function) => {
+    _mocks[method] = fn;
+  };
+}
+
+// Wrap API methods to check for mocks
+const wrappedApi = {} as any;
+for (const key of Object.keys(api)) {
+  if (typeof (api as any)[key] === 'function') {
+    wrappedApi[key] = async (...args: any[]) => {
+      if (_mocks[key]) {
+        return _mocks[key](...args);
+      }
+      return (api as any)[key](...args);
+    };
+  } else {
+    wrappedApi[key] = (api as any)[key];
+  }
+}
+
+// Expose mock setter for E2E testing
+wrappedApi.__setAgentDeckMock = (method: string, fn: Function) => {
+  _mocks[method] = fn;
+};
+
+console.log('[preload] Loading preload script...');
+contextBridge.exposeInMainWorld('agentDeck', wrappedApi);
+console.log('[preload] agentDeck exposed successfully');
