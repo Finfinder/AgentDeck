@@ -239,15 +239,15 @@ Nie dotyczy — brak zmian w logice biznesowej.
 
 Lista kontrolna kryteriów akceptacji:
 
-- [ ] `npm install` — zero błędów peerDependency
-- [ ] `npm run audit:security` — exit code 0 (brak podatności moderate+)
-- [ ] `npm run typecheck` — zero błędów TypeScript (wszystkie 8 wariantów)
-- [ ] `npm run test:unit` — wszystkie testy przechodzą
-- [ ] `npm run test:architecture` — reguły dep-cruiser spełnione
-- [ ] `npm run lint` — zero błędów ESLint
-- [ ] `npm run build` — artefakty Electron wygenerowane w `out/`
-- [ ] `electron.vite.config.ts` nie zawiera `rollupOptions` (migracja ukończona)
-- [ ] PR zawiera zaktualizowany `package-lock.json`
+- [x] `npm install` — zero błędów peerDependency
+- [x] `npm run audit:security` — exit code 0 (brak podatności moderate+)
+- [x] `npm run typecheck` — zero błędów TypeScript (wszystkie 8 wariantów)
+- [x] `npm run test:unit` — wszystkie testy przechodzą
+- [x] `npm run test:architecture` — reguły dep-cruiser spełnione
+- [x] `npm run lint` — zero błędów ESLint
+- [x] `npm run build` — artefakty Electron wygenerowane w `out/`
+- [x] `electron.vite.config.ts` nie zawiera `rollupOptions` (migracja ukończona)
+- [x] PR zawiera zaktualizowany `package-lock.json`
 
 ### Planowane quality gates z kontraktu `code-reviewing`
 
@@ -284,3 +284,4 @@ Lista kontrolna kryteriów akceptacji:
 | Data | Opis Zmiany |
 | --- | --- |
 | 2026-06-01 | Utworzono wstępny plan na podstawie PR #27 i PR #28 Dependabota |
+| 2026-06-01 | Wdrożono aktualizację: `vite@8.0.14`, `@vitejs/plugin-react@6.0.2`, `electron-vite@6.0.0-beta.1`; zmigrowano `rollupOptions`→`rolldownOptions`; utworzono branch `chore/0.1.0/PR/dependabot/27-28`; lokalne typecheck, testy i build przeszły. |
