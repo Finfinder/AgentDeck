@@ -1,10 +1,16 @@
-import { type FormEvent, useState } from 'react';
+import { useState } from 'react';
 
 import type { AgentDeckPreloadApi, SearchResult, WorkspaceModel } from '@agentdeck/shared';
 
 interface SearchPanelProps {
-  agent: AgentDeckPreloadApi;
-  workspaceModel: WorkspaceModel & { status: 'ok' };
+  readonly agent: AgentDeckPreloadApi;
+  readonly workspaceModel: WorkspaceModel & { status: 'ok' };
+}
+
+function pathBasename(p: string): string {
+  const normalized = p.replaceAll('\\', '/');
+  const idx = normalized.lastIndexOf('/');
+  return idx === -1 ? normalized : normalized.slice(idx + 1);
 }
 
 export function SearchPanel({ agent, workspaceModel }: SearchPanelProps) {
@@ -16,9 +22,8 @@ export function SearchPanel({ agent, workspaceModel }: SearchPanelProps) {
 
   const workspaceRoots = workspaceModel.folders.map(f => f.path);
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const trimmed = pattern.trim();
+  async function runSearch(pat: string): Promise<void> {
+    const trimmed = pat.trim();
     if (!trimmed) return;
 
     setIsSearching(true);
@@ -36,15 +41,9 @@ export function SearchPanel({ agent, workspaceModel }: SearchPanelProps) {
     }
   }
 
-  function pathBasename(p: string): string {
-    const normalized = p.replace(/\\/g, '/');
-    const idx = normalized.lastIndexOf('/');
-    return idx === -1 ? normalized : normalized.slice(idx + 1);
-  }
-
   return (
     <section className="search-panel" aria-label="Search">
-      <form className="search-form" onSubmit={e => { void handleSubmit(e); }} role="search">
+      <form className="search-form" onSubmit={e => { e.preventDefault(); void runSearch(pattern); }} role="search">
         <label className="search-label" htmlFor="search-input">
           Search
         </label>
@@ -71,7 +70,7 @@ export function SearchPanel({ agent, workspaceModel }: SearchPanelProps) {
       )}
 
       {!isSearching && hasSearched && !searchError && results.length === 0 && (
-        <p className="search-empty" role="status">No results found.</p>
+        <output className="search-empty">No results found.</output>
       )}
 
       {results.length > 0 && (

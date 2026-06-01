@@ -46,7 +46,7 @@ const BINARY_EXTS = new Set([
 ]);
 
 export function isSensitivePath(filePath: string): boolean {
-  const normalized = filePath.replace(/\\/g, '/');
+  const normalized = filePath.replaceAll('\\', '/');
   return SENSITIVE_PATH_PATTERNS.some(p => p.test(normalized));
 }
 
@@ -64,57 +64,64 @@ function isRecentWorkspace(value: unknown): value is RecentWorkspace {
   );
 }
 
+// Scan from the opening `"` and return the index past the closing `"`.
+function scanString(text: string, start: number): number {
+  let i = start + 1;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '\\') { i += 2; continue; }
+    if (ch === '"') return i + 1;
+    i++;
+  }
+  return i;
+}
+
+// Advance past a single-line comment; stops at the newline (does not consume it).
+function skipLineComment(text: string, start: number): number {
+  let i = start;
+  while (i < text.length && text[i] !== '\n') i++;
+  return i;
+}
+
+// Advance past a block comment, consuming the closing `*/`.
+function skipBlockComment(text: string, start: number): number {
+  let i = start + 2;
+  while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++;
+  return i + 2;
+}
+
 // Strip JSONC comments (// and /* */) and trailing commas so the result
 // is valid JSON parseable by JSON.parse.
 export function stripJsoncComments(text: string): string {
-  let result = '';
+  const chars: string[] = [];
   let i = 0;
-  let inString = false;
 
   while (i < text.length) {
     const ch = text[i];
 
-    if (inString) {
-      if (ch === '\\') {
-        result += ch + (text[i + 1] ?? '');
-        i += 2;
-        continue;
-      }
-      if (ch === '"') {
-        inString = false;
-      }
-      result += ch;
-      i++;
-      continue;
-    }
-
     if (ch === '"') {
-      inString = true;
-      result += ch;
-      i++;
+      const end = scanString(text, i);
+      chars.push(text.slice(i, end));
+      i = end;
       continue;
     }
 
-    // Single-line comment
     if (ch === '/' && text[i + 1] === '/') {
-      while (i < text.length && text[i] !== '\n') i++;
+      i = skipLineComment(text, i);
       continue;
     }
 
-    // Block comment
     if (ch === '/' && text[i + 1] === '*') {
-      i += 2;
-      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++;
-      i += 2; // consume */
+      i = skipBlockComment(text, i);
       continue;
     }
 
-    result += ch;
+    chars.push(ch ?? '');
     i++;
   }
 
   // Remove trailing commas before } or ]
-  return result.replace(/,(\s*[}\]])/g, '$1');
+  return chars.join('').replaceAll(/,(\s*[}\]])/g, '$1');
 }
 
 function isWorkspaceFolderEntry(value: unknown): value is { path: string; name?: string } {
@@ -148,9 +155,10 @@ export function parseCodeWorkspace(text: string, filePath: string): WorkspaceMod
   const folders: WorkspaceFolder[] = [];
 
   for (const entry of parsed.folders) {
-    if (!isWorkspaceFolderEntry(entry)) continue;
-    const resolved = resolve(workspaceDir, entry.path);
-    folders.push(entry.name !== undefined ? { path: resolved, name: entry.name } : { path: resolved });
+    if (isWorkspaceFolderEntry(entry)) {
+      const resolved = resolve(workspaceDir, entry.path);
+      folders.push(entry.name !== undefined ? { path: resolved, name: entry.name } : { path: resolved });
+    }
   }
 
   if (folders.length === 0) {

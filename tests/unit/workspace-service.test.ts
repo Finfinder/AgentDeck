@@ -45,7 +45,7 @@ describe('stripJsoncComments', () => {
   });
 
   it('handles escape sequences inside strings', () => {
-    const input = '{"path": "C:\\\\Users\\\\test"}';
+    const input = String.raw`{"path": "C:\\Users\\test"}`;
     expect(stripJsoncComments(input)).toBe(input);
   });
 });

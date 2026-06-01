@@ -2,23 +2,31 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { AgentDeckPreloadApi, DirectoryListing, WorkspaceModel } from '@agentdeck/shared';
 
+// Normalise path separators and remove trailing slashes without a ReDoS-prone regex.
+function normalizePathStr(p: string): string {
+  const s = p.replaceAll('\\', '/');
+  let end = s.length;
+  while (end > 1 && s[end - 1] === '/') end--;
+  return s.slice(0, end);
+}
+
 // Resolve the parent path without node:path — works for both '/' and '\' separators.
 function parentPath(p: string): string {
-  const normalized = p.replace(/\\/g, '/').replace(/\/+$/, '');
+  const normalized = normalizePathStr(p);
   const idx = normalized.lastIndexOf('/');
   return idx <= 0 ? normalized : normalized.slice(0, idx);
 }
 
 // Returns the last segment of a path for breadcrumb display.
 function pathBasename(p: string): string {
-  const normalized = p.replace(/\\/g, '/').replace(/\/+$/, '');
+  const normalized = normalizePathStr(p);
   const idx = normalized.lastIndexOf('/');
   return idx === -1 ? normalized : normalized.slice(idx + 1);
 }
 
 interface ExplorerProps {
-  agent: AgentDeckPreloadApi;
-  workspaceModel: WorkspaceModel & { status: 'ok' };
+  readonly agent: AgentDeckPreloadApi;
+  readonly workspaceModel: WorkspaceModel & { status: 'ok' };
 }
 
 export function Explorer({ agent, workspaceModel }: ExplorerProps) {
@@ -56,9 +64,13 @@ export function Explorer({ agent, workspaceModel }: ExplorerProps) {
 
   const canNavigateUp = currentPath !== rootPath && parentPath(currentPath) !== currentPath;
 
-  const breadcrumbName = currentPath === rootPath
-    ? (workspaceModel.folders[0] ? (workspaceModel.folders[0].name ?? pathBasename(rootPath)) : '/')
-    : pathBasename(currentPath);
+  let breadcrumbName: string;
+  if (currentPath === rootPath) {
+    const first = workspaceModel.folders[0];
+    breadcrumbName = first !== undefined ? (first.name ?? pathBasename(rootPath)) : '/';
+  } else {
+    breadcrumbName = pathBasename(currentPath);
+  }
 
   return (
     <section className="explorer-panel" aria-label="Explorer">
@@ -76,15 +88,16 @@ export function Explorer({ agent, workspaceModel }: ExplorerProps) {
         <span className="explorer-breadcrumb-name" title={currentPath}>{breadcrumbName}</span>
       </div>
 
-      {isLoading && <p className="explorer-loading" role="status">Loading…</p>}
+      {isLoading && <output className="explorer-loading">Loading…</output>}
 
       {!isLoading && (
-        <ul className="file-tree" role="tree" aria-label={`Contents of ${breadcrumbName}`}>
+        <div className="file-tree" role="tree" aria-label={`Contents of ${breadcrumbName}`}>
           {listing?.entries.map(entry => (
-            <li
+            <div
               key={entry.path}
               className={`file-tree-item${entry.isSensitive ? ' sensitive' : ''}`}
               role="treeitem"
+              aria-selected={false}
               aria-expanded={entry.kind === 'directory' ? false : undefined}
             >
               {entry.kind === 'directory' ? (
@@ -102,14 +115,14 @@ export function Explorer({ agent, workspaceModel }: ExplorerProps) {
                   <span className="file-tree-name">{entry.name}</span>
                 </span>
               )}
-            </li>
+            </div>
           ))}
           {listing?.entries.length === 0 && (
-            <li className="file-tree-empty" role="treeitem">
+            <div className="file-tree-empty" role="treeitem" aria-selected={false}>
               <span>Empty directory</span>
-            </li>
+            </div>
           )}
-        </ul>
+        </div>
       )}
     </section>
   );
