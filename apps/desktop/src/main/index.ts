@@ -85,7 +85,7 @@ function createMainWindow(): BrowserWindow {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: join(currentDir, '../../../out/preload/index.mjs'),
+      preload: join(currentDir, '../../../../out/preload/index.mjs'),
       sandbox: false
     }
   });
@@ -96,7 +96,7 @@ function createMainWindow(): BrowserWindow {
   if (rendererUrl) {
     void mainWindow.loadURL(rendererUrl);
   } else {
-    void mainWindow.loadFile(join(currentDir, '../renderer/index.html'));
+    void mainWindow.loadFile(join(currentDir, '../../../out/renderer/index.html'));
   }
 
   return mainWindow;
@@ -105,6 +105,17 @@ function createMainWindow(): BrowserWindow {
 async function selectWorkspaceEntry(value: unknown, mainWindow: BrowserWindow): Promise<WorkspaceSelection> {
   if (!isWorkspaceOpenRequest(value)) {
     return { status: 'cancelled' };
+  }
+
+  // In test mode, return a mock path instead of showing dialog
+  if (process.env.NODE_ENV === 'test') {
+    const testWorkspacePath = process.env.TEST_WORKSPACE_PATH || 'C:\\test';
+    return {
+      status: 'selected',
+      kind: value.kind,
+      path: value.kind === 'workspace-file' ? testWorkspacePath + '\\test.code-workspace' : testWorkspacePath,
+      name: value.kind === 'workspace-file' ? 'test.code-workspace' : 'test-folder',
+    };
   }
 
   // Ensure the window is visible before showing the dialog
