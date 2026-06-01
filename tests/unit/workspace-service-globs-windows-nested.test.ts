@@ -21,7 +21,7 @@ describe('WorkspaceService Windows path quirks and nested excludes', () => {
     await writeFile(file, 'win content', 'utf8');
 
     const svc = createWorkspaceService(base);
-    const r1 = await svc.searchFiles({ pattern: 'win', include: 'SubDir\\WiN.TXT', workspaceRoots: [base] });
+      const r1 = await svc.searchFiles({ pattern: 'win', include: String.raw`SubDir\WiN.TXT`, workspaceRoots: [base] });
     const r2 = await svc.searchFiles({ pattern: 'win', include: 'subdir/win.txt', workspaceRoots: [base] });
 
     expect(r1.some(x => x.file.endsWith('WiN.TXT'))).toBe(true);

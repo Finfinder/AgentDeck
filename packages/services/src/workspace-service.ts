@@ -24,10 +24,10 @@ const SENSITIVE_PATH_PATTERNS: RegExp[] = [
   /\.storage_state\.json$/i,
   /credentials?(\.|$)/i,
   /\.(npmrc|yarnrc)$/i,
-  /[/\\]\.ssh[/\\]/i,
+  /[\/\\]\.ssh[\/\\]/i,
   /keystore/i,
-  /[/\\]\.aws[/\\]/i,
-  /[/\\]\.azure[/\\]/i,
+  /[\/\\]\.aws[\/\\]/i,
+  /[\/\\]\.azure[\/\\]/i,
   /id_rsa/i,
   /id_ed25519/i
 ];
@@ -46,13 +46,13 @@ const BINARY_EXTS = new Set([
 ]);
 
 export function isSensitivePath(filePath: string): boolean {
-  const normalized = filePath.replaceAll('\\', '/');
+  const normalized = filePath.replaceAll(/\\/g, '/');
   return SENSITIVE_PATH_PATTERNS.some(p => p.test(normalized));
 }
 
 // Convert a single glob pattern to a regular expression string.
 function globToRegex(pattern: string): string {
-  let p = pattern.replaceAll('\\', '/');
+  let p = pattern.replaceAll(/\\/g, '/');
   if (p.startsWith('./')) p = p.slice(2);
   if (p.startsWith('/')) p = p.slice(1);
 
@@ -101,7 +101,7 @@ function scanString(text: string, start: number): number {
   let i = start + 1;
   while (i < text.length) {
     const ch = text[i];
-    if (ch === '\\') { i += 2; continue; }
+    if (ch === String.fromCharCode(92)) { i += 2; continue; }
     if (ch === '"') return i + 1;
     i++;
   }
@@ -266,15 +266,14 @@ export class WorkspaceService extends EventEmitter {
   async searchFiles(query: SearchQuery): Promise<readonly SearchResult[]> {
     const results: SearchResult[] = [];
     const pattern = query.pattern.toLowerCase();
-    const MAX_RESULTS = 50;
-    const MAX_FILE_SIZE = 512 * 1024;
 
+    const limits = { maxResults: 50, maxFileSize: 512 * 1024 };
     const includeRegs = compileGlobPatterns(query.include);
     const excludeRegs = compileGlobPatterns(query.exclude);
 
     for (const root of query.workspaceRoots) {
-      if (results.length >= MAX_RESULTS) break;
-      await this.searchInDir(root, pattern, results, MAX_RESULTS, MAX_FILE_SIZE, includeRegs, excludeRegs, root);
+      if (results.length >= limits.maxResults) break;
+      await this.searchInDir(root, pattern, results, limits, includeRegs, excludeRegs, root);
     }
 
     return results;
@@ -289,6 +288,18 @@ export class WorkspaceService extends EventEmitter {
     } catch {
       return [];
     }
+  }
+
+  private normalizeRelPath(root: string, fullPath: string): string {
+    return relative(root, fullPath).replaceAll(/\\/g, '/');
+  }
+
+  private isPathExcluded(relPath: string, excludeRegs: RegExp[]): boolean {
+    return excludeRegs.length > 0 && excludeRegs.some(r => r.test(relPath));
+  }
+
+  private matchesInclude(relFile: string, includeRegs: RegExp[]): boolean {
+    return includeRegs.length === 0 || includeRegs.some(r => r.test(relFile));
   }
 
   private async saveRecentWorkspace(entry: RecentWorkspace): Promise<void> {
@@ -330,20 +341,18 @@ export class WorkspaceService extends EventEmitter {
     dir: string,
     pattern: string,
     results: SearchResult[],
-    maxResults: number,
-    maxFileSize: number
-    ,
+    limits: { maxResults: number; maxFileSize: number },
     includeRegs: RegExp[],
     excludeRegs: RegExp[],
     root: string
   ): Promise<void> {
-    if (results.length >= maxResults) return;
+    if (results.length >= limits.maxResults) return;
 
     const dirents = await readdir(dir, { withFileTypes: true }).catch(() => null);
     if (!dirents) return;
 
     for (const dirent of dirents) {
-      if (results.length >= maxResults) break;
+      if (results.length >= limits.maxResults) break;
       const name = String(dirent.name);
       const fullPath = join(dir, name);
 
@@ -351,20 +360,20 @@ export class WorkspaceService extends EventEmitter {
         if (SKIP_DIRS.has(name)) continue;
 
         // Skip directories matched by exclude globs (relative to workspace root)
-        const relDir = relative(root, fullPath).replaceAll('\\', '/');
-        if (excludeRegs.length && excludeRegs.some(r => r.test(relDir))) continue;
+        const relDir = this.normalizeRelPath(root, fullPath);
+        if (this.isPathExcluded(relDir, excludeRegs)) continue;
 
-        await this.searchInDir(fullPath, pattern, results, maxResults, maxFileSize, includeRegs, excludeRegs, root);
+        await this.searchInDir(fullPath, pattern, results, limits, includeRegs, excludeRegs, root);
       } else if (dirent.isFile()) {
-        const relFile = relative(root, fullPath).replaceAll('\\', '/');
+        const relFile = this.normalizeRelPath(root, fullPath);
 
         // Exclude files matched by exclude patterns
-        if (excludeRegs.length && excludeRegs.some(r => r.test(relFile))) continue;
+        if (this.isPathExcluded(relFile, excludeRegs)) continue;
 
         // If include patterns exist, require at least one to match the relative path
-        if (includeRegs.length && !includeRegs.some(r => r.test(relFile))) continue;
+        if (!this.matchesInclude(relFile, includeRegs)) continue;
 
-        await this.searchInFile(fullPath, pattern, results, maxResults, maxFileSize);
+        await this.searchInFile(fullPath, pattern, results, limits);
       }
     }
   }
@@ -373,21 +382,20 @@ export class WorkspaceService extends EventEmitter {
     filePath: string,
     pattern: string,
     results: SearchResult[],
-    maxResults: number,
-    maxFileSize: number
+    limits: { maxResults: number; maxFileSize: number }
   ): Promise<void> {
     if (BINARY_EXTS.has(extname(filePath).toLowerCase())) return;
 
     try {
       const fileStat = await stat(filePath);
-      if (fileStat.size > maxFileSize) return;
+      if (fileStat.size > limits.maxFileSize) return;
 
       const text = await readFile(filePath, 'utf8');
       const sensitive = isSensitivePath(filePath);
       const lines = text.split('\n');
 
       for (let idx = 0; idx < lines.length; idx++) {
-        if (results.length >= maxResults) break;
+        if (results.length >= limits.maxResults) break;
         const line = lines[idx] ?? '';
         const col = line.toLowerCase().indexOf(pattern);
         if (col === -1) continue;
