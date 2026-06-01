@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { pathBasename, normalizePathStr } from '@agentdeck/shared';
 import type { AgentDeckPreloadApi, DirectoryListing, WorkspaceModel } from '@agentdeck/shared';
 
-// Resolve the parent path without node:path — works for both '/' and '\\' separators.
+// Resolve the parent path without node:path - works for both '/' and '\\' separators.
 function parentPath(p: string): string {
   const normalized = normalizePathStr(p);
   const idx = normalized.lastIndexOf('/');
@@ -16,7 +16,9 @@ interface ExplorerProps {
 }
 
 export function Explorer({ agent, workspaceModel }: ExplorerProps) {
-  const rootPath = workspaceModel.folders[0]?.path ?? '';
+  const roots = workspaceModel.folders;
+  const [selectedRootIndex, setSelectedRootIndex] = useState(0);
+  const rootPath = roots[selectedRootIndex]?.path ?? '';
   const [currentPath, setCurrentPath] = useState(rootPath);
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -48,12 +50,17 @@ export function Explorer({ agent, workspaceModel }: ExplorerProps) {
     };
   }, [agent, currentPath, loadDir]);
 
+  // When the selected root changes, reset currentPath to the new root
+  useEffect(() => {
+    setCurrentPath(rootPath);
+  }, [rootPath]);
+
   const canNavigateUp = currentPath !== rootPath && parentPath(currentPath) !== currentPath;
 
   let breadcrumbName: string;
   if (currentPath === rootPath) {
-    const first = workspaceModel.folders[0];
-    breadcrumbName = first === undefined ? '/' : (first.name ?? pathBasename(rootPath));
+    const selected = roots[selectedRootIndex];
+    breadcrumbName = selected === undefined ? '/' : (selected.name ?? pathBasename(rootPath));
   } else {
     breadcrumbName = pathBasename(currentPath);
   }
@@ -61,6 +68,18 @@ export function Explorer({ agent, workspaceModel }: ExplorerProps) {
   return (
     <section className="explorer-panel" aria-label="Explorer">
       <div className="explorer-breadcrumb">
+          {roots.length > 1 && (
+            <select
+              aria-label="Workspace root"
+              className="explorer-root-select"
+              value={selectedRootIndex}
+              onChange={e => { setSelectedRootIndex(Number(e.target.value)); }}
+            >
+              {roots.map((r, idx) => (
+                <option key={r.path} value={idx} title={r.path}>{r.name ?? pathBasename(r.path)}</option>
+              ))}
+            </select>
+          )}
         {canNavigateUp && (
           <button
             className="explorer-breadcrumb-up"
@@ -74,7 +93,7 @@ export function Explorer({ agent, workspaceModel }: ExplorerProps) {
         <span className="explorer-breadcrumb-name" title={currentPath}>{breadcrumbName}</span>
       </div>
 
-      {isLoading && <output className="explorer-loading">Loading…</output>}
+      {isLoading && <output className="explorer-loading">Loading.</output>}
 
       {!isLoading && (
         <div className="file-tree" role="tree" aria-label={`Contents of ${breadcrumbName}`}>

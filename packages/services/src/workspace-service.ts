@@ -16,7 +16,7 @@ import type {
 } from '@agentdeck/shared';
 
 // Patterns indicating a file path may contain secrets or credentials.
-// Used to mark entries for the Permission Broker — not to block access.
+// Used to mark entries for the Permission Broker - not to block access.
 const SENSITIVE_PATH_PATTERNS: RegExp[] = [
   /\.env($|\.)/i,
   /\.(key|pem|crt|cer|p12|pfx|jks)$/i,
@@ -35,7 +35,7 @@ const SENSITIVE_PATH_PATTERNS: RegExp[] = [
 // Directories skipped during directory listing and search to avoid noise.
 const SKIP_DIRS = new Set(['.git', 'node_modules', '__pycache__', '.venv', 'venv', '.tox', 'dist', 'build', 'out', '.next', '.nuxt', 'coverage', '.nyc_output']);
 
-// Binary file extensions — skip when searching text.
+// Binary file extensions - skip when searching text.
 const BINARY_EXTS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.svg',
   '.woff', '.woff2', '.ttf', '.eot', '.otf',
@@ -57,9 +57,9 @@ function globToRegex(pattern: string): string {
   if (p.startsWith('/')) p = p.slice(1);
 
   // Use placeholders for wildcards so we can escape other regex chars safely.
-  const DSTAR = '\u0000';
-  const STAR = '\u0001';
-  const QMARK = '\u0002';
+  const DSTAR = '___DSTAR___';
+  const STAR = '___STAR___';
+  const QMARK = '___QMARK___';
 
   p = p.replaceAll('**', DSTAR);
   p = p.replaceAll('*', STAR);
@@ -310,7 +310,7 @@ export class WorkspaceService extends EventEmitter {
       await mkdir(dirname(this.recentFilePath), { recursive: true });
       await writeFile(this.recentFilePath, `${JSON.stringify(updated, null, 2)}\n`, 'utf8');
     } catch {
-      // Best-effort — do not crash when saving recents fails
+      // Best-effort - do not crash when saving recents fails
     }
   }
 
@@ -325,7 +325,7 @@ export class WorkspaceService extends EventEmitter {
         });
         this.activeWatchers.push(watcher);
       } catch {
-        // Permission or path errors are non-fatal — watcher is optional
+        // Permission or path errors are non-fatal - watcher is optional
       }
     }
   }

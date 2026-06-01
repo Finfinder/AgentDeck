@@ -4,7 +4,7 @@ import { promises as fsPromises } from 'node:fs';
 export type ThemePreference = 'light' | 'dark';
 export type ThemeSettings = Readonly<{ theme: ThemePreference }>;
 
-export const DEFAULT_THEME_SETTINGS: ThemeSettings = { theme: 'light' };
+export const DEFAULT_THEME_SETTINGS: ThemeSettings = { theme: 'dark' };
 
 export async function readThemeSettings(filePath?: string): Promise<ThemeSettings> {
   if (!filePath) {

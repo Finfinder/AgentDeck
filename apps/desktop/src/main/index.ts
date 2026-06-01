@@ -28,7 +28,7 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
   ipcMain.handle(IPC_CHANNELS.setThemeSettings, (_event, value: unknown) => {
     return isThemeSettings(value) ? settingsService.writeThemeSettings(value) : DEFAULT_THEME_SETTINGS;
   });
-  ipcMain.handle(IPC_CHANNELS.selectWorkspaceEntry, (_event, value: unknown) => selectWorkspaceEntry(value));
+  ipcMain.handle(IPC_CHANNELS.selectWorkspaceEntry, (_event, value: unknown) => selectWorkspaceEntry(value, mainWindow));
 
   ipcMain.handle(IPC_CHANNELS.openWorkspace, (_event, path: unknown, kind: unknown) => {
     if (typeof path !== 'string' || (kind !== 'folder' && kind !== 'workspace-file')) {
@@ -102,19 +102,27 @@ function createMainWindow(): BrowserWindow {
   return mainWindow;
 }
 
-async function selectWorkspaceEntry(value: unknown): Promise<WorkspaceSelection> {
+async function selectWorkspaceEntry(value: unknown, mainWindow: BrowserWindow): Promise<WorkspaceSelection> {
   if (!isWorkspaceOpenRequest(value)) {
     return { status: 'cancelled' };
   }
 
-  const result = await dialog.showOpenDialog(
-    value.kind === 'folder'
-      ? { properties: ['openDirectory'] }
-      : {
-          filters: [{ name: 'VS Code Workspace', extensions: ['code-workspace'] }],
-          properties: ['openFile']
-        }
-  );
+  // Ensure the window is visible before showing the dialog
+  if (!mainWindow.isVisible()) {
+    mainWindow.show();
+  }
+  mainWindow.focus();
+
+  const dialogOptions = value.kind === 'folder'
+    ? { properties: ['openDirectory' as const] }
+    : {
+        filters: [{ name: 'VS Code Workspace', extensions: ['code-workspace'] }],
+        properties: ['openFile' as const]
+      };
+
+  // Use the focused window or fall back to mainWindow
+  const focusedWindow = BrowserWindow.getFocusedWindow() ?? mainWindow;
+  const result = await dialog.showOpenDialog(focusedWindow, dialogOptions);
 
   if (result.canceled) {
     return { status: 'cancelled' };
@@ -148,7 +156,10 @@ async function startSafely(): Promise<void> {
   } catch (error) {
     console.error('[main] Failed to start AgentDeck:', error);
     startupState = createStartupErrorState(app.getVersion());
-    createMainWindow();
+    const settingsService = createSettingsService(app.getPath('userData'));
+    const workspaceService = createWorkspaceService(app.getPath('userData'));
+    const mainWindow = createMainWindow();
+    registerIpcHandlers(settingsService, workspaceService, mainWindow);
   }
 }
 

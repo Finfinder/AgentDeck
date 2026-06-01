@@ -50,13 +50,13 @@ export function SearchPanel({ agent, workspaceModel }: SearchPanelProps) {
             type="search"
             value={pattern}
             onChange={e => { setPattern(e.target.value); }}
-            placeholder="Search files…"
+            placeholder="Search files."
             aria-label="Search pattern"
             disabled={isSearching}
             autoComplete="off"
           />
           <button type="submit" disabled={isSearching || pattern.trim() === ''} aria-label="Run search">
-            {isSearching ? 'Searching…' : 'Search'}
+            {isSearching ? 'Searching.' : 'Search'}
           </button>
         </div>
       </form>
