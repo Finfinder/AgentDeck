@@ -24,10 +24,10 @@ const SENSITIVE_PATH_PATTERNS: RegExp[] = [
   /\.storage_state\.json$/i,
   /credentials?(\.|$)/i,
   /\.(npmrc|yarnrc)$/i,
-  /[\/\\]\.ssh[\/\\]/i,
+  /[/\\]\.ssh[/\\]/i,
   /keystore/i,
-  /[\/\\]\.aws[\/\\]/i,
-  /[\/\\]\.azure[\/\\]/i,
+  /[/\\]\.aws[/\\]/i,
+  /[/\\]\.azure[/\\]/i,
   /id_rsa/i,
   /id_ed25519/i
 ];
@@ -46,13 +46,13 @@ const BINARY_EXTS = new Set([
 ]);
 
 export function isSensitivePath(filePath: string): boolean {
-  const normalized = filePath.replaceAll(/\\/g, '/');
+  const normalized = filePath.replaceAll('\\', '/');
   return SENSITIVE_PATH_PATTERNS.some(p => p.test(normalized));
 }
 
 // Convert a single glob pattern to a regular expression string.
 function globToRegex(pattern: string): string {
-  let p = pattern.replaceAll(/\\/g, '/');
+  let p = pattern.replaceAll('\\', '/');
   if (p.startsWith('./')) p = p.slice(2);
   if (p.startsWith('/')) p = p.slice(1);
 
@@ -101,7 +101,7 @@ function scanString(text: string, start: number): number {
   let i = start + 1;
   while (i < text.length) {
     const ch = text[i];
-    if (ch === String.fromCharCode(92)) { i += 2; continue; }
+    if (ch === '\\') { i += 2; continue; }
     if (ch === '"') return i + 1;
     i++;
   }
@@ -291,11 +291,11 @@ export class WorkspaceService extends EventEmitter {
   }
 
   private normalizeRelPath(root: string, fullPath: string): string {
-    return relative(root, fullPath).replaceAll(/\\/g, '/');
+    return relative(root, fullPath).replaceAll('\\', '/');
   }
 
   private isPathExcluded(relPath: string, excludeRegs: RegExp[]): boolean {
-    return excludeRegs.length > 0 && excludeRegs.some(r => r.test(relPath));
+    return excludeRegs.some(r => r.test(relPath));
   }
 
   private matchesInclude(relFile: string, includeRegs: RegExp[]): boolean {
@@ -353,29 +353,63 @@ export class WorkspaceService extends EventEmitter {
 
     for (const dirent of dirents) {
       if (results.length >= limits.maxResults) break;
-      const name = String(dirent.name);
-      const fullPath = join(dir, name);
-
-      if (dirent.isDirectory()) {
-        if (SKIP_DIRS.has(name)) continue;
-
-        // Skip directories matched by exclude globs (relative to workspace root)
-        const relDir = this.normalizeRelPath(root, fullPath);
-        if (this.isPathExcluded(relDir, excludeRegs)) continue;
-
-        await this.searchInDir(fullPath, pattern, results, limits, includeRegs, excludeRegs, root);
-      } else if (dirent.isFile()) {
-        const relFile = this.normalizeRelPath(root, fullPath);
-
-        // Exclude files matched by exclude patterns
-        if (this.isPathExcluded(relFile, excludeRegs)) continue;
-
-        // If include patterns exist, require at least one to match the relative path
-        if (!this.matchesInclude(relFile, includeRegs)) continue;
-
-        await this.searchInFile(fullPath, pattern, results, limits);
-      }
+      await this.processDirent(dirent, dir, pattern, results, limits, includeRegs, excludeRegs, root);
     }
+  }
+
+  private async processDirent(
+    dirent: { name: string | Buffer; isDirectory(): boolean; isFile(): boolean },
+    dir: string,
+    pattern: string,
+    results: SearchResult[],
+    limits: { maxResults: number; maxFileSize: number },
+    includeRegs: RegExp[],
+    excludeRegs: RegExp[],
+    root: string
+  ): Promise<void> {
+    const name = String(dirent.name);
+    const fullPath = join(dir, name);
+
+    if (dirent.isDirectory()) {
+      await this.handleDirectory(name, fullPath, pattern, results, limits, includeRegs, excludeRegs, root);
+    } else if (dirent.isFile()) {
+      await this.handleFile(fullPath, pattern, results, limits, includeRegs, excludeRegs, root);
+    }
+  }
+
+  private async handleDirectory(
+    name: string,
+    fullPath: string,
+    pattern: string,
+    results: SearchResult[],
+    limits: { maxResults: number; maxFileSize: number },
+    includeRegs: RegExp[],
+    excludeRegs: RegExp[],
+    root: string
+  ): Promise<void> {
+    if (SKIP_DIRS.has(name)) return;
+
+    const relDir = this.normalizeRelPath(root, fullPath);
+    if (this.isPathExcluded(relDir, excludeRegs)) return;
+
+    await this.searchInDir(fullPath, pattern, results, limits, includeRegs, excludeRegs, root);
+  }
+
+  private async handleFile(
+    fullPath: string,
+    pattern: string,
+    results: SearchResult[],
+    limits: { maxResults: number; maxFileSize: number },
+    includeRegs: RegExp[],
+    excludeRegs: RegExp[],
+    root: string
+  ): Promise<void> {
+    const relFile = this.normalizeRelPath(root, fullPath);
+
+    if (this.isPathExcluded(relFile, excludeRegs)) return;
+    if (!this.matchesInclude(relFile, includeRegs)) return;
+
+    await this.searchInFile(fullPath, pattern, results, limits);
   }
 
   private async searchInFile(
