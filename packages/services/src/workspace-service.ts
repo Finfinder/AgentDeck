@@ -157,7 +157,7 @@ export function parseCodeWorkspace(text: string, filePath: string): WorkspaceMod
   for (const entry of parsed.folders) {
     if (isWorkspaceFolderEntry(entry)) {
       const resolved = resolve(workspaceDir, entry.path);
-      folders.push(entry.name !== undefined ? { path: resolved, name: entry.name } : { path: resolved });
+      folders.push(entry.name === undefined ? { path: resolved } : { path: resolved, name: entry.name });
     }
   }
 

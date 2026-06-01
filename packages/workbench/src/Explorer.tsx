@@ -67,7 +67,7 @@ export function Explorer({ agent, workspaceModel }: ExplorerProps) {
   let breadcrumbName: string;
   if (currentPath === rootPath) {
     const first = workspaceModel.folders[0];
-    breadcrumbName = first !== undefined ? (first.name ?? pathBasename(rootPath)) : '/';
+    breadcrumbName = first === undefined ? '/' : (first.name ?? pathBasename(rootPath));
   } else {
     breadcrumbName = pathBasename(currentPath);
   }
