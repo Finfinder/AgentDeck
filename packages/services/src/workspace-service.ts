@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { watch, type FSWatcher } from 'node:fs';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, extname, join, resolve } from 'node:path';
+import { basename, dirname, extname, join, resolve, relative } from 'node:path';
 
 import type {
   DirectoryListing,
@@ -48,6 +48,38 @@ const BINARY_EXTS = new Set([
 export function isSensitivePath(filePath: string): boolean {
   const normalized = filePath.replaceAll('\\', '/');
   return SENSITIVE_PATH_PATTERNS.some(p => p.test(normalized));
+}
+
+// Convert a single glob pattern to a regular expression string.
+function globToRegex(pattern: string): string {
+  let p = pattern.replaceAll('\\', '/');
+  if (p.startsWith('./')) p = p.slice(2);
+  if (p.startsWith('/')) p = p.slice(1);
+
+  // Use placeholders for wildcards so we can escape other regex chars safely.
+  const DSTAR = '\u0000';
+  const STAR = '\u0001';
+  const QMARK = '\u0002';
+
+  p = p.replaceAll('**', DSTAR);
+  p = p.replaceAll('*', STAR);
+  p = p.replaceAll('?', QMARK);
+
+  // Escape remaining regex-special characters.
+  p = p.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+
+  // Replace placeholders with regex equivalents.
+  p = p.replaceAll(DSTAR, '.*'); // matches across path separators
+  p = p.replaceAll(STAR, '[^/]*'); // matches within a path segment
+  p = p.replaceAll(QMARK, '.');
+
+  return p;
+}
+
+function compileGlobPatterns(spec?: string): RegExp[] {
+  if (!spec) return [];
+  const parts = spec.split(',').map(s => s.trim()).filter(Boolean);
+  return parts.map(p => new RegExp('^' + globToRegex(p) + '$', 'i'));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -237,9 +269,12 @@ export class WorkspaceService extends EventEmitter {
     const MAX_RESULTS = 50;
     const MAX_FILE_SIZE = 512 * 1024;
 
+    const includeRegs = compileGlobPatterns(query.include);
+    const excludeRegs = compileGlobPatterns(query.exclude);
+
     for (const root of query.workspaceRoots) {
       if (results.length >= MAX_RESULTS) break;
-      await this.searchInDir(root, pattern, results, MAX_RESULTS, MAX_FILE_SIZE);
+      await this.searchInDir(root, pattern, results, MAX_RESULTS, MAX_FILE_SIZE, includeRegs, excludeRegs, root);
     }
 
     return results;
@@ -297,6 +332,10 @@ export class WorkspaceService extends EventEmitter {
     results: SearchResult[],
     maxResults: number,
     maxFileSize: number
+    ,
+    includeRegs: RegExp[],
+    excludeRegs: RegExp[],
+    root: string
   ): Promise<void> {
     if (results.length >= maxResults) return;
 
@@ -310,8 +349,21 @@ export class WorkspaceService extends EventEmitter {
 
       if (dirent.isDirectory()) {
         if (SKIP_DIRS.has(name)) continue;
-        await this.searchInDir(fullPath, pattern, results, maxResults, maxFileSize);
+
+        // Skip directories matched by exclude globs (relative to workspace root)
+        const relDir = relative(root, fullPath).replaceAll('\\', '/');
+        if (excludeRegs.length && excludeRegs.some(r => r.test(relDir))) continue;
+
+        await this.searchInDir(fullPath, pattern, results, maxResults, maxFileSize, includeRegs, excludeRegs, root);
       } else if (dirent.isFile()) {
+        const relFile = relative(root, fullPath).replaceAll('\\', '/');
+
+        // Exclude files matched by exclude patterns
+        if (excludeRegs.length && excludeRegs.some(r => r.test(relFile))) continue;
+
+        // If include patterns exist, require at least one to match the relative path
+        if (includeRegs.length && !includeRegs.some(r => r.test(relFile))) continue;
+
         await this.searchInFile(fullPath, pattern, results, maxResults, maxFileSize);
       }
     }
