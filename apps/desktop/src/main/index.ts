@@ -86,7 +86,7 @@ function createMainWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       preload: join(currentDir, '../preload/index.mjs'),
-      sandbox: true
+      sandbox: false
     }
   });
 
@@ -120,9 +120,7 @@ async function selectWorkspaceEntry(value: unknown, mainWindow: BrowserWindow): 
         properties: ['openFile' as const]
       };
 
-  // Use the focused window or fall back to mainWindow
-  const focusedWindow = BrowserWindow.getFocusedWindow() ?? mainWindow;
-  const result = await dialog.showOpenDialog(focusedWindow, dialogOptions);
+  const result = await dialog.showOpenDialog(mainWindow, dialogOptions);
 
   if (result.canceled) {
     return { status: 'cancelled' };
