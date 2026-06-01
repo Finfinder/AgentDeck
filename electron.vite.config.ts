@@ -17,7 +17,7 @@ export default defineConfig({
     resolve: { alias },
     build: {
       externalizeDeps: true,
-      rollupOptions: {
+      rolldownOptions: {
         input: resolve(rootDir, 'apps/desktop/src/main/index.ts')
       }
     }
@@ -26,7 +26,7 @@ export default defineConfig({
     resolve: { alias },
     build: {
       externalizeDeps: true,
-      rollupOptions: {
+      rolldownOptions: {
         input: resolve(rootDir, 'apps/desktop/src/preload/index.ts')
       }
     }
@@ -38,7 +38,7 @@ export default defineConfig({
     build: {
       emptyOutDir: true,
       outDir: resolve(rootDir, 'out/renderer'),
-      rollupOptions: {
+      rolldownOptions: {
         input: resolve(rootDir, 'packages/workbench/index.html')
       }
     }
