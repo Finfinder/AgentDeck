@@ -6,8 +6,7 @@ import {
   isStartupState,
   isWorkspaceModel,
   isDirectoryListing,
-  isFsChangeEvent,
-  DEFAULT_THEME_SETTINGS
+  isFsChangeEvent
 } from '@agentdeck/shared';
 
 describe('packages/shared ipc type guards', () => {
@@ -15,14 +14,14 @@ describe('packages/shared ipc type guards', () => {
     expect(isThemeSettings({ theme: 'dark' })).toBe(true);
     expect(isThemeSettings({ theme: 'light' })).toBe(true);
     expect(isThemeSettings({})).toBe(false);
-    expect(isThemeSettings({ theme: 'unknown' } as any)).toBe(false);
+    expect(isThemeSettings({ theme: 'unknown' } as unknown as { theme: string })).toBe(false);
   });
 
   it('validates workspace open request', () => {
     expect(isWorkspaceOpenRequest({ kind: 'folder' })).toBe(true);
     expect(isWorkspaceOpenRequest({ kind: 'workspace-file' })).toBe(true);
     expect(isWorkspaceOpenRequest({})).toBe(false);
-    expect(isWorkspaceOpenRequest({ kind: 'file' } as any)).toBe(false);
+    expect(isWorkspaceOpenRequest({ kind: 'file' } as unknown as { kind: string })).toBe(false);
   });
 
   it('validates workspace selection', () => {
@@ -39,7 +38,7 @@ describe('packages/shared ipc type guards', () => {
 
     // invalid: missing name
     expect(
-      isWorkspaceSelection({ status: 'selected', kind: 'folder', path: '/x' } as any)
+      isWorkspaceSelection({ status: 'selected', kind: 'folder', path: '/x' } as unknown as { status: string; kind: string; path: string; name?: string })
     ).toBe(false);
   });
 
@@ -62,7 +61,7 @@ describe('packages/shared ipc type guards', () => {
     expect(isStartupState(err)).toBe(true);
 
     // invalid: missing appVersion
-    expect(isStartupState({ status: 'ready', services: [] } as any)).toBe(false);
+    expect(isStartupState({ status: 'ready', services: [] } as unknown as { status: string; appVersion?: string; services?: unknown[] })).toBe(false);
   });
 
   it('validates workspace model', () => {
@@ -83,7 +82,7 @@ describe('packages/shared ipc type guards', () => {
 
     // invalid: folders not an array
     expect(
-      isWorkspaceModel({ status: 'ok', filePath: '/x', kind: 'folder', folders: {} } as any)
+      isWorkspaceModel({ status: 'ok', filePath: '/x', kind: 'folder', folders: {} } as unknown as { status: string; filePath: string; kind: string; folders: unknown })
     ).toBe(false);
   });
 
@@ -98,7 +97,7 @@ describe('packages/shared ipc type guards', () => {
 
     // invalid entry
     expect(
-      isDirectoryListing({ path: '/root', entries: [{ name: 'x' }] } as any)
+      isDirectoryListing({ path: '/root', entries: [{ name: 'x' }] } as unknown as { path: string; entries: unknown[] })
     ).toBe(false);
   });
 
@@ -107,6 +106,6 @@ describe('packages/shared ipc type guards', () => {
     expect(isFsChangeEvent({ kind: 'change', path: '/a' })).toBe(true);
     expect(isFsChangeEvent({ kind: 'unlink', path: '/a' })).toBe(true);
     expect(isFsChangeEvent({ kind: 'addDir', path: '/a' })).toBe(true);
-    expect(isFsChangeEvent({ kind: 'unknown', path: '/a' } as any)).toBe(false);
+    expect(isFsChangeEvent({ kind: 'unknown', path: '/a' } as unknown as { kind: string; path: string })).toBe(false);
   });
 });
