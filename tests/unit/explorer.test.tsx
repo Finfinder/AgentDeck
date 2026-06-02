@@ -251,7 +251,7 @@ describe('Explorer', () => {
     expect(onFsEvent).toHaveBeenCalled();
 
     // Verify the handler is a function
-    const handler = onFsEvent.mock.calls[0][0];
+    const handler = onFsEvent.mock.calls[0]?.[0];
     expect(typeof handler).toBe('function');
   });
 
