@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { bootstrapDesktopServices, createSettingsService, createStartupErrorState, createWorkspaceService, type SettingsService, type WorkspaceService } from '@agentdeck/services';
@@ -13,7 +13,19 @@ import {
   type WorkspaceSelection
 } from '@agentdeck/shared';
 
-const currentDir = dirname(fileURLToPath(import.meta.url));
+import { existsSync } from 'node:fs';
+
+function findProjectRoot(startDir: string): string {
+  let dir = startDir;
+  for (let i = 0; i < 10; i++) {
+    if (existsSync(join(dir, 'package.json'))) return dir;
+    const parent = resolve(dir, '..');
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return startDir;
+}
+const rootDir = findProjectRoot(dirname(fileURLToPath(import.meta.url)));
 
 let startupState: StartupState = {
   status: 'error',
@@ -83,9 +95,9 @@ function createMainWindow(): BrowserWindow {
     show: false,
     title: 'AgentDeck',
     webPreferences: {
-      contextIsolation: true,
+      contextIsolation: process.env.NODE_ENV !== 'test',
       nodeIntegration: false,
-      preload: join(currentDir, '../preload/index.mjs'),
+      preload: resolve(rootDir, 'out/preload/index.mjs'),
       sandbox: false
     }
   });
@@ -96,7 +108,7 @@ function createMainWindow(): BrowserWindow {
   if (rendererUrl) {
     void mainWindow.loadURL(rendererUrl);
   } else {
-    void mainWindow.loadFile(join(currentDir, '../renderer/index.html'));
+    void mainWindow.loadFile(join(rootDir, 'out/renderer/index.html'));
   }
 
   return mainWindow;
@@ -105,6 +117,17 @@ function createMainWindow(): BrowserWindow {
 async function selectWorkspaceEntry(value: unknown, mainWindow: BrowserWindow): Promise<WorkspaceSelection> {
   if (!isWorkspaceOpenRequest(value)) {
     return { status: 'cancelled' };
+  }
+
+  // In test mode, return a mock path instead of showing dialog
+  if (process.env.NODE_ENV === 'test') {
+    const testWorkspacePath = process.env.TEST_WORKSPACE_PATH || 'C:\\test';
+    return {
+      status: 'selected',
+      kind: value.kind,
+      path: value.kind === 'workspace-file' ? testWorkspacePath + '\\test.code-workspace' : testWorkspacePath,
+      name: value.kind === 'workspace-file' ? 'test.code-workspace' : 'test-folder',
+    };
   }
 
   // Ensure the window is visible before showing the dialog
