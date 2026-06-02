@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { bootstrapDesktopServices, createSettingsService, createStartupErrorState, createWorkspaceService, type SettingsService, type WorkspaceService } from '@agentdeck/services';
+import { bootstrapDesktopServices, createSettingsService, createStartupErrorState, createWorkspaceService, getDiagnostics, readEditorFile, type SettingsService, type WorkspaceService, writeEditorFile } from '@agentdeck/services';
 import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
@@ -65,6 +65,24 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
     if (!mainWindow.isDestroyed()) {
       mainWindow.webContents.send(IPC_CHANNELS.fsEvent, event);
     }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.readFile, async (_event, filePath: unknown) => {
+    if (typeof filePath !== 'string') {
+      return { status: 'error', code: 'UNKNOWN', message: 'Invalid file path.' };
+    }
+    return readEditorFile(filePath);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.writeFile, async (_event, filePath: unknown, content: unknown) => {
+    if (typeof filePath !== 'string' || typeof content !== 'string') {
+      return { status: 'error', code: 'UNKNOWN', message: 'Invalid arguments.' };
+    }
+    return writeEditorFile(filePath, content);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getEditorDiagnostics, async () => {
+    return getDiagnostics();
   });
 }
 

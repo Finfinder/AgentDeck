@@ -17,6 +17,9 @@ function mockAgent(overrides: Partial<AgentDeckPreloadApi> = {}): AgentDeckPrelo
     searchFiles: vi.fn().mockResolvedValue([]),
     getRecentWorkspaces: vi.fn().mockResolvedValue([]),
     onFsEvent: vi.fn().mockReturnValue(() => undefined),
+    readFile: vi.fn().mockResolvedValue({ status: 'error', code: 'FILE_NOT_FOUND', message: 'Test' }),
+    writeFile: vi.fn().mockResolvedValue({ status: 'ok' }),
+    getEditorDiagnostics: vi.fn().mockResolvedValue([]),
     ...overrides
   };
 }

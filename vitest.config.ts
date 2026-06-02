@@ -12,7 +12,8 @@ export default defineConfig({
       '@agentdeck/agent-runtime': resolve(rootDir, 'packages/agent-runtime/src/index.ts'),
       '@agentdeck/services': resolve(rootDir, 'packages/services/src/index.ts'),
       '@agentdeck/shared': resolve(rootDir, 'packages/shared/src/index.ts'),
-      '@agentdeck/workbench': resolve(rootDir, 'packages/workbench/src/index.ts')
+      '@agentdeck/workbench': resolve(rootDir, 'packages/workbench/src/index.ts'),
+      '@monaco-editor/react': resolve(rootDir, 'tests/__mocks__/monaco-editor-react.tsx')
     }
   },
   test: {

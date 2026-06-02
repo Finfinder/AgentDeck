@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { DEFAULT_THEME_SETTINGS, type AgentDeckPreloadApi, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
 
+import { EditorSurface } from './editor';
 import { Explorer } from './Explorer';
 import { SearchPanel } from './SearchPanel';
 
@@ -20,7 +21,10 @@ const DEV_PRELOAD_API: AgentDeckPreloadApi = {
   listDirectory: async path => ({ path, entries: [] }),
   searchFiles: async () => [],
   getRecentWorkspaces: async () => [],
-  onFsEvent: () => () => undefined
+  onFsEvent: () => () => undefined,
+  readFile: async () => ({ status: 'error', code: 'FILE_NOT_FOUND', message: 'Dev mode - no file access.' }),
+  writeFile: async () => ({ status: 'error', code: 'ACCESS_DENIED', message: 'Dev mode - no file write.' }),
+  getEditorDiagnostics: async () => []
 };
 
 function getPreloadApi(): AgentDeckPreloadApi {
@@ -152,7 +156,7 @@ export function App() {
         </div>
 
         {workspaceModel?.status === 'ok' && activePanel === 'explorer' && (
-          <Explorer agent={agent} workspaceModel={workspaceModel} />
+          <Explorer agent={agent} workspaceModel={workspaceModel} onFileOpen={(filePath) => { agent.readFile(filePath); }} />
         )}
         {workspaceModel?.status === 'ok' && activePanel === 'search' && (
           <SearchPanel agent={agent} workspaceModel={workspaceModel} />
@@ -170,28 +174,7 @@ export function App() {
         )}
       </aside>
 
-      <section className="editor-area" aria-labelledby="agentdeck-title">
-        <div className="editor-tabs" role="tablist" aria-label="Open editors">
-          <button className="editor-tab active" type="button" role="tab" aria-selected="true">
-            Welcome
-          </button>
-        </div>
-
-        <section className="editor-surface" aria-label="Editor">
-          <div className="editor-gutter" aria-hidden="true">
-            <span>1</span>
-            <span>2</span>
-            <span>3</span>
-            <span>4</span>
-          </div>
-          <div className="editor-content">
-            <p className="eyebrow">AgentDeck</p>
-            <h2>Workbench</h2>
-            <p>{workspaceSelection?.status === 'selected' ? workspaceSelection.path : 'No workspace opened.'}</p>
-            <p>{statusText}</p>
-          </div>
-        </section>
-      </section>
+      <EditorSurface agent={agent} />
 
       <section className="bottom-panel" aria-label="Panel">
         <div className="panel-tabs" role="tablist" aria-label="Panel views">

@@ -4,12 +4,15 @@ import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
   isDirectoryListing,
+  isFileReadResult,
+  isFileWriteResult,
   isFsChangeEvent,
   isStartupState,
   isThemeSettings,
   isWorkspaceModel,
   isWorkspaceSelection,
   type AgentDeckPreloadApi,
+  type EditorDiagnostic,
   type FsChangeEvent,
   type StartupState
 } from '@agentdeck/shared';
@@ -60,6 +63,18 @@ const api: AgentDeckPreloadApi = {
     };
     ipcRenderer.on(IPC_CHANNELS.fsEvent, listener);
     return () => { ipcRenderer.off(IPC_CHANNELS.fsEvent, listener); };
+  },
+  readFile: async (filePath: string) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.readFile, filePath);
+    return isFileReadResult(value) ? value : { status: 'error', code: 'UNKNOWN', message: 'Unexpected response from main process.' };
+  },
+  writeFile: async (filePath: string, content: string) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.writeFile, filePath, content);
+    return isFileWriteResult(value) ? value : { status: 'error', code: 'UNKNOWN', message: 'Unexpected response from main process.' };
+  },
+  getEditorDiagnostics: async (filePath: string) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.getEditorDiagnostics, filePath);
+    return Array.isArray(value) ? value as EditorDiagnostic[] : [];
   },
   versions: {
     chrome: process.versions.chrome ?? 'unknown',

@@ -91,3 +91,16 @@ export function createStartupErrorState(appVersion: string): StartupState {
 export { readThemeSettings, writeThemeSettings, DEFAULT_THEME_SETTINGS } from './settings';
 export type { ThemeSettings } from './settings';
 export { createWorkspaceService, isSensitivePath, parseCodeWorkspace, stripJsoncComments, WorkspaceService } from './workspace-service';
+export {
+  clearBuffers,
+  closeBuffer,
+  createEditorTab,
+  createTabId,
+  getBufferDirty,
+  getDiagnostics,
+  getOpenBuffers,
+  markBufferDirty,
+  readEditorFile,
+  resolveLanguage,
+  writeEditorFile
+} from './editor-service';

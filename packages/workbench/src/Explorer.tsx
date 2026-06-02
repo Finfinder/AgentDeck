@@ -13,9 +13,10 @@ function parentPath(p: string): string {
 interface ExplorerProps {
   readonly agent: AgentDeckPreloadApi;
   readonly workspaceModel: WorkspaceModel & { status: 'ok' };
+  readonly onFileOpen?: (filePath: string) => void;
 }
 
-export function Explorer({ agent, workspaceModel }: ExplorerProps) {
+export function Explorer({ agent, workspaceModel, onFileOpen }: ExplorerProps) {
   const roots = workspaceModel.folders;
   const [selectedRootIndex, setSelectedRootIndex] = useState(0);
   const rootPath = roots[selectedRootIndex]?.path ?? '';
@@ -115,10 +116,15 @@ export function Explorer({ agent, workspaceModel }: ExplorerProps) {
                   <span className="file-tree-name">{entry.name}</span>
                 </button>
               ) : (
-                <span title={entry.path}>
+                <button
+                  className="file-tree-file-button"
+                  onClick={() => { onFileOpen?.(entry.path); }}
+                  title={entry.path}
+                  aria-label={`Open file ${entry.name}`}
+                >
                   <span className="file-tree-icon" aria-hidden="true">??</span>
                   <span className="file-tree-name">{entry.name}</span>
-                </span>
+                </button>
               )}
             </div>
           ))}

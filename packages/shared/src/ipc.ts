@@ -7,7 +7,10 @@ export const IPC_CHANNELS = {
   listDirectory: 'agentdeck:v1:workspace:list-directory',
   searchFiles: 'agentdeck:v1:workspace:search-files',
   getRecentWorkspaces: 'agentdeck:v1:workspace:get-recent',
-  fsEvent: 'agentdeck:v1:workspace:fs-event'
+  fsEvent: 'agentdeck:v1:workspace:fs-event',
+  readFile: 'agentdeck:v1:editor:read-file',
+  writeFile: 'agentdeck:v1:editor:write-file',
+  getEditorDiagnostics: 'agentdeck:v1:editor:get-diagnostics'
 } as const;
 
 export type ThemePreference = 'dark' | 'light';
@@ -119,6 +122,65 @@ export type StartupState =
       message: string;
     }>;
 
+// ?? Editor types ????????????????????????????????????????????????????????????
+
+export type EditorLanguage =
+  | 'typescript'
+  | 'javascript'
+  | 'json'
+  | 'yaml'
+  | 'markdown'
+  | 'powershell'
+  | 'plaintext';
+
+export type EditorTab = Readonly<{
+  id: string;
+  filePath: string;
+  fileName: string;
+  language: EditorLanguage;
+  isDirty: boolean;
+  isPinned: boolean;
+}>;
+
+export type EditorTabInput = Readonly<{
+  filePath: string;
+}>;
+
+export type FileReadResult =
+  | Readonly<{
+      status: 'ok';
+      content: string;
+      encoding: string;
+    }>
+  | Readonly<{
+      status: 'error';
+      code: 'FILE_NOT_FOUND' | 'ACCESS_DENIED' | 'ENCODING_ERROR' | 'UNKNOWN';
+      message: string;
+    }>;
+
+export type FileWriteResult =
+  | Readonly<{
+      status: 'ok';
+    }>
+  | Readonly<{
+      status: 'error';
+      code: 'WRITE_CONFLICT' | 'ACCESS_DENIED' | 'UNKNOWN';
+      message: string;
+    }>;
+
+export type DiagnosticSeverity = 'error' | 'warning' | 'info' | 'hint';
+
+export type EditorDiagnostic = Readonly<{
+  filePath: string;
+  message: string;
+  severity: DiagnosticSeverity;
+  line: number;
+  col: number;
+  source: string;
+}>;
+
+export type EditorSplitDirection = 'horizontal' | 'vertical';
+
 export type AgentDeckPreloadApi = Readonly<{
   getStartupState: () => Promise<StartupState>;
   getThemeSettings: () => Promise<ThemeSettings>;
@@ -129,6 +191,9 @@ export type AgentDeckPreloadApi = Readonly<{
   searchFiles: (query: SearchQuery) => Promise<readonly SearchResult[]>;
   getRecentWorkspaces: () => Promise<readonly RecentWorkspace[]>;
   onFsEvent: (handler: (event: FsChangeEvent) => void) => () => void;
+  readFile: (filePath: string) => Promise<FileReadResult>;
+  writeFile: (filePath: string, content: string) => Promise<FileWriteResult>;
+  getEditorDiagnostics: (filePath: string) => Promise<readonly EditorDiagnostic[]>;
   versions: Readonly<{
     chrome: string;
     electron: string;
@@ -238,5 +303,47 @@ export function isFsChangeEvent(value: unknown): value is FsChangeEvent {
     isRecord(value) &&
     (value.kind === 'add' || value.kind === 'change' || value.kind === 'unlink' || value.kind === 'addDir') &&
     typeof value.path === 'string'
+  );
+}
+
+const EDITOR_LANGUAGES: readonly string[] = [
+  'typescript', 'javascript', 'json', 'yaml', 'markdown', 'powershell', 'plaintext'
+];
+
+export function isEditorLanguage(value: unknown): value is EditorLanguage {
+  return typeof value === 'string' && EDITOR_LANGUAGES.includes(value);
+}
+
+export function isEditorTab(value: unknown): value is EditorTab {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.filePath === 'string' &&
+    typeof value.fileName === 'string' &&
+    isEditorLanguage(value.language) &&
+    typeof value.isDirty === 'boolean' &&
+    typeof value.isPinned === 'boolean'
+  );
+}
+
+export function isFileReadResult(value: unknown): value is FileReadResult {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') {
+    return typeof value.content === 'string' && typeof value.encoding === 'string';
+  }
+  return (
+    value.status === 'error' &&
+    (value.code === 'FILE_NOT_FOUND' || value.code === 'ACCESS_DENIED' || value.code === 'ENCODING_ERROR' || value.code === 'UNKNOWN') &&
+    typeof value.message === 'string'
+  );
+}
+
+export function isFileWriteResult(value: unknown): value is FileWriteResult {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') return true;
+  return (
+    value.status === 'error' &&
+    (value.code === 'WRITE_CONFLICT' || value.code === 'ACCESS_DENIED' || value.code === 'UNKNOWN') &&
+    typeof value.message === 'string'
   );
 }
