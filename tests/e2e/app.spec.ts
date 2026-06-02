@@ -23,8 +23,8 @@ test.beforeAll(async () => {
 
 test.beforeEach(async () => {
   app = await electron.launch({
-    args: [join(rootDir, '../../apps/desktop/src/main/index.ts')],
-    env: { ...process.env, NODE_ENV: 'test' },
+    args: [join(rootDir, '../../out/main/index.js')],
+    env: { ...process.env, NODE_ENV: 'test', TEST_WORKSPACE_PATH: tempDir },
   });
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');

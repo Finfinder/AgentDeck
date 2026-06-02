@@ -78,15 +78,27 @@ if (typeof window !== 'undefined') {
 }
 
 // Wrap API methods to check for mocks
+// Only wrap async (Promise-returning) methods; pass through sync methods like onFsEvent as-is
+const _asyncMethods = new Set(['getStartupState', 'getThemeSettings', 'setThemeSettings', 'selectWorkspaceEntry', 'openWorkspace', 'listDirectory', 'searchFiles', 'getRecentWorkspaces']);
 const wrappedApi = {} as any;
 for (const key of Object.keys(api)) {
   if (typeof (api as any)[key] === 'function') {
-    wrappedApi[key] = async (...args: any[]) => {
-      if (_mocks[key]) {
-        return _mocks[key](...args);
-      }
-      return (api as any)[key](...args);
-    };
+    if (_asyncMethods.has(key)) {
+      wrappedApi[key] = async (...args: any[]) => {
+        if (_mocks[key]) {
+          return _mocks[key](...args);
+        }
+        return (api as any)[key](...args);
+      };
+    } else {
+      // Sync methods (e.g. onFsEvent) must not be wrapped in async
+      wrappedApi[key] = (...args: any[]) => {
+        if (_mocks[key]) {
+          return _mocks[key](...args);
+        }
+        return (api as any)[key](...args);
+      };
+    }
   } else {
     wrappedApi[key] = (api as any)[key];
   }
@@ -98,5 +110,14 @@ wrappedApi.__setAgentDeckMock = (method: string, fn: Function) => {
 };
 
 console.log('[preload] Loading preload script...');
-contextBridge.exposeInMainWorld('agentDeck', wrappedApi);
-console.log('[preload] agentDeck exposed successfully');
+// Use contextBridge when available (production with contextIsolation:true);
+// fall back to direct window assignment for test environments.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const cb = (globalThis as any).contextBridge;
+if (cb && typeof cb.exposeInMainWorld === 'function') {
+  cb.exposeInMainWorld('agentDeck', wrappedApi);
+  console.log('[preload] agentDeck exposed via contextBridge');
+} else {
+  (window as any).agentDeck = wrappedApi;
+  console.log('[preload] agentDeck exposed via window (test fallback)');
+}
