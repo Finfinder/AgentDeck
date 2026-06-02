@@ -12,6 +12,11 @@ function mockPreloadApi(overrides: Partial<AgentDeckPreloadApi> = {}) {
     versions: { chrome: '130.0.0', electron: '42.3.0', node: '25.0.0' },
     getThemeSettings: vi.fn().mockResolvedValue(DEFAULT_THEME_SETTINGS),
     setThemeSettings: vi.fn().mockImplementation(async (s: unknown) => s),
+    openWorkspace: vi.fn().mockResolvedValue({ status: 'error', code: 'FILE_NOT_FOUND', message: 'Test' }),
+    listDirectory: vi.fn().mockResolvedValue({ path: '/', entries: [] }),
+    searchFiles: vi.fn().mockResolvedValue([]),
+    getRecentWorkspaces: vi.fn().mockResolvedValue([]),
+    onFsEvent: vi.fn().mockReturnValue(() => undefined),
     ...overrides
   };
 
@@ -111,15 +116,25 @@ describe('Workbench startup surface', () => {
       path: String.raw`C:\Workspaces\AgentDeck.code-workspace`,
       name: 'AgentDeck.code-workspace'
     });
+    const openWorkspace = vi.fn().mockResolvedValue({
+      status: 'ok',
+      filePath: String.raw`C:\Workspaces\AgentDeck.code-workspace`,
+      kind: 'workspace-file',
+      folders: [{ path: String.raw`C:\Workspaces` }]
+    });
 
-    mockPreloadApi({ selectWorkspaceEntry });
+    mockPreloadApi({ selectWorkspaceEntry, openWorkspace });
 
     render(<App />);
 
     await user.click(screen.getByRole('button', { name: 'Open workspace' }));
 
     expect(selectWorkspaceEntry).toHaveBeenCalledWith({ kind: 'workspace-file' });
-    expect(await screen.findByRole('heading', { name: 'AgentDeck.code-workspace' })).toBeInTheDocument();
-    expect(screen.getByText('AgentDeck.code-workspace selected.')).toBeInTheDocument();
+    expect(openWorkspace).toHaveBeenCalledWith(
+      String.raw`C:\Workspaces\AgentDeck.code-workspace`,
+      'workspace-file'
+    );
+    expect(await screen.findByText('AgentDeck.code-workspace opened.')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Explorer' })).toBeInTheDocument();
   });
 });

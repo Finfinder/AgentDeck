@@ -1,0 +1,223 @@
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+
+import { SearchPanel } from '@agentdeck/workbench';
+import type { AgentDeckPreloadApi, SearchResult, WorkspaceModel } from '@agentdeck/shared';
+
+function mockAgent(overrides: Partial<AgentDeckPreloadApi> = {}): AgentDeckPreloadApi {
+  return {
+    getStartupState: vi.fn().mockResolvedValue({ status: 'ready', appVersion: '0.1.0', services: [] }),
+    selectWorkspaceEntry: vi.fn().mockResolvedValue({ status: 'cancelled' }),
+    versions: { chrome: '130.0.0', electron: '42.3.0', node: '25.0.0' },
+    getThemeSettings: vi.fn().mockResolvedValue({ theme: 'dark' }),
+    setThemeSettings: vi.fn().mockImplementation(async (s: unknown) => s),
+    openWorkspace: vi.fn().mockResolvedValue({ status: 'error', code: 'FILE_NOT_FOUND', message: 'Test' }),
+    listDirectory: vi.fn().mockResolvedValue({ path: '/', entries: [] }),
+    searchFiles: vi.fn().mockResolvedValue([]),
+    getRecentWorkspaces: vi.fn().mockResolvedValue([]),
+    onFsEvent: vi.fn().mockReturnValue(() => undefined),
+    ...overrides
+  };
+}
+
+const workspaceModel: WorkspaceModel & { status: 'ok' } = {
+  status: 'ok',
+  filePath: '/workspace.code-workspace',
+  kind: 'workspace-file',
+  folders: [{ path: '/workspace', name: 'workspace' }]
+};
+
+describe('SearchPanel', () => {
+  it('renders search form with input and button', () => {
+    render(<SearchPanel agent={mockAgent()} workspaceModel={workspaceModel} />);
+
+    expect(screen.getByRole('search')).toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: 'Search pattern' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run search' })).toBeInTheDocument();
+  });
+
+  it('disables search button when pattern is empty', () => {
+    render(<SearchPanel agent={mockAgent()} workspaceModel={workspaceModel} />);
+
+    expect(screen.getByRole('button', { name: 'Run search' })).toBeDisabled();
+  });
+
+  it('enables search button when pattern has content', async () => {
+    const user = userEvent.setup();
+    render(<SearchPanel agent={mockAgent()} workspaceModel={workspaceModel} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'test');
+
+    expect(screen.getByRole('button', { name: 'Run search' })).toBeEnabled();
+  });
+
+  it('calls agent.searchFiles with pattern and workspace roots on submit', async () => {
+    const user = userEvent.setup();
+    const searchFiles = vi.fn().mockResolvedValue([]);
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'hello');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    await waitFor(() => {
+      expect(searchFiles).toHaveBeenCalledWith({
+        pattern: 'hello',
+        workspaceRoots: ['/workspace']
+      });
+    });
+  });
+
+  it('renders search results with file basename, location and snippet', async () => {
+    const user = userEvent.setup();
+    const results: SearchResult[] = [
+      { file: '/workspace/src/index.ts', line: 10, col: 5, snippet: 'const x = 1;', isSensitive: false },
+      { file: '/workspace/src/utils.ts', line: 3, col: 1, snippet: 'export function', isSensitive: false }
+    ];
+    const searchFiles = vi.fn().mockResolvedValue(results);
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'const');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    expect(await screen.findByRole('list', { name: '2 search results' })).toBeInTheDocument();
+    expect(screen.getByText('index.ts')).toBeInTheDocument();
+    expect(screen.getByText(':10:5')).toBeInTheDocument();
+    expect(screen.getByText('const x = 1;')).toBeInTheDocument();
+    expect(screen.getByText('utils.ts')).toBeInTheDocument();
+  });
+
+  it('marks sensitive results with sensitive class', async () => {
+    const user = userEvent.setup();
+    const results: SearchResult[] = [
+      { file: '/workspace/.env', line: 1, col: 1, snippet: 'SECRET=abc', isSensitive: true }
+    ];
+    const searchFiles = vi.fn().mockResolvedValue(results);
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'SECRET');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    const item = await screen.findByRole('listitem');
+    expect(item).toHaveClass('sensitive');
+  });
+
+  it('renders "No results found" when search returns empty', async () => {
+    const user = userEvent.setup();
+    const searchFiles = vi.fn().mockResolvedValue([]);
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'nothing');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    expect(await screen.findByText('No results found.')).toBeInTheDocument();
+  });
+
+  it('renders error message when search throws', async () => {
+    const user = userEvent.setup();
+    const searchFiles = vi.fn().mockRejectedValue(new Error('Search service unavailable'));
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'fail');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Search service unavailable');
+  });
+
+  it('shows "Searching." label on button while searching', async () => {
+    const user = userEvent.setup();
+    // Create a promise that we control
+    let resolveSearch: (value: SearchResult[]) => void;
+    const searchFiles = vi.fn().mockImplementation(
+      () => new Promise<SearchResult[]>(resolve => { resolveSearch = resolve; })
+    );
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'slow');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    expect(await screen.findByRole('button', { name: 'Run search' })).toHaveTextContent('Searching.');
+
+    // Resolve the search
+    resolveSearch!([]);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Run search' })).toHaveTextContent('Search');
+    });
+  });
+
+  it('disables input while searching', async () => {
+    const user = userEvent.setup();
+    let resolveSearch: (value: SearchResult[]) => void;
+    const searchFiles = vi.fn().mockImplementation(
+      () => new Promise<SearchResult[]>(resolve => { resolveSearch = resolve; })
+    );
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'slow');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    expect(await screen.findByRole('searchbox', { name: 'Search pattern' })).toBeDisabled();
+
+    resolveSearch!([]);
+
+    await waitFor(() => {
+      expect(screen.getByRole('searchbox', { name: 'Search pattern' })).toBeEnabled();
+    });
+  });
+
+  it('does not call searchFiles for whitespace-only pattern', async () => {
+    const user = userEvent.setup();
+    const searchFiles = vi.fn().mockResolvedValue([]);
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), '   ');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    expect(searchFiles).not.toHaveBeenCalled();
+  });
+
+  it('uses multiple workspace roots when workspace has multiple folders', async () => {
+    const user = userEvent.setup();
+    const searchFiles = vi.fn().mockResolvedValue([]);
+    const agent = mockAgent({ searchFiles });
+
+    const multiRootWorkspace: WorkspaceModel & { status: 'ok' } = {
+      status: 'ok',
+      filePath: '/multi.code-workspace',
+      kind: 'workspace-file',
+      folders: [
+        { path: '/workspace-a', name: 'A' },
+        { path: '/workspace-b', name: 'B' }
+      ]
+    };
+
+    render(<SearchPanel agent={agent} workspaceModel={multiRootWorkspace} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'test');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    await waitFor(() => {
+      expect(searchFiles).toHaveBeenCalledWith({
+        pattern: 'test',
+        workspaceRoots: ['/workspace-a', '/workspace-b']
+      });
+    });
+  });
+});
