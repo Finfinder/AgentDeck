@@ -2,5 +2,10 @@
     "sonarlint.connectedMode.project": {
         "connectionId": "finfinder",
         "projectKey": "Finfinder_AgentDeck"
+    },
+    "sonarlint.rules": {
+        "typescript:S6766": {
+            "level": "off"
+        }
     }
 }

@@ -1,4 +1,4 @@
-# Security Policy
+# Security Policy 
 
 AgentDeck is a local-first desktop IDE prototype. This policy covers the application code, GitHub Actions workflows, npm dependencies, security scanning configuration, and repository documentation.
 

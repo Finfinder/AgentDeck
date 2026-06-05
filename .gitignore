@@ -10,5 +10,10 @@ coverage/
 .env.*
 !.env.example
 
+# Playwright test artifacts
+test-results/
+playwright-report/
+playwright/.cache/
+
 # Issue templates backup (kept locally, not tracked in git)
 .github/Issue/

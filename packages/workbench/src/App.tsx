@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { DEFAULT_THEME_SETTINGS, type AgentDeckPreloadApi, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
+import { DEFAULT_THEME_SETTINGS, type AgentDeckPreloadApi, type EditorDiagnostic, type FsChangeEvent, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
 
 import { EditorSurface } from './editor';
+import { useEditorStore } from './editor/useEditorStore';
 import { Explorer } from './Explorer';
+import { MenuBar } from './MenuBar';
+import { ProblemsPanel } from './ProblemsPanel';
 import { SearchPanel } from './SearchPanel';
 
 const STARTUP_STATE_READ_ERROR_MESSAGE = 'Unable to read startup state.';
@@ -24,7 +27,14 @@ const DEV_PRELOAD_API: AgentDeckPreloadApi = {
   onFsEvent: () => () => undefined,
   readFile: async () => ({ status: 'error', code: 'FILE_NOT_FOUND', message: 'Dev mode - no file access.' }),
   writeFile: async () => ({ status: 'error', code: 'ACCESS_DENIED', message: 'Dev mode - no file write.' }),
-  getEditorDiagnostics: async () => []
+  markBufferDirty: async () => undefined,
+  deleteFile: async () => ({ status: 'error', code: 'ACCESS_DENIED', message: 'Dev mode - no file delete.' }),
+  renameFile: async () => ({ status: 'error', code: 'ACCESS_DENIED', message: 'Dev mode - no file rename.' }),
+  getEditorDiagnostics: async () => [],
+  applyWorkspaceEdit: async () => ({ status: 'error', code: 'UNKNOWN', message: 'Dev mode - no workspace edit.' }),
+  showDiff: async () => ({ status: 'error', code: 'UNKNOWN', message: 'Dev mode - no diff.' }),
+  showSaveDialog: async () => null,
+  toggleDevTools: async () => undefined
 };
 
 function getPreloadApi(): AgentDeckPreloadApi {
@@ -44,24 +54,127 @@ export function App() {
   const [workspaceModel, setWorkspaceModel] = useState<WorkspaceModel | null>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState('No workspace opened.');
   const [activePanel, setActivePanel] = useState<'explorer' | 'search'>('explorer');
+  const [activeBottomPanel, setActiveBottomPanel] = useState<'problems' | 'services' | 'output'>('problems');
+  const [externalChanges, setExternalChanges] = useState<ReadonlySet<string>>(new Set());
+  const editorStore = useEditorStore();
+  const [diagnostics, setDiagnostics] = useState<readonly EditorDiagnostic[]>([]);
+  const [ipcDiagnostics, setIpcDiagnostics] = useState<readonly EditorDiagnostic[]>([]);
+
+  const allDiagnostics = useMemo(
+    () => [...ipcDiagnostics, ...diagnostics],
+    [ipcDiagnostics, diagnostics]
+  );
+
+  const diagCounts = useMemo(() => {
+    let errors = 0, warnings = 0, infos = 0, hints = 0;
+    for (const d of allDiagnostics) {
+      switch (d.severity) {
+        case 'error': errors++; break;
+        case 'warning': warnings++; break;
+        case 'info': infos++; break;
+        case 'hint': hints++; break;
+      }
+    }
+    return { errors, warnings, infos, hints };
+  }, [allDiagnostics]);
+
+  const handleDiagnosticsChange = useCallback((next: readonly EditorDiagnostic[]) => {
+    setDiagnostics(next);
+  }, []);
+
+  // Poll IPC for workspace-level diagnostics (supports E2E mocks and future LSP integration)
+  useEffect(() => {
+    let isActive = true;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
+      try {
+        const result = await agent.getEditorDiagnostics('');
+        if (isActive) setIpcDiagnostics(result);
+      } catch { /* non-critical */ }
+      if (isActive) timer = setTimeout(poll, 3000);
+    };
+
+    poll();
+    return () => {
+      isActive = false;
+      clearTimeout(timer);
+    };
+  }, [agent]);
+
+  // ?? File system watcher - track external changes ????????????????
+  useEffect(() => {
+    const dispose = agent.onFsEvent((event: FsChangeEvent) => {
+      if (event.kind === 'change') {
+        setExternalChanges(prev => {
+          const next = new Set(prev);
+          next.add(event.path);
+          return next;
+        });
+      }
+    });
+    return dispose;
+  }, [agent]);
+
+  // ?? Close workspace event (from File menu) ??????????????????????????
+  useEffect(() => {
+    function handleCloseWorkspace() {
+      setWorkspaceModel(null);
+      setWorkspaceSelection(null);
+      setWorkspaceStatus('No workspace opened.');
+    }
+    globalThis.addEventListener('agentdeck:close-workspace', handleCloseWorkspace);
+    return () => globalThis.removeEventListener('agentdeck:close-workspace', handleCloseWorkspace);
+  }, []);
+
+  // ?? Show panel event (from View menu) ??????????????????????????????
+  useEffect(() => {
+    function handleShowPanel(e: Event) {
+      const detail = (e as CustomEvent).detail;
+      if (detail === 'explorer' || detail === 'search') {
+        setActivePanel(detail);
+      }
+    }
+    globalThis.addEventListener('agentdeck:show-panel', handleShowPanel);
+    return () => globalThis.removeEventListener('agentdeck:show-panel', handleShowPanel);
+  }, []);
+
+  // ?? Save / Save All handlers ???????????????????????????????????????
+  // EditorSurface owns the content map and already listens for Ctrl+S.
+  // We dispatch keyboard events to trigger the same save path.
+  const handleSave = useCallback(() => {
+    globalThis.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 's',
+        code: 'KeyS',
+        ctrlKey: true,
+        bubbles: true
+      })
+    );
+  }, []);
+
+  const handleSaveAll = useCallback(() => {
+    // Save all dirty tabs: dispatch Ctrl+S for each dirty tab.
+    // EditorSurface handles one active tab at a time via Ctrl+S.
+    // For Save All, we dispatch a custom event that EditorSurface can intercept.
+    globalThis.dispatchEvent(new CustomEvent('agentdeck:save-all'));
+  }, []);
 
   useEffect(() => {
     let isActive = true;
 
     agent
       .getStartupState()
-      .then(state => {
-        if (isActive) {
-          setStartupState(state);
-        }
-      })
-      .catch(() => {
-        if (!isActive) {
-          return;
-        }
-
-        setLoadError(STARTUP_STATE_READ_ERROR_MESSAGE);
-      });
+        .then(state => {
+          if (isActive) {
+            setStartupState(state);
+          }
+        })
+        .catch(() => {
+          if (isActive) {
+            setLoadError(STARTUP_STATE_READ_ERROR_MESSAGE);
+          }
+        });
 
     return () => {
       isActive = false;
@@ -73,18 +186,16 @@ export function App() {
 
     agent
       .getThemeSettings()
-      .then(settings => {
-        if (isActive) {
-          setThemeSettings(settings);
-        }
-      })
-      .catch(() => {
-        if (!isActive) {
-          return;
-        }
-
-        setSettingsStatus(THEME_SETTINGS_READ_ERROR_MESSAGE);
-      });
+        .then(settings => {
+          if (isActive) {
+            setThemeSettings(settings);
+          }
+        })
+        .catch(() => {
+          if (isActive) {
+            setSettingsStatus(THEME_SETTINGS_READ_ERROR_MESSAGE);
+          }
+        });
 
     return () => {
       isActive = false;
@@ -121,12 +232,47 @@ export function App() {
     }
   }
 
+  async function openWorkspaceByPath(path: string, kind: WorkspaceOpenKind): Promise<void> {
+    try {
+      setWorkspaceSelection({ status: 'selected', kind, path, name: path.split(/[/\\]/).pop() ?? path });
+      const model = await agent.openWorkspace(path, kind);
+      setWorkspaceModel(model);
+      setWorkspaceStatus(model.status === 'ok' ? `${path.split(/[/\\]/).pop() ?? path} opened.` : model.message);
+    } catch {
+      setWorkspaceStatus(WORKSPACE_OPEN_ERROR_MESSAGE);
+    }
+  }
+
+  const handleDiagnosticClick = useCallback(
+    (filePath: string, line: number, col: number) => {
+      editorStore.openTab({ filePath, line, col });
+    },
+    [editorStore]
+  );
+
+  const handleSaveAs = useCallback(() => {
+    const activeTab = editorStore.tabs.find(t => t.id === editorStore.activeTabId);
+    if (activeTab) {
+      // EditorSurface owns the content map and the save dialog integration.
+      // Dispatch an event with the tabId; EditorSurface will handle the rest.
+      globalThis.dispatchEvent(new CustomEvent('agentdeck:save-as', { detail: { tabId: activeTab.id } }));
+    }
+  }, [editorStore]);
+
   const statusText = loadError ?? (startupState?.status === 'error' ? startupState.message : 'Ready');
-  const appVersion = startupState?.appVersion ?? '0.1.0';
   const startupServices = startupState?.status === 'ready' ? startupState.services : [];
 
   return (
     <main className="workbench-shell" aria-busy={startupState === null && loadError === null} data-theme={themeSettings.theme} role="main">
+      <MenuBar
+        agent={agent}
+        editorTabs={editorStore.tabs}
+        onOpenWorkspace={(kind) => { openWorkspace(kind); }}
+        onOpenWorkspaceDirect={(path, kind) => { openWorkspaceByPath(path, kind); }}
+        onSave={() => { handleSave(); }}
+        onSaveAs={() => { handleSaveAs(); }}
+        onSaveAll={() => { handleSaveAll(); }}
+      />
       <nav className="activity-bar" aria-label="Primary activity">
         <button className="activity-button" type="button" aria-label="Explorer" aria-pressed={activePanel === 'explorer'} title="Explorer" onClick={() => { setActivePanel('explorer'); }}>
           EX
@@ -140,26 +286,21 @@ export function App() {
       </nav>
 
       <aside className="side-bar" aria-label={activePanel === 'search' ? 'Search' : 'Explorer'}>
-        <header className="region-header">
-          <p className="eyebrow">AgentDeck</p>
-          <h1 id="agentdeck-title">Workbench</h1>
-          <p className="version">v{appVersion}</p>
-        </header>
 
         <div className="workspace-actions" aria-label="Workspace actions">
-          <button className="primary-action" type="button" onClick={() => { void openWorkspace('workspace-file'); }}>
+          <button className="primary-action" type="button" onClick={() => { openWorkspace('workspace-file'); }}>
             Open workspace
           </button>
-          <button className="secondary-action" type="button" onClick={() => { void openWorkspace('folder'); }}>
+          <button className="secondary-action" type="button" onClick={() => { openWorkspace('folder'); }}>
             Open folder
           </button>
         </div>
 
         {workspaceModel?.status === 'ok' && activePanel === 'explorer' && (
-          <Explorer agent={agent} workspaceModel={workspaceModel} onFileOpen={(filePath) => { agent.readFile(filePath); }} />
+          <Explorer agent={agent} workspaceModel={workspaceModel} onFileOpen={(filePath) => { editorStore.openTab({ filePath }); }} />
         )}
         {workspaceModel?.status === 'ok' && activePanel === 'search' && (
-          <SearchPanel agent={agent} workspaceModel={workspaceModel} />
+          <SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={(filePath, line, col, pattern, revealNonce) => { editorStore.openTab({ filePath, line, col, ...(pattern == null ? {} : { pattern }), ...(revealNonce == null ? {} : { revealNonce }) }); }} />
         )}
         {workspaceModel?.status !== 'ok' && (
           <section className="workspace-card" aria-labelledby="explorer-title">
@@ -174,38 +315,85 @@ export function App() {
         )}
       </aside>
 
-      <EditorSurface agent={agent} />
+      <EditorSurface agent={agent} store={editorStore} externalChanges={externalChanges} onExternalChangeAck={(path) => { setExternalChanges(prev => { const next = new Set(prev); next.delete(path); return next; }); }} onDiagnosticsChange={handleDiagnosticsChange} theme={themeSettings.theme} />
 
       <section className="bottom-panel" aria-label="Panel">
         <div className="panel-tabs" role="tablist" aria-label="Panel views">
-          <button type="button" role="tab" aria-selected="true">
+          <button type="button" role="tab" aria-selected={activeBottomPanel === 'problems'} onClick={() => { setActiveBottomPanel('problems'); }}>
+            Problems
+          </button>
+          <button type="button" role="tab" aria-selected={activeBottomPanel === 'services'} onClick={() => { setActiveBottomPanel('services'); }}>
             Services
           </button>
-          <button type="button" role="tab" aria-selected="false">
+          <button type="button" role="tab" aria-selected={activeBottomPanel === 'output'} onClick={() => { setActiveBottomPanel('output'); }}>
             Output
           </button>
         </div>
 
         <div className="panel-content">
+          {activeBottomPanel === 'problems' && (
+            <ProblemsPanel diagnostics={allDiagnostics} onDiagnosticClick={handleDiagnosticClick} workspaceRoot={workspaceModel?.status === 'ok' ? workspaceModel.folders[0]?.path ?? null : null} />
+          )}
+          {/* Render startup status/alert regardless of active panel so tests can locate it by role and name */}
           <p className="startup-status" role={startupState?.status === 'error' || loadError ? 'alert' : 'status'} aria-label="Startup state">
             {statusText}
           </p>
-          {startupServices.length > 0 ? (
-            <ul className="service-list" aria-label="Startup services">
-              {startupServices.map(service => (
-                <li key={service.id}>
-                  <span>{service.label}</span>
-                  <span>{service.status}</span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          {activeBottomPanel === 'services' && (
+            <>
+              {startupServices.length > 0 ? (
+                <ul className="service-list" aria-label="Startup services">
+                  {startupServices.map(service => (
+                    <li key={service.id}>
+                      <span>{service.label}</span>
+                      <span>{service.status}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </>
+          )}
+          {activeBottomPanel === 'output' && (
+            <p className="output-empty" aria-live="polite">No output.</p>
+          )}
         </div>
       </section>
 
       <footer className="status-bar">
         <output aria-label="Workspace status">{workspaceStatus}</output>
         <output aria-label="Theme settings">{settingsStatus}</output>
+        <div className="status-bar-diagnostics" aria-label="Diagnostic counts">
+          <span className="status-bar-diag status-bar-diag--error" aria-label={`${diagCounts.errors} errors`}>
+            <svg className="status-bar-diag-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.5"/>
+              <line x1="4.5" y1="4.5" x2="11.5" y2="11.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <line x1="11.5" y1="4.5" x2="4.5" y2="11.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            {diagCounts.errors}
+          </span>
+          <span className="status-bar-diag status-bar-diag--warning" aria-label={`${diagCounts.warnings} warnings`}>
+            <svg className="status-bar-diag-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <polygon points="8,1 15,14 1,14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+              <line x1="8" y1="6" x2="8" y2="10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <circle cx="8" cy="12" r="0.8" fill="currentColor"/>
+            </svg>
+            {diagCounts.warnings}
+          </span>
+          <span className="status-bar-diag status-bar-diag--info" aria-label={`${diagCounts.infos} infos`}>
+            <svg className="status-bar-diag-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.5"/>
+              <circle cx="8" cy="5" r="1" fill="currentColor"/>
+              <line x1="8" y1="7.5" x2="8" y2="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            {diagCounts.infos}
+          </span>
+          <span className="status-bar-diag status-bar-diag--hint" aria-label={`${diagCounts.hints} hints`}>
+            <svg className="status-bar-diag-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.5"/>
+              <text x="8" y="12" textAnchor="middle" fontSize="10" fontWeight="bold" fill="currentColor">?</text>
+            </svg>
+            {diagCounts.hints}
+          </span>
+        </div>
         <div className="theme-switcher" aria-label="Theme">
           <button type="button" onClick={() => updateTheme('dark')} aria-pressed={themeSettings.theme === 'dark'}>
             Dark

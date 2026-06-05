@@ -8,7 +8,7 @@ interface EditorTabsProps {
 }
 
 function dirtyIndicator(isDirty: boolean): string {
-  return isDirty ? ' �' : '';
+  return isDirty ? ' *' : '';
 }
 
 export function EditorTabs({ tabs, activeTabId, onSelect, onClose }: EditorTabsProps) {
@@ -28,7 +28,6 @@ export function EditorTabs({ tabs, activeTabId, onSelect, onClose }: EditorTabsP
           <div
             key={tab.id}
             className={`editor-tab ${isActive ? 'active' : ''} ${tab.isPinned ? 'pinned' : ''}`}
-            role="presentation"
           >
             <button
               type="button"
@@ -40,7 +39,6 @@ export function EditorTabs({ tabs, activeTabId, onSelect, onClose }: EditorTabsP
               className="editor-tab-button"
             >
               <span className="editor-tab-name">{tab.fileName}{dirtyIndicator(tab.isDirty)}</span>
-              <span className="editor-tab-language">{tab.language}</span>
             </button>
             <button
               type="button"
@@ -51,7 +49,7 @@ export function EditorTabs({ tabs, activeTabId, onSelect, onClose }: EditorTabsP
                 onClose(tab.id);
               }}
             >
-              �
+              <span aria-hidden="true" style={{ pointerEvents: 'none' }}>✕</span>
             </button>
           </div>
         );

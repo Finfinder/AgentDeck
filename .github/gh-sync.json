@@ -1,0 +1,99 @@
+{
+  "repo": {
+    "slug": "Finfinder/AgentDeck"
+  },
+  "features": {
+    "issues": true,
+    "projects": true,
+    "wiki": false,
+    "discussions": false
+  },
+  "labels": [
+    {
+      "name": "roadmap",
+      "color": "0e8a16",
+      "description": "Topic roadmap or larger direction of work."
+    },
+    {
+      "name": "priority:high",
+      "color": "b60205",
+      "description": "High priority issue."
+    },
+    {
+      "name": "priority:medium",
+      "color": "fbca04",
+      "description": "Medium priority issue."
+    },
+    {
+      "name": "priority:low",
+      "color": "cccccc",
+      "description": "Low priority issue."
+    },
+    {
+      "name": "ui",
+      "color": "c2e0c6",
+      "description": "UI/UX improvements and visual refinements."
+    },
+    {
+      "name": "security",
+      "color": "d73a4a",
+      "description": "Security-related changes and hardening."
+    },
+    {
+      "name": "workflow",
+      "color": "0366d6",
+      "description": "CI/CD, GitHub Actions, and automation."
+    },
+    {
+      "name": "compatibility",
+      "color": "5319e7",
+      "description": "VS Code API compatibility and extension support."
+    },
+    {
+      "name": "embeddings",
+      "color": "1d76db",
+      "description": "Semantic search and embedding-related features."
+    },
+    {
+      "name": "dependencies",
+      "color": "a2eeef",
+      "description": "Dependency updates and package management."
+    },
+    {
+      "name": "documentation",
+      "color": "0075ca",
+      "description": "Documentation changes and improvements."
+    }
+  ],
+  "milestones": [
+    {
+      "title": "0.1.x Bootstrap MVP",
+      "description": "Project foundation, domain contract, workbench shell, and basic services.",
+      "state": "open"
+    },
+    {
+      "title": "0.2.x Agent Runtime and MCP",
+      "description": "Agent runtime, workers, subagents, memory service, and MCP integration.",
+      "state": "open"
+    },
+    {
+      "title": "0.3.x Extension Host and compatibility",
+      "description": "Extension host, VSIX installer, and VS Code API compatibility.",
+      "state": "open"
+    },
+    {
+      "title": "1.0 Stabilize MVP",
+      "description": "Final stabilization, hardening, and MVP readiness.",
+      "state": "open"
+    }
+  ],
+  "roadmapIssue": {
+    "enabled": true,
+    "title": "Project Status / Roadmap",
+    "labels": [
+      "roadmap"
+    ],
+    "bodyPath": ".github/roadmap-issue.md",
+    "pin": true
+  }
+}

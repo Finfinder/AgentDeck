@@ -12,7 +12,11 @@ const tabs: EditorTab[] = [
     fileName: 'app.ts',
     language: 'typescript',
     isDirty: false,
-    isPinned: false
+    isPinned: false,
+    revealLine: null,
+    revealCol: null,
+    revealPattern: null,
+    revealNonce: 0
   },
   {
     id: 'tab-2',
@@ -20,7 +24,11 @@ const tabs: EditorTab[] = [
     fileName: 'main.ts',
     language: 'typescript',
     isDirty: true,
-    isPinned: false
+    isPinned: false,
+    revealLine: null,
+    revealCol: null,
+    revealPattern: null,
+    revealNonce: 0
   },
   {
     id: 'tab-3',
@@ -28,7 +36,11 @@ const tabs: EditorTab[] = [
     fileName: 'config.json',
     language: 'json',
     isDirty: false,
-    isPinned: true
+    isPinned: true,
+    revealLine: null,
+    revealCol: null,
+    revealPattern: null,
+    revealNonce: 0
   }
 ];
 
@@ -83,14 +95,14 @@ describe('EditorTabs', () => {
         onClose={vi.fn()}
       />
     );
-    // Dirty tab name span should contain the bullet character.
+    // Dirty tab name span should contain the dirty indicator.
     const tabButtons = screen.getAllByRole('tab');
-    // tab-2 (main.ts) is dirty — its name span includes ' \u2022'.
+    // tab-2 (main.ts) is dirty — its name span includes ' *'.
     const dirtyTabButton = tabButtons.find(
       (btn) => btn.getAttribute('aria-controls') === 'editor-panel-tab-2'
     );
     expect(dirtyTabButton).toBeDefined();
-    expect(dirtyTabButton!.textContent).toContain('•');
+    expect(dirtyTabButton!.textContent).toContain('*');
   });
 
   it('calls onSelect when tab is clicked', async () => {
@@ -124,20 +136,6 @@ describe('EditorTabs', () => {
     const closeButtons = screen.getAllByRole('button', { name: /Close/ });
     await userEvent.click(closeButtons[0]!);
     expect(onClose).toHaveBeenCalledWith('tab-1');
-  });
-
-  it('renders language labels', () => {
-    render(
-      <EditorTabs
-        tabs={tabs}
-        activeTabId="tab-1"
-        onSelect={vi.fn()}
-        onClose={vi.fn()}
-      />
-    );
-    // Language labels are rendered as small text in each tab.
-    const languageLabels = screen.getAllByText(/typescript|json/);
-    expect(languageLabels.length).toBeGreaterThanOrEqual(2);
   });
 
   it('marks pinned tabs with pinned class', () => {

@@ -12,6 +12,21 @@ function mockPreloadApi(overrides: Partial<Record<string, unknown>> = {}) {
     versions: { chrome: '130.0.0', electron: '42.3.0', node: '25.0.0' },
     getThemeSettings: vi.fn().mockResolvedValue({ theme: 'dark' }),
     setThemeSettings: vi.fn().mockImplementation(async (s: unknown) => s),
+    onFsEvent: vi.fn().mockReturnValue(() => undefined),
+    readFile: vi.fn().mockResolvedValue({ status: 'ok', content: '', encoding: 'utf8' }),
+    writeFile: vi.fn().mockResolvedValue({ status: 'ok' }),
+    markBufferDirty: vi.fn().mockResolvedValue(undefined),
+    deleteFile: vi.fn().mockResolvedValue({ status: 'ok' }),
+    renameFile: vi.fn().mockResolvedValue({ status: 'ok' }),
+    getEditorDiagnostics: vi.fn().mockResolvedValue([]),
+    applyWorkspaceEdit: vi.fn().mockResolvedValue({ status: 'ok' }),
+    showDiff: vi.fn().mockResolvedValue({ status: 'ok', diff: '' }),
+    showSaveDialog: vi.fn().mockResolvedValue(null),
+    toggleDevTools: vi.fn().mockResolvedValue(undefined),
+    openWorkspace: vi.fn().mockResolvedValue({ status: 'error', code: 'FILE_NOT_FOUND', message: 'Test' }),
+    listDirectory: vi.fn().mockResolvedValue({ path: '/', entries: [] }),
+    searchFiles: vi.fn().mockResolvedValue([]),
+    getRecentWorkspaces: vi.fn().mockResolvedValue([]),
     ...overrides
   };
 
@@ -61,3 +76,4 @@ describe('App error handling', () => {
     expect(await screen.findByRole('status', { name: 'Workspace status' })).toHaveTextContent('Unable to open workspace picker.');
   });
 });
+

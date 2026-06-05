@@ -13,7 +13,7 @@ Quick summary:
 
 ## Quick Start (dev)
 
-Prerequisites:
+Prerequisites: 
 
 - Node.js 22+ or a current LTS compatible with Vite 7
 - npm

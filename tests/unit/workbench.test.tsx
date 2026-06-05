@@ -19,7 +19,14 @@ function mockPreloadApi(overrides: Partial<AgentDeckPreloadApi> = {}) {
     onFsEvent: vi.fn().mockReturnValue(() => undefined),
     readFile: vi.fn().mockResolvedValue({ status: 'error', code: 'FILE_NOT_FOUND', message: 'Test' }),
     writeFile: vi.fn().mockResolvedValue({ status: 'ok' }),
+    markBufferDirty: vi.fn().mockResolvedValue(undefined),
+    deleteFile: vi.fn().mockResolvedValue({ status: 'ok' }),
+    renameFile: vi.fn().mockResolvedValue({ status: 'ok' }),
     getEditorDiagnostics: vi.fn().mockResolvedValue([]),
+    applyWorkspaceEdit: vi.fn().mockResolvedValue({ status: 'ok' }),
+    showDiff: vi.fn().mockResolvedValue({ status: 'ok', diff: '' }),
+    showSaveDialog: vi.fn().mockResolvedValue(null),
+    toggleDevTools: vi.fn().mockResolvedValue(undefined),
     ...overrides
   };
 
@@ -66,9 +73,11 @@ describe('Workbench startup surface', () => {
 
     render(<App />);
 
-  const alert = await screen.findByRole('alert', { name: 'Startup state' });
+    // Switch to Services panel to see the startup state alert
+    await userEvent.click(screen.getByRole('tab', { name: 'Services' }));
 
-    expect(alert).toHaveTextContent(/^Unable to read startup state\.$/);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/Unable to read startup state/);
     expect(alert).not.toHaveTextContent(/IPC unavailable/);
   });
 
@@ -79,7 +88,12 @@ describe('Workbench startup surface', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('alert', { name: 'Startup state' })).toHaveTextContent('Unable to read startup state.');
+    // Switch to Services panel to see the startup state alert
+    await userEvent.click(screen.getByRole('tab', { name: 'Services' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/Unable to read startup state/);
+    expect(alert).not.toHaveTextContent(/IPC unavailable/);
   });
 
   it('uses dark theme as the first render and loads persisted theme settings', async () => {

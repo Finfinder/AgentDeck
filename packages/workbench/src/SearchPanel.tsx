@@ -6,10 +6,11 @@ import type { AgentDeckPreloadApi, SearchResult, WorkspaceModel } from '@agentde
 interface SearchPanelProps {
   readonly agent: AgentDeckPreloadApi;
   readonly workspaceModel: WorkspaceModel & { status: 'ok' };
+  readonly onFileOpen: (filePath: string, line: number, col: number, pattern?: string, revealNonce?: number) => void;
 }
 
 
-export function SearchPanel({ agent, workspaceModel }: SearchPanelProps) {
+export function SearchPanel({ agent, workspaceModel, onFileOpen }: SearchPanelProps) {
   const [pattern, setPattern] = useState('');
   const [results, setResults] = useState<readonly SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -39,7 +40,7 @@ export function SearchPanel({ agent, workspaceModel }: SearchPanelProps) {
 
   return (
     <section className="search-panel" aria-label="Search">
-      <form className="search-form" onSubmit={e => { e.preventDefault(); void runSearch(pattern); }} role="search">
+      <form className="search-form" onSubmit={e => { e.preventDefault(); runSearch(pattern).catch(err => console.error('[SearchPanel] Search error:', err)); }} role="search">
         <label className="search-label" htmlFor="search-input">
           Search
         </label>
@@ -71,14 +72,17 @@ export function SearchPanel({ agent, workspaceModel }: SearchPanelProps) {
 
       {results.length > 0 && (
         <ul className="search-results" aria-label={`${results.length.toString()} search results`}>
-          {results.map((result, idx) => (
-            <li
-              key={`${result.file}:${result.line.toString()}:${result.col.toString()}:${idx.toString()}`}
-              className={`search-result-item${result.isSensitive ? ' sensitive' : ''}`}
-            >
-              <span className="search-result-file" title={result.file}>{pathBasename(result.file)}</span>
-              <span className="search-result-location">:{result.line}:{result.col}</span>
-              <span className="search-result-snippet">{result.snippet}</span>
+          {results.map(result => (
+            <li key={`${result.file}:${result.line}:${result.col}`}>
+              <button
+                type="button"
+                className={`search-result-item${result.isSensitive ? ' sensitive' : ''}`}
+                onClick={() => { onFileOpen(result.file, result.line, result.col, pattern, Date.now()); }}
+              >
+                <span className="search-result-file" title={result.file}>{pathBasename(result.file)}</span>
+                <span className="search-result-location">:{result.line}:{result.col}</span>
+                <span className="search-result-snippet">{result.snippet}</span>
+              </button>
             </li>
           ))}
         </ul>

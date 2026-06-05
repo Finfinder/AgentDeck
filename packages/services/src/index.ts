@@ -92,6 +92,7 @@ export { readThemeSettings, writeThemeSettings, DEFAULT_THEME_SETTINGS } from '.
 export type { ThemeSettings } from './settings';
 export { createWorkspaceService, isSensitivePath, parseCodeWorkspace, stripJsoncComments, WorkspaceService } from './workspace-service';
 export {
+  applyWorkspaceEdit,
   clearBuffers,
   closeBuffer,
   createEditorTab,
@@ -102,5 +103,6 @@ export {
   markBufferDirty,
   readEditorFile,
   resolveLanguage,
+  showDiff,
   writeEditorFile
 } from './editor-service';

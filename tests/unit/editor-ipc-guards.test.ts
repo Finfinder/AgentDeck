@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isEditorLanguage,
   isEditorTab,
+  isFileOperationResult,
   isFileReadResult,
   isFileWriteResult
 } from '@agentdeck/shared';
@@ -177,6 +178,60 @@ describe('editor IPC guards', () => {
 
     it('rejects null', () => {
       expect(isFileWriteResult(null)).toBe(false);
+    });
+  });
+
+  describe('isFileOperationResult', () => {
+    it('accepts ok result', () => {
+      expect(isFileOperationResult({ status: 'ok' })).toBe(true);
+    });
+
+    it('accepts error result with FILE_NOT_FOUND', () => {
+      expect(isFileOperationResult({
+        status: 'error',
+        code: 'FILE_NOT_FOUND',
+        message: 'not found'
+      })).toBe(true);
+    });
+
+    it('accepts error result with ACCESS_DENIED', () => {
+      expect(isFileOperationResult({
+        status: 'error',
+        code: 'ACCESS_DENIED',
+        message: 'denied'
+      })).toBe(true);
+    });
+
+    it('accepts error result with UNKNOWN', () => {
+      expect(isFileOperationResult({
+        status: 'error',
+        code: 'UNKNOWN',
+        message: 'unknown'
+      })).toBe(true);
+    });
+
+    it('rejects invalid error code', () => {
+      expect(isFileOperationResult({
+        status: 'error',
+        code: 'INVALID_CODE',
+        message: 'test'
+      })).toBe(false);
+    });
+
+    it('rejects when message is missing in error result', () => {
+      expect(isFileOperationResult({
+        status: 'error',
+        code: 'FILE_NOT_FOUND'
+      })).toBe(false);
+    });
+
+    it('rejects null', () => {
+      expect(isFileOperationResult(null)).toBe(false);
+    });
+
+    it('rejects non-object', () => {
+      expect(isFileOperationResult('ok')).toBe(false);
+      expect(isFileOperationResult(42)).toBe(false);
     });
   });
 });

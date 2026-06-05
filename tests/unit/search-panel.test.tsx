@@ -19,7 +19,14 @@ function mockAgent(overrides: Partial<AgentDeckPreloadApi> = {}): AgentDeckPrelo
     onFsEvent: vi.fn().mockReturnValue(() => undefined),
     readFile: vi.fn().mockResolvedValue({ status: 'error', code: 'FILE_NOT_FOUND', message: 'Test' }),
     writeFile: vi.fn().mockResolvedValue({ status: 'ok' }),
+    markBufferDirty: vi.fn().mockResolvedValue(undefined),
+    deleteFile: vi.fn().mockResolvedValue({ status: 'ok' }),
+    renameFile: vi.fn().mockResolvedValue({ status: 'ok' }),
     getEditorDiagnostics: vi.fn().mockResolvedValue([]),
+    applyWorkspaceEdit: vi.fn().mockResolvedValue({ status: 'ok' }),
+    showDiff: vi.fn().mockResolvedValue({ status: 'ok', diff: '' }),
+    showSaveDialog: vi.fn().mockResolvedValue(null),
+    toggleDevTools: vi.fn().mockResolvedValue(undefined),
     ...overrides
   };
 }
@@ -31,9 +38,11 @@ const workspaceModel: WorkspaceModel & { status: 'ok' } = {
   folders: [{ path: '/workspace', name: 'workspace' }]
 };
 
+const mockOnFileOpen = vi.fn();
+
 describe('SearchPanel', () => {
   it('renders search form with input and button', () => {
-    render(<SearchPanel agent={mockAgent()} workspaceModel={workspaceModel} />);
+    render(<SearchPanel agent={mockAgent()} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
 
     expect(screen.getByRole('search')).toBeInTheDocument();
     expect(screen.getByRole('searchbox', { name: 'Search pattern' })).toBeInTheDocument();
@@ -41,14 +50,14 @@ describe('SearchPanel', () => {
   });
 
   it('disables search button when pattern is empty', () => {
-    render(<SearchPanel agent={mockAgent()} workspaceModel={workspaceModel} />);
+    render(<SearchPanel agent={mockAgent()} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
 
     expect(screen.getByRole('button', { name: 'Run search' })).toBeDisabled();
   });
 
   it('enables search button when pattern has content', async () => {
     const user = userEvent.setup();
-    render(<SearchPanel agent={mockAgent()} workspaceModel={workspaceModel} />);
+    render(<SearchPanel agent={mockAgent()} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
 
     await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'test');
 
@@ -60,7 +69,7 @@ describe('SearchPanel', () => {
     const searchFiles = vi.fn().mockResolvedValue([]);
     const agent = mockAgent({ searchFiles });
 
-    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
 
     await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'hello');
     await user.click(screen.getByRole('button', { name: 'Run search' }));
@@ -82,7 +91,7 @@ describe('SearchPanel', () => {
     const searchFiles = vi.fn().mockResolvedValue(results);
     const agent = mockAgent({ searchFiles });
 
-    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
 
     await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'const');
     await user.click(screen.getByRole('button', { name: 'Run search' }));
@@ -102,12 +111,12 @@ describe('SearchPanel', () => {
     const searchFiles = vi.fn().mockResolvedValue(results);
     const agent = mockAgent({ searchFiles });
 
-    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
 
     await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'SECRET');
     await user.click(screen.getByRole('button', { name: 'Run search' }));
 
-    const item = await screen.findByRole('listitem');
+    const item = (await screen.findByText('SECRET=abc')).closest('.search-result-item')!;
     expect(item).toHaveClass('sensitive');
   });
 
@@ -116,7 +125,7 @@ describe('SearchPanel', () => {
     const searchFiles = vi.fn().mockResolvedValue([]);
     const agent = mockAgent({ searchFiles });
 
-    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
 
     await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'nothing');
     await user.click(screen.getByRole('button', { name: 'Run search' }));
@@ -129,7 +138,7 @@ describe('SearchPanel', () => {
     const searchFiles = vi.fn().mockRejectedValue(new Error('Search service unavailable'));
     const agent = mockAgent({ searchFiles });
 
-    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
 
     await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'fail');
     await user.click(screen.getByRole('button', { name: 'Run search' }));
@@ -146,7 +155,7 @@ describe('SearchPanel', () => {
     );
     const agent = mockAgent({ searchFiles });
 
-    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
 
     await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'slow');
     await user.click(screen.getByRole('button', { name: 'Run search' }));
@@ -169,7 +178,7 @@ describe('SearchPanel', () => {
     );
     const agent = mockAgent({ searchFiles });
 
-    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
 
     await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'slow');
     await user.click(screen.getByRole('button', { name: 'Run search' }));
@@ -188,7 +197,7 @@ describe('SearchPanel', () => {
     const searchFiles = vi.fn().mockResolvedValue([]);
     const agent = mockAgent({ searchFiles });
 
-    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} />);
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
 
     await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), '   ');
     await user.click(screen.getByRole('button', { name: 'Run search' }));
@@ -211,7 +220,7 @@ describe('SearchPanel', () => {
       ]
     };
 
-    render(<SearchPanel agent={agent} workspaceModel={multiRootWorkspace} />);
+    render(<SearchPanel agent={agent} workspaceModel={multiRootWorkspace} onFileOpen={mockOnFileOpen} />);
 
     await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'test');
     await user.click(screen.getByRole('button', { name: 'Run search' }));
@@ -224,3 +233,4 @@ describe('SearchPanel', () => {
     });
   });
 });
+

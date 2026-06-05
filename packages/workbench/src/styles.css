@@ -85,8 +85,9 @@ button[aria-selected="true"] {
 .workbench-shell {
   display: grid;
   grid-template-columns: 52px 292px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) 220px 28px;
+  grid-template-rows: 30px minmax(0, 1fr) 220px 28px;
   grid-template-areas:
+    "menubar menubar menubar"
     "activity sidebar editor"
     "activity sidebar panel"
     "status status status";
@@ -208,45 +209,17 @@ button[aria-selected="true"] {
   font-size: 0.82rem;
 }
 
-.editor-area {
-  grid-area: editor;
-  display: grid;
-  grid-template-rows: 36px minmax(0, 1fr);
-  min-width: 0;
-  background: var(--color-editor);
-}
-
-.editor-tabs,
-.panel-tabs {
-  display: flex;
-  align-items: end;
-  gap: var(--space-1);
-  min-width: 0;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-panel);
-}
-
-.editor-tab,
-.panel-tabs button {
-  align-self: stretch;
-  min-width: 104px;
-  padding: 0 var(--space-4);
-  border: 0;
-  border-right: 1px solid var(--color-border);
-  border-radius: 0;
-  background: transparent;
-}
-
-.editor-tab.active,
-.panel-tabs button[aria-selected="true"] {
-  background: var(--color-editor);
-}
+/* Editor area and tabs styling consolidated later in the file to avoid duplicates. */
 
 .editor-surface {
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  position: relative;
   min-width: 0;
   min-height: 0;
+  height: 100%;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .editor-gutter {
@@ -336,14 +309,14 @@ h2 {
 .status-bar {
   grid-area: status;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: var(--space-4);
   min-width: 0;
   padding: 0 var(--space-3);
   border-top: 1px solid var(--color-border);
-  background: var(--color-accent);
-  color: var(--color-on-accent);
+  background: var(--color-panel);
+  color: var(--color-text);
   font-size: 0.78rem;
 }
 
@@ -353,6 +326,42 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.status-bar-diagnostics {
+  display: inline-flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.status-bar-diag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.status-bar-diag-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.status-bar-diag--error {
+  color: #f48771;
+}
+
+.status-bar-diag--warning {
+  color: #cca700;
+}
+
+.status-bar-diag--info {
+  color: #75beff;
+}
+
+.status-bar-diag--hint {
+  color: #b0b0b0;
 }
 
 .theme-switcher {
@@ -494,6 +503,53 @@ h2 {
   color: var(--color-subtle);
 }
 
+/* Context menu shown on right-click in the file tree */
+.context-menu {
+  position: fixed;
+  z-index: 2200;
+  min-width: 160px;
+  max-width: 360px;
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-panel);
+  padding: 6px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: auto;
+  max-height: calc(100vh - 16px);
+}
+
+.context-menu-item {
+  background: none;
+  border: none;
+  color: var(--color-text);
+  text-align: left;
+  padding: 6px 12px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.context-menu-item:active {
+  background: rgba(255,255,255,0.06);
+}
+
+.context-menu-item-danger {
+  color: var(--color-danger);
+}
+
+.context-menu-separator {
+  height: 1px;
+  background: var(--color-border);
+  margin: 4px 0;
+}
+
 /* ??? Search Panel ???????????????????????????????????????????? */
 
 .search-panel {
@@ -575,6 +631,11 @@ h2 {
   border-bottom: 1px solid var(--color-border);
   white-space: nowrap;
   overflow: hidden;
+  cursor: pointer;
+}
+
+.search-result-item:hover {
+  background: var(--color-panel-raised);
 }
 
 .search-result-item.sensitive {
@@ -682,13 +743,6 @@ h2 {
   flex: 1;
 }
 
-.editor-tab-language {
-  color: var(--color-subtle);
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  flex-shrink: 0;
-}
-
 .editor-tab-close {
   width: 20px;
   height: 20px;
@@ -710,17 +764,12 @@ h2 {
   color: var(--color-text);
 }
 
-.editor-surface {
-  min-width: 0;
-  min-height: 0;
-  position: relative;
-}
-
 .editor-surface-loading,
 .editor-surface-error,
 .editor-welcome {
-  display: grid;
-  align-content: center;
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
   justify-content: center;
   gap: var(--space-3);
   min-width: 0;
@@ -760,6 +809,25 @@ h2 {
   inset: 0;
 }
 
+.editor-surface .monaco-editor .overflow-guard {
+  inset: 0;
+}
+
+.editor-surface .monaco-editor .find-widget,
+.editor-surface .monaco-editor .replace-widget,
+.editor-surface .monaco-editor .find-query,
+.editor-surface .monaco-editor .replace-query,
+.editor-surface .monaco-editor .findInput,
+.editor-surface .monaco-editor .replaceInput,
+.editor-surface .monaco-editor .monaco-find-input,
+.editor-surface .monaco-editor .monaco-replace-input,
+.editor-surface .monaco-editor .findMatch,
+.editor-surface .monaco-editor .replaceMatch,
+.editor-surface .monaco-editor .findScope,
+.editor-surface .monaco-editor .replaceScope {
+  display: none !important;
+}
+
 /* ??? File tree file button ????????????????????????????????? */
 
 .file-tree-file-button {
@@ -783,3 +851,364 @@ h2 {
 .file-tree-file-button:hover {
   background: rgba(255, 255, 255, 0.05);
 }
+
+/* Close dirty tab confirmation dialog */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  border: none;
+  outline: none;
+  padding: 0;
+  color: inherit;
+  overflow: hidden;
+}
+
+.dialog-overlay::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.workbench-shell[data-theme="light"] .dialog-overlay {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.workbench-shell[data-theme="light"] .dialog-overlay::backdrop {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.dialog {
+  min-width: 360px;
+  max-width: 480px;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-panel);
+  box-shadow: var(--shadow-panel);
+}
+
+.workbench-shell[data-theme="light"] .dialog {
+  border-color: var(--color-border);
+  background: var(--color-panel);
+}
+
+.dialog-title {
+  margin: 0 0 var(--space-4) 0;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.dialog-button {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: var(--color-panel-raised);
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.dialog-button:hover {
+  background: var(--color-border);
+}
+
+.dialog-button.primary {
+  border-color: var(--color-accent);
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+}
+
+.dialog-button.primary:hover {
+  background: var(--color-accent-strong);
+}
+
+.dialog-input {
+  width: 100%;
+  padding: 6px 10px;
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: var(--color-editor);
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.dialog-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+/* Write conflict dialog */
+.dialog-conflict {
+  min-width: 400px;
+  max-width: 540px;
+}
+
+.dialog-conflict-icon {
+  margin-bottom: var(--space-3);
+  color: var(--color-warning);
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.dialog-body {
+  margin: 0 0 var(--space-4) 0;
+  color: var(--color-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+
+/* Menu bar */
+.menu-bar {
+  grid-area: menubar;
+  display: flex;
+  align-items: stretch;
+  height: 30px;
+  min-height: 30px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-panel);
+  user-select: none;
+}
+
+.menu-bar-item {
+  position: relative;
+}
+
+.menu-bar-button {
+  height: 100%;
+  min-height: 0;
+  padding: 0 10px;
+  border: none;
+  border-radius: 0;
+  color: var(--color-text);
+  background: transparent;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.menu-bar-button:hover {
+  background: var(--color-panel-raised);
+}
+
+.menu-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 1000;
+  min-width: 220px;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: 0 0 var(--radius-control) var(--radius-control);
+  background: var(--color-panel);
+  box-shadow: var(--shadow-panel);
+}
+
+.menu-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 5px 12px;
+  color: var(--color-text);
+  font-size: 0.82rem;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.menu-dropdown .menu-dropdown-item {
+  background: transparent !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  border: none !important;
+  width: 100%;
+  text-align: left;
+}
+
+.menu-dropdown .menu-dropdown-item:hover {
+  background: color-mix(in srgb, var(--color-panel) 70%, var(--color-accent) 30%) !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+}
+
+.menu-dropdown .menu-dropdown-item.disabled:hover {
+  background: transparent !important;
+}
+
+.menu-dropdown-item.disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
+.menu-dropdown-item.disabled:hover {
+  background: transparent;
+}
+
+.menu-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-item-shortcut {
+  flex-shrink: 0;
+  color: var(--color-subtle);
+  font-size: 0.76rem;
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--color-border);
+}
+
+/* ??? Problems Panel - Grouped by file ?????????????????????? */
+
+.problems-group-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.problems-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.problems-group-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 3px 8px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  min-height: 22px;
+}
+
+.problems-group-header:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.problems-group-toggle {
+  flex-shrink: 0;
+  width: 12px;
+  font-size: 0.65rem;
+  color: var(--color-subtle);
+  transition: transform 0.15s ease;
+}
+
+.problems-group-toggle--collapsed {
+  transform: rotate(-90deg);
+}
+
+.problems-group-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problems-group-count {
+  flex-shrink: 0;
+  color: var(--color-subtle);
+  font-weight: 400;
+  font-size: 0.72rem;
+}
+
+.problems-group .problems-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.problems-group .problems-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 8px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 0.76rem;
+  cursor: pointer;
+  text-align: left;
+  min-height: 20px;
+}
+
+.problems-group .problems-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.problems-group .problems-severity {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 0.72rem;
+}
+
+.problems-severity--error {
+  color: #f48771;
+}
+
+.problems-severity--warning {
+  color: #cca700;
+}
+
+.problems-severity--info {
+  color: #75beff;
+}
+
+.problems-severity--hint {
+  color: #b0b0b0;
+}
+
+.problems-group .problems-message {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problems-group .problems-source {
+  flex-shrink: 0;
+  color: var(--color-subtle);
+  font-size: 0.7rem;
+}
+
+.problems-group .problems-location {
+  flex-shrink: 0;
+  color: var(--color-subtle);
+  font-size: 0.7rem;
+}
+
+
+

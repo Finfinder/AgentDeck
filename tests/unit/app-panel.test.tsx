@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -19,7 +19,14 @@ function mockPreloadApi(overrides: Partial<AgentDeckPreloadApi> = {}): AgentDeck
     onFsEvent: vi.fn().mockReturnValue(() => undefined),
     readFile: vi.fn().mockResolvedValue({ status: 'error', code: 'FILE_NOT_FOUND', message: 'Test' }),
     writeFile: vi.fn().mockResolvedValue({ status: 'ok' }),
+    markBufferDirty: vi.fn().mockResolvedValue(undefined),
+    deleteFile: vi.fn().mockResolvedValue({ status: 'ok' }),
+    renameFile: vi.fn().mockResolvedValue({ status: 'ok' }),
     getEditorDiagnostics: vi.fn().mockResolvedValue([]),
+    applyWorkspaceEdit: vi.fn().mockResolvedValue({ status: 'ok' }),
+    showDiff: vi.fn().mockResolvedValue({ status: 'ok', diff: '' }),
+    showSaveDialog: vi.fn().mockResolvedValue(null),
+    toggleDevTools: vi.fn().mockResolvedValue(undefined),
     ...overrides
   };
 }
@@ -52,7 +59,7 @@ describe('App workspace open (folder)', () => {
     });
 
     setAgentDeck(mockPreloadApi({ selectWorkspaceEntry, openWorkspace }));
-    render(<App />);
+    await act(async () => { render(<App />); });
 
     await user.click(screen.getByRole('button', { name: 'Open folder' }));
 
@@ -69,7 +76,7 @@ describe('App workspace open (folder)', () => {
     const selectWorkspaceEntry = vi.fn().mockResolvedValue({ status: 'cancelled' });
 
     setAgentDeck(mockPreloadApi({ selectWorkspaceEntry }));
-    render(<App />);
+    await act(async () => { render(<App />); });
 
     await user.click(screen.getByRole('button', { name: 'Open workspace' }));
 
@@ -93,7 +100,7 @@ describe('App workspace open (folder)', () => {
     });
 
     setAgentDeck(mockPreloadApi({ selectWorkspaceEntry, openWorkspace }));
-    render(<App />);
+    await act(async () => { render(<App />); });
 
     await user.click(screen.getByRole('button', { name: 'Open workspace' }));
 
@@ -107,7 +114,7 @@ describe('App workspace open (folder)', () => {
     const selectWorkspaceEntry = vi.fn().mockRejectedValue(new Error('IPC failure'));
 
     setAgentDeck(mockPreloadApi({ selectWorkspaceEntry }));
-    render(<App />);
+    await act(async () => { render(<App />); });
 
     await user.click(screen.getByRole('button', { name: 'Open workspace' }));
 
@@ -126,7 +133,7 @@ describe('App theme settings', () => {
     setAgentDeck(mockPreloadApi({
       getThemeSettings: vi.fn().mockRejectedValue(new Error('fail'))
     }));
-    render(<App />);
+    await act(async () => { render(<App />); });
 
     expect(await screen.findByRole('status', { name: 'Theme settings' })).toHaveTextContent('Unable to read theme settings.');
   });
@@ -136,7 +143,7 @@ describe('App theme settings', () => {
     setAgentDeck(mockPreloadApi({
       setThemeSettings: vi.fn().mockRejectedValue(new Error('save failed'))
     }));
-    render(<App />);
+    await act(async () => { render(<App />); });
 
     await user.click(screen.getByRole('button', { name: 'Light' }));
 
@@ -149,8 +156,8 @@ describe('App panel switching', () => {
     setAgentDeck(mockPreloadApi());
   });
 
-  it('disables search button when no workspace is open', () => {
-    render(<App />);
+  it('disables search button when no workspace is open', async () => {
+    await act(async () => { render(<App />); });
 
     expect(screen.getByRole('button', { name: 'Search' })).toBeDisabled();
   });
@@ -171,7 +178,7 @@ describe('App panel switching', () => {
     });
 
     setAgentDeck(mockPreloadApi({ selectWorkspaceEntry, openWorkspace }));
-    render(<App />);
+    await act(async () => { render(<App />); });
 
     await user.click(screen.getByRole('button', { name: 'Open folder' }));
 
@@ -197,7 +204,7 @@ describe('App panel switching', () => {
     const searchFiles = vi.fn().mockResolvedValue([]);
 
     setAgentDeck(mockPreloadApi({ selectWorkspaceEntry, openWorkspace, searchFiles }));
-    render(<App />);
+    await act(async () => { render(<App />); });
 
     await user.click(screen.getByRole('button', { name: 'Open folder' }));
     await waitFor(() => screen.getByRole('button', { name: 'Search' }));
@@ -225,7 +232,10 @@ describe('App startup services', () => {
         ]
       })
     }));
-    render(<App />);
+    await act(async () => { render(<App />); });
+
+    // Switch to Services panel to see the service list
+    await userEvent.click(screen.getByRole('tab', { name: 'Services' }));
 
     const serviceList = await screen.findByRole('list', { name: 'Startup services' });
     expect(serviceList).toBeInTheDocument();
@@ -235,13 +245,13 @@ describe('App startup services', () => {
   });
 
   it('does not render service list when no services', async () => {
-    render(<App />);
+    await act(async () => { render(<App />); });
 
     await screen.findByRole('status', { name: 'Startup state' });
     expect(screen.queryByRole('list', { name: 'Startup services' })).not.toBeInTheDocument();
   });
 
-  it('renders app version from startup state', async () => {
+  it('renders ready status from startup state', async () => {
     setAgentDeck(mockPreloadApi({
       getStartupState: vi.fn().mockResolvedValue({
         status: 'ready',
@@ -249,9 +259,9 @@ describe('App startup services', () => {
         services: []
       })
     }));
-    render(<App />);
+    await act(async () => { render(<App />); });
 
-    expect(await screen.findByText('v1.2.3')).toBeInTheDocument();
+    expect(await screen.findByRole('status', { name: 'Startup state' })).toHaveTextContent('Ready');
   });
 });
 
@@ -275,7 +285,7 @@ describe('App workspace error display in sidebar', () => {
     });
 
     setAgentDeck(mockPreloadApi({ selectWorkspaceEntry, openWorkspace }));
-    render(<App />);
+    await act(async () => { render(<App />); });
 
     await user.click(screen.getByRole('button', { name: 'Open workspace' }));
 
@@ -284,10 +294,49 @@ describe('App workspace error display in sidebar', () => {
   });
 
   it('shows "No workspace opened" when no workspace and no selection', async () => {
-    render(<App />);
+    await act(async () => { render(<App />); });
 
     await waitFor(() => {
       expect(screen.getByRole('status', { name: 'Workspace status' })).toHaveTextContent('No workspace opened.');
     });
   });
+
+  it('opens editor tab when a file is clicked in Explorer', async () => {
+    const user = userEvent.setup();
+    const selectWorkspaceEntry = vi.fn().mockResolvedValue({
+      status: 'selected',
+      kind: 'folder',
+      path: '/ws',
+      name: 'ws'
+    });
+    const openWorkspace = vi.fn().mockResolvedValue({
+      status: 'ok',
+      filePath: '/ws',
+      kind: 'folder',
+      folders: [{ path: '/ws', name: 'ws' }]
+    });
+    const listDirectory = vi.fn().mockResolvedValue({
+      path: '/ws',
+      entries: [
+        { name: 'index.ts', path: '/ws/index.ts', kind: 'file', isSensitive: false }
+      ]
+    });
+
+    setAgentDeck(mockPreloadApi({ selectWorkspaceEntry, openWorkspace, listDirectory }));
+    await act(async () => { render(<App />); });
+
+    // Open folder
+    await user.click(screen.getByRole('button', { name: 'Open folder' }));
+    await waitFor(() => screen.getByRole('region', { name: 'Explorer' }));
+
+    // Click on file in Explorer
+    const fileButton = await screen.findByRole('treeitem', { name: 'Open file index.ts' });
+    await user.click(fileButton);
+
+    // Editor tab should appear with the file name
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /index.ts/ })).toBeInTheDocument();
+    });
+  });
 });
+

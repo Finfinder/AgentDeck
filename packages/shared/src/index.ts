@@ -3,8 +3,10 @@ export {
 	DEFAULT_THEME_SETTINGS,
 	IPC_CHANNELS,
 	isDirectoryListing,
+	isString,
 	isEditorLanguage,
 	isEditorTab,
+	isFileOperationResult,
 	isFileReadResult,
 	isFileWriteResult,
 	isFsChangeEvent,
@@ -12,7 +14,11 @@ export {
 	isThemeSettings,
 	isWorkspaceModel,
 	isWorkspaceOpenRequest,
-	isWorkspaceSelection
+	isWorkspaceSelection,
+	isWorkspaceEditInput,
+	isWorkspaceEditResult,
+	isDiffInput,
+	isDiffResult
 } from './ipc';
 export { pathBasename, normalizePathStr } from './path';
 export type { DomainEntityName, DomainOwnership, ModuleName } from './domain';
@@ -27,6 +33,7 @@ export type {
 	EditorTabInput,
 	FileEntry,
 	FileEntryKind,
+	FileOperationResult,
 	FileReadResult,
 	FileWriteResult,
 	FsChangeEvent,
@@ -43,5 +50,10 @@ export type {
 	WorkspaceOpenKind,
 	WorkspaceOpenRequest,
 	WorkspaceParseErrorCode,
-	WorkspaceSelection
+	WorkspaceSelection,
+	WorkspaceEditInput,
+	WorkspaceEditOperation,
+	WorkspaceEditResult,
+	DiffInput,
+	DiffResult
 } from './ipc';

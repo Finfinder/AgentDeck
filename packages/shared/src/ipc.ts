@@ -10,8 +10,15 @@ export const IPC_CHANNELS = {
   fsEvent: 'agentdeck:v1:workspace:fs-event',
   readFile: 'agentdeck:v1:editor:read-file',
   writeFile: 'agentdeck:v1:editor:write-file',
-  getEditorDiagnostics: 'agentdeck:v1:editor:get-diagnostics'
-} as const;
+  markBufferDirty: 'agentdeck:v1:editor:mark-buffer-dirty',
+  deleteFile: 'agentdeck:v1:workspace:delete-file',
+  renameFile: 'agentdeck:v1:workspace:rename-file',
+  getEditorDiagnostics: 'agentdeck:v1:editor:get-diagnostics',
+  applyWorkspaceEdit: 'agentdeck:v1:editor:apply-workspace-edit',
+  showDiff: 'agentdeck:v1:editor:show-diff',
+  showSaveDialog: 'agentdeck:v1:dialog:show-save',
+  toggleDevTools: 'agentdeck:v1:devtools:toggle'
+} as const satisfies Record<string, string>;
 
 export type ThemePreference = 'dark' | 'light';
 
@@ -131,6 +138,15 @@ export type EditorLanguage =
   | 'yaml'
   | 'markdown'
   | 'powershell'
+  | 'python'
+  | 'cpp'
+  | 'c'
+  | 'csharp'
+  | 'css'
+  | 'scss'
+  | 'less'
+  | 'html'
+  | 'dockerfile'
   | 'plaintext';
 
 export type EditorTab = Readonly<{
@@ -140,10 +156,18 @@ export type EditorTab = Readonly<{
   language: EditorLanguage;
   isDirty: boolean;
   isPinned: boolean;
+  revealLine: number | null;
+  revealCol: number | null;
+  revealPattern: string | null;
+  revealNonce: number;
 }>;
 
 export type EditorTabInput = Readonly<{
   filePath: string;
+  line?: number;
+  col?: number;
+  pattern?: string;
+  revealNonce?: number;
 }>;
 
 export type FileReadResult =
@@ -168,6 +192,16 @@ export type FileWriteResult =
       message: string;
     }>;
 
+export type FileOperationResult =
+  | Readonly<{
+      status: 'ok';
+    }>
+  | Readonly<{
+      status: 'error';
+      code: 'FILE_NOT_FOUND' | 'ACCESS_DENIED' | 'UNKNOWN';
+      message: string;
+    }>;
+
 export type DiagnosticSeverity = 'error' | 'warning' | 'info' | 'hint';
 
 export type EditorDiagnostic = Readonly<{
@@ -180,7 +214,36 @@ export type EditorDiagnostic = Readonly<{
 }>;
 
 export type EditorSplitDirection = 'horizontal' | 'vertical';
+// ?? WorkspaceEdit types ??
+export type WorkspaceEditOperation = Readonly<{
+  filePath: string;
+  range?: {
+    startLine: number;
+    startCol: number;
+    endLine: number;
+    endCol: number;
+  };
+  text: string;
+}>;
 
+export type WorkspaceEditInput = Readonly<{
+  operations: readonly WorkspaceEditOperation[];
+}>;
+
+export type WorkspaceEditResult =
+  | Readonly<{ status: 'ok' }>
+  | Readonly<{ status: 'error'; code: 'FILE_NOT_FOUND' | 'ACCESS_DENIED' | 'WRITE_CONFLICT' | 'UNKNOWN'; message: string }>;
+
+// ?? Diff types ??
+export type DiffInput = Readonly<{
+  original: string;
+  modified: string;
+  filePath?: string;
+}>;
+
+export type DiffResult =
+  | Readonly<{ status: 'ok'; diff: string }>
+  | Readonly<{ status: 'error'; code: 'UNKNOWN'; message: string }>;
 export type AgentDeckPreloadApi = Readonly<{
   getStartupState: () => Promise<StartupState>;
   getThemeSettings: () => Promise<ThemeSettings>;
@@ -193,7 +256,14 @@ export type AgentDeckPreloadApi = Readonly<{
   onFsEvent: (handler: (event: FsChangeEvent) => void) => () => void;
   readFile: (filePath: string) => Promise<FileReadResult>;
   writeFile: (filePath: string, content: string) => Promise<FileWriteResult>;
+  markBufferDirty: (filePath: string) => Promise<void>;
+  deleteFile: (filePath: string) => Promise<FileOperationResult>;
+  renameFile: (oldPath: string, newPath: string) => Promise<FileOperationResult>;
   getEditorDiagnostics: (filePath: string) => Promise<readonly EditorDiagnostic[]>;
+  applyWorkspaceEdit: (edit: WorkspaceEditInput) => Promise<WorkspaceEditResult>;
+  showDiff: (input: DiffInput) => Promise<DiffResult>;
+  showSaveDialog: (defaultPath?: string) => Promise<string | null>;
+  toggleDevTools: () => Promise<void>;
   versions: Readonly<{
     chrome: string;
     electron: string;
@@ -215,6 +285,10 @@ function isStartupServiceDescriptor(value: unknown): value is StartupServiceDesc
     typeof value.label === 'string' &&
     value.status === 'ready'
   );
+}
+
+export function isString(value: unknown): value is string {
+  return typeof value === 'string';
 }
 
 export function isThemeSettings(value: unknown): value is ThemeSettings {
@@ -306,12 +380,18 @@ export function isFsChangeEvent(value: unknown): value is FsChangeEvent {
   );
 }
 
-const EDITOR_LANGUAGES: readonly string[] = [
-  'typescript', 'javascript', 'json', 'yaml', 'markdown', 'powershell', 'plaintext'
-];
+const EDITOR_LANGUAGES = new Set<string>([
+  'typescript',
+  'javascript',
+  'json',
+  'yaml',
+  'markdown',
+  'powershell',
+  'plaintext'
+]);
 
 export function isEditorLanguage(value: unknown): value is EditorLanguage {
-  return typeof value === 'string' && EDITOR_LANGUAGES.includes(value);
+  return typeof value === 'string' && EDITOR_LANGUAGES.has(value);
 }
 
 export function isEditorTab(value: unknown): value is EditorTab {
@@ -346,4 +426,63 @@ export function isFileWriteResult(value: unknown): value is FileWriteResult {
     (value.code === 'WRITE_CONFLICT' || value.code === 'ACCESS_DENIED' || value.code === 'UNKNOWN') &&
     typeof value.message === 'string'
   );
+}
+
+// Helper for error result validation with specific allowed codes
+function isErrorResult(value: unknown, allowedCodes: readonly string[]): value is { status: 'error'; code: string; message: string } {
+  if (!isRecord(value)) return false;
+  return (
+    value.status === 'error' &&
+    typeof value.code === 'string' &&
+    allowedCodes.includes(value.code) &&
+    typeof value.message === 'string'
+  );
+}
+
+export function isFileOperationResult(value: unknown): value is FileOperationResult {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') return true;
+  return isErrorResult(value, ['FILE_NOT_FOUND', 'ACCESS_DENIED', 'UNKNOWN']);
+}
+
+// ?? WorkspaceEdit guards ??
+function isWorkspaceEditRange(value: unknown): value is { startLine: number; startCol: number; endLine: number; endCol: number } {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.startLine === 'number' &&
+    typeof value.startCol === 'number' &&
+    typeof value.endLine === 'number' &&
+    typeof value.endCol === 'number'
+  );
+}
+
+function isWorkspaceEditOperation(value: unknown): value is WorkspaceEditOperation {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.filePath === 'string' &&
+    typeof value.text === 'string' &&
+    (value.range === undefined || isWorkspaceEditRange(value.range))
+  );
+}
+
+export function isWorkspaceEditInput(value: unknown): value is WorkspaceEditInput {
+  if (!isRecord(value)) return false;
+  return Array.isArray(value.operations) && value.operations.every(isWorkspaceEditOperation);
+}
+
+export function isWorkspaceEditResult(value: unknown): value is WorkspaceEditResult {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') return true;
+  return isErrorResult(value, ['FILE_NOT_FOUND', 'ACCESS_DENIED', 'WRITE_CONFLICT', 'UNKNOWN']);
+}
+
+export function isDiffInput(value: unknown): value is DiffInput {
+  if (!isRecord(value)) return false;
+  return typeof value.original === 'string' && typeof value.modified === 'string';
+}
+
+export function isDiffResult(value: unknown): value is DiffResult {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') return typeof value.diff === 'string';
+  return value.status === 'error' && value.code === 'UNKNOWN' && typeof value.message === 'string';
 }

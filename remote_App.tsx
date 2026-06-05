@@ -108,7 +108,6 @@ export function App() {
 
       <aside className="side-bar" aria-labelledby="explorer-title">
         <header className="region-header">
-          <p className="eyebrow">AgentDeck</p>
           <h1 id="explorer-title">Explorer</h1>
         </header>
         <div className="workspace-actions" aria-label="Workspace actions">
@@ -142,7 +141,6 @@ export function App() {
             <br />3
           </div>
           <div className="editor-content">
-            <p className="eyebrow">Workbench</p>
             <h2 id="editor-title">{selectedWorkspaceName}</h2>
             <p>{workspaceStatus}</p>
           </div>

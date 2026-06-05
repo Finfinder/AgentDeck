@@ -1,8 +1,9 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, globalShortcut } from 'electron';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 
-import { bootstrapDesktopServices, createSettingsService, createStartupErrorState, createWorkspaceService, getDiagnostics, readEditorFile, type SettingsService, type WorkspaceService, writeEditorFile } from '@agentdeck/services';
+import { applyWorkspaceEdit, bootstrapDesktopServices, createSettingsService, createStartupErrorState, createWorkspaceService, getDiagnostics, markBufferDirty, readEditorFile, showDiff, type SettingsService, type WorkspaceService, writeEditorFile } from '@agentdeck/services';
 import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
@@ -12,8 +13,6 @@ import {
   type StartupState,
   type WorkspaceSelection
 } from '@agentdeck/shared';
-
-import { existsSync } from 'node:fs';
 
 function findProjectRoot(startDir: string): string {
   let dir = startDir;
@@ -81,18 +80,77 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
     return writeEditorFile(filePath, content);
   });
 
+  ipcMain.handle(IPC_CHANNELS.markBufferDirty, (_event, filePath: unknown) => {
+    if (typeof filePath === 'string') {
+      markBufferDirty(filePath);
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.deleteFile, async (_event, filePath: unknown) => {
+    if (typeof filePath !== 'string') {
+      return { status: 'error', code: 'UNKNOWN', message: 'Invalid file path.' };
+    }
+    return workspaceService.deleteFile(filePath);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.renameFile, async (_event, oldPath: unknown, newPath: unknown) => {
+    if (typeof oldPath !== 'string' || typeof newPath !== 'string') {
+      return { status: 'error', code: 'UNKNOWN', message: 'Invalid file paths.' };
+    }
+    return workspaceService.renameFile(oldPath, newPath);
+  });
+
   ipcMain.handle(IPC_CHANNELS.getEditorDiagnostics, async () => {
+    // Allow mock diagnostics via env var for E2E testing.
+    const mockRaw = process.env.TEST_MOCK_DIAGNOSTICS;
+    if (mockRaw) {
+      try {
+        return JSON.parse(mockRaw);
+      } catch {
+        // Fall through to real implementation.
+      }
+    }
     return getDiagnostics();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.applyWorkspaceEdit, async (_event, edit: unknown) => {
+    // Workspace edit is handled by editor-service which manages buffers
+    // The renderer sends operations array directly
+    return applyWorkspaceEdit(edit as Parameters<typeof applyWorkspaceEdit>[0]);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.showDiff, async (_event, input: unknown) => {
+    const { original, modified } = input as { original: string; modified: string };
+    return showDiff(original, modified);
+  });
+
+  ipcMain.handle('agentdeck:v1:devtools:toggle', () => {
+    const focused = BrowserWindow.getFocusedWindow();
+    if (focused) {
+      if (focused.webContents.isDevToolsOpened()) {
+        focused.webContents.closeDevTools();
+      } else {
+        focused.webContents.openDevTools({ mode: 'bottom' });
+      }
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.showSaveDialog, async (_event, defaultPath: unknown) => {
+    const options: Electron.SaveDialogOptions = {
+      properties: ['showOverwriteConfirmation']
+    };
+    if (typeof defaultPath === 'string') {
+      options.defaultPath = defaultPath;
+    }
+    const result = await dialog.showSaveDialog(mainWindow, options);
+    return result.canceled ? null : (result.filePath ?? null);
   });
 }
 
 function isSearchQuery(value: unknown): value is SearchQuery {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as Record<string, unknown>).pattern === 'string' &&
-    Array.isArray((value as Record<string, unknown>).workspaceRoots)
-  );
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.pattern === 'string' && Array.isArray(candidate.workspaceRoots);
 }
 
 async function resolveStartupState(): Promise<StartupState> {
@@ -113,7 +171,7 @@ function createMainWindow(): BrowserWindow {
     show: false,
     title: 'AgentDeck',
     webPreferences: {
-      contextIsolation: process.env.NODE_ENV !== 'test',
+      contextIsolation: true,
       nodeIntegration: false,
       preload: resolve(rootDir, 'out/preload/index.mjs'),
       sandbox: false
@@ -139,11 +197,12 @@ async function selectWorkspaceEntry(value: unknown, mainWindow: BrowserWindow): 
 
   // In test mode, return a mock path instead of showing dialog
   if (process.env.NODE_ENV === 'test') {
-    const testWorkspacePath = process.env.TEST_WORKSPACE_PATH || 'C:\\test';
+    // Use path.join to avoid manual escaping of backslashes in Windows paths.
+    const testWorkspacePath = process.env.TEST_WORKSPACE_PATH ?? join('C:', 'test');
     return {
       status: 'selected',
       kind: value.kind,
-      path: value.kind === 'workspace-file' ? testWorkspacePath + '\\test.code-workspace' : testWorkspacePath,
+      path: value.kind === 'workspace-file' ? join(testWorkspacePath, 'test.code-workspace') : testWorkspacePath,
       name: value.kind === 'workspace-file' ? 'test.code-workspace' : 'test-folder',
     };
   }
@@ -180,6 +239,27 @@ async function selectWorkspaceEntry(value: unknown, mainWindow: BrowserWindow): 
   };
 }
 
+function registerDevToolsShortcut(mainWindow: BrowserWindow): void {
+  globalShortcut.register('F12', () => {
+    if (mainWindow.isFocused()) {
+      if (mainWindow.webContents.isDevToolsOpened()) {
+        mainWindow.webContents.closeDevTools();
+      } else {
+        mainWindow.webContents.openDevTools({ mode: 'bottom' });
+      }
+    }
+  });
+  globalShortcut.register('Ctrl+Shift+I', () => {
+    if (mainWindow.isFocused()) {
+      if (mainWindow.webContents.isDevToolsOpened()) {
+        mainWindow.webContents.closeDevTools();
+      } else {
+        mainWindow.webContents.openDevTools({ mode: 'bottom' });
+      }
+    }
+  });
+}
+
 async function start(): Promise<void> {
   const settingsService = createSettingsService(app.getPath('userData'));
   const workspaceService = createWorkspaceService(app.getPath('userData'));
@@ -187,10 +267,18 @@ async function start(): Promise<void> {
   startupState = await resolveStartupState();
   const mainWindow = createMainWindow();
   registerIpcHandlers(settingsService, workspaceService, mainWindow);
+  registerDevToolsShortcut(mainWindow);
 }
 
 async function startSafely(): Promise<void> {
   try {
+    if (process.platform !== 'darwin') {
+      try {
+        Menu.setApplicationMenu(null);
+      } catch (err) {
+        console.warn('[main] Failed to remove application menu:', err);
+      }
+    }
     await start();
   } catch (error) {
     console.error('[main] Failed to start AgentDeck:', error);

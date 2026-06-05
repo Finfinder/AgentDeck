@@ -4,17 +4,26 @@ import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
   isDirectoryListing,
+  isDiffInput,
+  isDiffResult,
+  isFileOperationResult,
   isFileReadResult,
   isFileWriteResult,
   isFsChangeEvent,
   isStartupState,
   isThemeSettings,
+  isWorkspaceEditInput,
+  isWorkspaceEditResult,
   isWorkspaceModel,
   isWorkspaceSelection,
   type AgentDeckPreloadApi,
+  type DiffInput,
+  type DiffResult,
   type EditorDiagnostic,
   type FsChangeEvent,
-  type StartupState
+  type StartupState,
+  type WorkspaceEditInput,
+  type WorkspaceEditResult
 } from '@agentdeck/shared';
 
 const invalidStartupState: StartupState = {
@@ -43,7 +52,10 @@ const api: AgentDeckPreloadApi = {
   },
   openWorkspace: async (path, kind) => {
     const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.openWorkspace, path, kind);
-    return isWorkspaceModel(value) ? value : { status: 'error', code: 'INVALID_JSONC', message: 'Unexpected response from main process.' };
+    if (!isWorkspaceModel(value)) {
+      return { status: 'error', code: 'INVALID_JSONC', message: 'Unexpected response from main process.' };
+    }
+    return value;
   },
   listDirectory: async path => {
     const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.listDirectory, path);
@@ -72,9 +84,35 @@ const api: AgentDeckPreloadApi = {
     const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.writeFile, filePath, content);
     return isFileWriteResult(value) ? value : { status: 'error', code: 'UNKNOWN', message: 'Unexpected response from main process.' };
   },
+  markBufferDirty: async (filePath: string) => {
+    await ipcRenderer.invoke(IPC_CHANNELS.markBufferDirty, filePath);
+  },
+  deleteFile: async (filePath: string) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.deleteFile, filePath);
+    return isFileOperationResult(value) ? value : { status: 'error', code: 'UNKNOWN', message: 'Unexpected response from main process.' };
+  },
+  renameFile: async (oldPath: string, newPath: string) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.renameFile, oldPath, newPath);
+    return isFileOperationResult(value) ? value : { status: 'error', code: 'UNKNOWN', message: 'Unexpected response from main process.' };
+  },
   getEditorDiagnostics: async (filePath: string) => {
     const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.getEditorDiagnostics, filePath);
     return Array.isArray(value) ? value as EditorDiagnostic[] : [];
+  },
+  applyWorkspaceEdit: async (edit: WorkspaceEditInput) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.applyWorkspaceEdit, edit);
+    return isWorkspaceEditResult(value) ? value : { status: 'error', code: 'UNKNOWN', message: 'Unexpected response from main process.' };
+  },
+  showDiff: async (input: DiffInput) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.showDiff, input);
+    return isDiffResult(value) ? value : { status: 'error', code: 'UNKNOWN', message: 'Unexpected response from main process.' };
+  },
+  showSaveDialog: async (defaultPath?: string) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.showSaveDialog, defaultPath);
+    return typeof value === 'string' ? value : null;
+  },
+  toggleDevTools: async () => {
+    await ipcRenderer.invoke(IPC_CHANNELS.toggleDevTools);
   },
   versions: {
     chrome: process.versions.chrome ?? 'unknown',

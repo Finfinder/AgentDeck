@@ -1,11 +1,12 @@
 import { EventEmitter } from 'node:events';
 import { watch, type FSWatcher } from 'node:fs';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve, relative } from 'node:path';
 
 import type {
   DirectoryListing,
   FileEntry,
+  FileOperationResult,
   FsChangeEvent,
   RecentWorkspace,
   SearchQuery,
@@ -66,7 +67,7 @@ function globToRegex(pattern: string): string {
   p = p.replaceAll('?', QMARK);
 
   // Escape remaining regex-special characters.
-  p = p.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  p = p.replace(/[.+^${}()|[\]\\]/g, String.raw`\$&`);
 
   // Replace placeholders with regex equivalents.
   p = p.replaceAll(DSTAR, '.*'); // matches across path separators
@@ -241,6 +242,26 @@ export class WorkspaceService extends EventEmitter {
     this.stopWatchers();
   }
 
+  async deleteFile(filePath: string): Promise<FileOperationResult> {
+    try {
+      await unlink(filePath);
+      return { status: 'ok' };
+    } catch (err) {
+      const code = isRecord(err) && err.code === 'ENOENT' ? 'FILE_NOT_FOUND' : 'UNKNOWN';
+      return { status: 'error', code, message: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  async renameFile(oldPath: string, newPath: string): Promise<FileOperationResult> {
+    try {
+      await rename(oldPath, newPath);
+      return { status: 'ok' };
+    } catch (err) {
+      const code = isRecord(err) && err.code === 'ENOENT' ? 'FILE_NOT_FOUND' : 'UNKNOWN';
+      return { status: 'error', code, message: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   async listDirectory(dirPath: string): Promise<DirectoryListing> {
     try {
       const dirents = await readdir(dirPath, { withFileTypes: true });
@@ -353,7 +374,7 @@ export class WorkspaceService extends EventEmitter {
 
     for (const dirent of dirents) {
       if (results.length >= limits.maxResults) break;
-      await this.processDirent(dirent, dir, pattern, results, limits, includeRegs, excludeRegs, root);
+      await this.processDirent(dirent, dir, pattern, results, limits, { includeRegs, excludeRegs }, root);
     }
   }
 
@@ -363,17 +384,16 @@ export class WorkspaceService extends EventEmitter {
     pattern: string,
     results: SearchResult[],
     limits: { maxResults: number; maxFileSize: number },
-    includeRegs: RegExp[],
-    excludeRegs: RegExp[],
+    filters: { includeRegs: RegExp[]; excludeRegs: RegExp[] },
     root: string
   ): Promise<void> {
     const name = String(dirent.name);
     const fullPath = join(dir, name);
 
     if (dirent.isDirectory()) {
-      await this.handleDirectory(name, fullPath, pattern, results, limits, includeRegs, excludeRegs, root);
+      await this.handleDirectory(name, fullPath, pattern, results, limits, filters, root);
     } else if (dirent.isFile()) {
-      await this.handleFile(fullPath, pattern, results, limits, includeRegs, excludeRegs, root);
+      await this.handleFile(fullPath, pattern, results, limits, filters, root);
     }
   }
 
@@ -383,16 +403,15 @@ export class WorkspaceService extends EventEmitter {
     pattern: string,
     results: SearchResult[],
     limits: { maxResults: number; maxFileSize: number },
-    includeRegs: RegExp[],
-    excludeRegs: RegExp[],
+    filters: { includeRegs: RegExp[]; excludeRegs: RegExp[] },
     root: string
   ): Promise<void> {
     if (SKIP_DIRS.has(name)) return;
 
     const relDir = this.normalizeRelPath(root, fullPath);
-    if (this.isPathExcluded(relDir, excludeRegs)) return;
+    if (this.isPathExcluded(relDir, filters.excludeRegs)) return;
 
-    await this.searchInDir(fullPath, pattern, results, limits, includeRegs, excludeRegs, root);
+    await this.searchInDir(fullPath, pattern, results, limits, filters.includeRegs, filters.excludeRegs, root);
   }
 
   private async handleFile(
@@ -400,14 +419,13 @@ export class WorkspaceService extends EventEmitter {
     pattern: string,
     results: SearchResult[],
     limits: { maxResults: number; maxFileSize: number },
-    includeRegs: RegExp[],
-    excludeRegs: RegExp[],
+    filters: { includeRegs: RegExp[]; excludeRegs: RegExp[] },
     root: string
   ): Promise<void> {
     const relFile = this.normalizeRelPath(root, fullPath);
 
-    if (this.isPathExcluded(relFile, excludeRegs)) return;
-    if (!this.matchesInclude(relFile, includeRegs)) return;
+    if (this.isPathExcluded(relFile, filters.excludeRegs)) return;
+    if (!this.matchesInclude(relFile, filters.includeRegs)) return;
 
     await this.searchInFile(fullPath, pattern, results, limits);
   }

@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 
 import {
+  applyWorkspaceEdit,
   clearBuffers,
   closeBuffer,
   createEditorTab,
@@ -8,7 +9,8 @@ import {
   getBufferDirty,
   getOpenBuffers,
   markBufferDirty,
-  resolveLanguage
+  resolveLanguage,
+  showDiff
 } from '@agentdeck/services';
 
 describe('EditorService', () => {
@@ -83,9 +85,9 @@ describe('EditorService', () => {
       expect(id1).not.toBe(id2);
     });
 
-    it('creates a short id (12 chars)', () => {
+    it('creates a short id (8 chars)', () => {
       const id = createTabId('/src/app.ts');
-      expect(id.length).toBe(12);
+      expect(id.length).toBe(8);
     });
   });
 
@@ -148,6 +150,34 @@ describe('EditorService', () => {
     it('getOpenBuffers returns an array', () => {
       const buffers = getOpenBuffers();
       expect(Array.isArray(buffers)).toBe(true);
+    });
+  });
+
+  describe('applyWorkspaceEdit', () => {
+    it('returns FILE_NOT_FOUND for unknown buffer', async () => {
+      const result = await applyWorkspaceEdit({
+        operations: [{ filePath: '/unknown/file.ts', text: 'new content' }]
+      });
+      expect(result.status).toBe('error');
+      if (result.status === 'error') {
+        expect(result.code).toBe('FILE_NOT_FOUND');
+      }
+    });
+  });
+
+  describe('showDiff', () => {
+    it('generates unified diff for different content', () => {
+      const result = showDiff('line1\nline2\nline3', 'line1\nmodified\nline3');
+      expect(result.status).toBe('ok');
+      if (result.status === 'ok') {
+        expect(result.diff).toContain('--- original');
+        expect(result.diff).toContain('+++ modified');
+      }
+    });
+
+    it('returns ok for identical content', () => {
+      const result = showDiff('same content', 'same content');
+      expect(result.status).toBe('ok');
     });
   });
 });

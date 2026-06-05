@@ -19,7 +19,14 @@ function mockAgent(overrides: Partial<AgentDeckPreloadApi> = {}): AgentDeckPrelo
     onFsEvent: vi.fn().mockReturnValue(() => undefined),
     readFile: vi.fn().mockResolvedValue({ status: 'error', code: 'FILE_NOT_FOUND', message: 'Test' }),
     writeFile: vi.fn().mockResolvedValue({ status: 'ok' }),
+    markBufferDirty: vi.fn().mockResolvedValue(undefined),
+    deleteFile: vi.fn().mockResolvedValue({ status: 'ok' }),
+    renameFile: vi.fn().mockResolvedValue({ status: 'ok' }),
     getEditorDiagnostics: vi.fn().mockResolvedValue([]),
+    applyWorkspaceEdit: vi.fn().mockResolvedValue({ status: 'ok' }),
+    showDiff: vi.fn().mockResolvedValue({ status: 'ok', diff: '' }),
+    showSaveDialog: vi.fn().mockResolvedValue(null),
+    toggleDevTools: vi.fn().mockResolvedValue(undefined),
     ...overrides
   };
 }
@@ -66,7 +73,7 @@ describe('Explorer', () => {
 
     render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} />);
 
-    expect(await screen.findByText('Loading.')).toBeInTheDocument();
+    await screen.findByText('Loading.');
 
     resolveDir!({ path: '/workspace', entries: [] });
 
@@ -98,7 +105,7 @@ describe('Explorer', () => {
 
     render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} />);
 
-    const dirButton = await screen.findByRole('button', { name: 'Open directory src' });
+    const dirButton = await screen.findByRole('treeitem', { name: 'Open directory src' });
     expect(dirButton).toBeInTheDocument();
 
     await userEvent.click(dirButton);
@@ -125,7 +132,7 @@ describe('Explorer', () => {
     render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} />);
 
     const item = await screen.findByRole('treeitem', { selected: false });
-    expect(item).toHaveClass('sensitive');
+    expect(item.parentElement).toHaveClass('sensitive');
   });
 
   it('shows breadcrumb with root name at root path', async () => {
@@ -147,7 +154,7 @@ describe('Explorer', () => {
     render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} />);
 
     // Navigate into src
-    const dirButton = await screen.findByRole('button', { name: 'Open directory src' });
+    const dirButton = await screen.findByRole('treeitem', { name: 'Open directory src' });
     await userEvent.click(dirButton);
 
     await waitFor(() => {
@@ -176,7 +183,7 @@ describe('Explorer', () => {
     render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} />);
 
     // Navigate into src
-    const dirButton = await screen.findByRole('button', { name: 'Open directory src' });
+    const dirButton = await screen.findByRole('treeitem', { name: 'Open directory src' });
     await userEvent.click(dirButton);
 
     await waitFor(() => screen.getByRole('button', { name: 'Navigate up' }));
@@ -236,7 +243,7 @@ describe('Explorer', () => {
 
     render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} />);
 
-    const dirButton = await screen.findByRole('button', { name: 'Open directory src' });
+    const dirButton = await screen.findByRole('treeitem', { name: 'Open directory src' });
     await userEvent.click(dirButton);
 
     await waitFor(() => {
@@ -284,6 +291,38 @@ describe('Explorer', () => {
     expect(await screen.findByRole('tree')).toBeInTheDocument();
   });
 
+  it('calls onFileOpen with file path when a file entry is clicked', async () => {
+    const entries = makeEntries([
+      { name: 'index.ts', path: '/workspace/index.ts', kind: 'file' }
+    ]);
+    const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+    const onFileOpen = vi.fn();
+
+    render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} onFileOpen={onFileOpen} />);
+
+    const fileButton = await screen.findByRole('treeitem', { name: 'Open file index.ts' });
+    await userEvent.click(fileButton);
+
+    expect(onFileOpen).toHaveBeenCalledWith('/workspace/index.ts');
+  });
+
+  it('does not call onFileOpen when a directory entry is clicked', async () => {
+    const entries = makeEntries([
+      { name: 'src', path: '/workspace/src', kind: 'directory' }
+    ]);
+    const listDirectory = vi.fn()
+      .mockResolvedValueOnce({ path: '/workspace', entries })
+      .mockResolvedValueOnce({ path: '/workspace/src', entries: [] });
+    const onFileOpen = vi.fn();
+
+    render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} onFileOpen={onFileOpen} />);
+
+    const dirButton = await screen.findByRole('treeitem', { name: 'Open directory src' });
+    await userEvent.click(dirButton);
+
+    expect(onFileOpen).not.toHaveBeenCalled();
+  });
+
   it('uses path basename for breadcrumb when root has no name', async () => {
     const noNameWorkspace: WorkspaceModel & { status: 'ok' } = {
       status: 'ok',
@@ -298,3 +337,4 @@ describe('Explorer', () => {
     expect(await screen.findByText('my-project')).toBeInTheDocument();
   });
 });
+
