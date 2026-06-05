@@ -115,11 +115,13 @@ export function MonacoEditorSurface({
   const tsConfiguredRef = useRef(false);
   if (!tsConfiguredRef.current) {
     tsConfiguredRef.current = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tsDefaults = (monaco.languages as any)?.typescript?.typescriptDefaults;
     if (tsDefaults) {
       tsDefaults.setEagerModelSync(true);
       tsDefaults.setDiagnosticsOptions({ noSemanticValidation: false, noSyntaxValidation: false });
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const jsDefaults = (monaco.languages as any)?.typescript?.javascriptDefaults;
     if (jsDefaults) {
       jsDefaults.setEagerModelSync(true);

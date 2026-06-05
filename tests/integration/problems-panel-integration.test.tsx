@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '@agentdeck/workbench';
-import type { AgentDeckPreloadApi, EditorDiagnostic } from '@agentdeck/shared';
+import type { AgentDeckPreloadApi } from '@agentdeck/shared';
 
 function mockPreloadApi(overrides: Partial<AgentDeckPreloadApi> = {}): AgentDeckPreloadApi {
   return {
@@ -37,25 +37,6 @@ function setAgentDeck(api: AgentDeckPreloadApi): void {
     value: api
   });
 }
-
-const sampleDiagnostics: readonly EditorDiagnostic[] = [
-  {
-    filePath: '/workspace/src/app.ts',
-    message: "Type 'string' is not assignable to type 'number'.",
-    severity: 'error',
-    line: 42,
-    col: 10,
-    source: 'ts'
-  },
-  {
-    filePath: '/workspace/src/utils.ts',
-    message: "Variable 'x' is declared but never used.",
-    severity: 'warning',
-    line: 7,
-    col: 5,
-    source: 'eslint'
-  }
-] as const;
 
 describe('ProblemsPanel integration with App', () => {
   beforeEach(() => {

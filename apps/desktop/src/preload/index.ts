@@ -4,7 +4,6 @@ import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
   isDirectoryListing,
-  isDiffInput,
   isDiffResult,
   isFileOperationResult,
   isFileReadResult,
@@ -12,18 +11,15 @@ import {
   isFsChangeEvent,
   isStartupState,
   isThemeSettings,
-  isWorkspaceEditInput,
   isWorkspaceEditResult,
   isWorkspaceModel,
   isWorkspaceSelection,
   type AgentDeckPreloadApi,
   type DiffInput,
-  type DiffResult,
   type EditorDiagnostic,
   type FsChangeEvent,
   type StartupState,
-  type WorkspaceEditInput,
-  type WorkspaceEditResult
+  type WorkspaceEditInput
 } from '@agentdeck/shared';
 
 const invalidStartupState: StartupState = {

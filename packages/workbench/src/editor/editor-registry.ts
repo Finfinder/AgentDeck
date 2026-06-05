@@ -63,7 +63,7 @@ export function editorApplyWorkspaceEdit(
 
 // ?? Diff for Monaco ??
 // Creates a diff editor model for showing differences
-export function editorShowDiff(original: string, modified: string, filePath?: string): { original: string; modified: string } | null {
+export function editorShowDiff(original: string, modified: string): { original: string; modified: string } | null {
   // Return diff data for renderer to display
   // In a full implementation, this would create a diff editor view
   return { original, modified };

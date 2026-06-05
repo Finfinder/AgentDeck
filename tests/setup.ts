@@ -1,7 +1,6 @@
 import '@testing-library/jest-dom/vitest';
-import { vi } from 'vitest';
 
 // Polyfill for jsdom missing clipboard API used by monaco-editor.
-if (typeof (document as any).queryCommandSupported !== 'function') {
-  (document as any).queryCommandSupported = () => false;
+if (typeof (document as unknown as Record<string, unknown>).queryCommandSupported !== 'function') {
+  (document as unknown as Record<string, unknown>).queryCommandSupported = () => false;
 }
