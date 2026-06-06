@@ -299,7 +299,7 @@ describe('MonacoEditorSurface', () => {
       expect(screen.queryByText('Loading app.ts')).toBeNull();
     });
 
-    // No content change � markBufferDirty should not be called.
+    // No content change — markBufferDirty should not be called.
     expect(markBufferDirtyMock).not.toHaveBeenCalled();
   });
 
