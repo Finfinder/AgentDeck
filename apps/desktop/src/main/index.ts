@@ -7,6 +7,7 @@ import { applyWorkspaceEdit, bootstrapDesktopServices, createSettingsService, cr
 import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
+  isDiffInput,
   isThemeSettings,
   isWorkspaceEditInput,
   isWorkspaceOpenRequest,
@@ -127,8 +128,10 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
   });
 
   ipcMain.handle(IPC_CHANNELS.showDiff, async (_event, input: unknown) => {
-    const { original, modified } = input as { original: string; modified: string };
-    return showDiff(original, modified);
+    if (!isDiffInput(input)) {
+      return { status: 'error', code: 'UNKNOWN', message: 'showDiff: invalid input — expected { original: string, modified: string }' } as const;
+    }
+    return showDiff(input.original, input.modified);
   });
 
   ipcMain.handle('agentdeck:v1:devtools:toggle', () => {
