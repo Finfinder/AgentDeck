@@ -2,7 +2,8 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'electron-vite';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
 
@@ -34,6 +35,27 @@ function monacoLocalAssetsPlugin() {
         res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
         res.end(readFileSync(filePath));
       });
+
+      // Serve index.html with a fresh CSP nonce injected on each request.
+      server.middlewares.use((req, res, next) => {
+        try {
+          if (!req.url) return next();
+          const url = req.url.split('?')[0];
+          if (url === '/' || url.endsWith('/index.html')) {
+            const srcIndex = resolve(rootDir, 'packages/workbench/index.html');
+            let html = readFileSync(srcIndex, 'utf8');
+            const nonce = randomBytes(16).toString('base64');
+            html = html.replaceAll('__CSP_NONCE__', nonce);
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.end(html);
+            return;
+          }
+        } catch (err) {
+          console.warn('[monaco-local-assets] failed to serve index.html with injected nonce', err);
+          return next();
+        }
+        return next();
+      });
     },
     writeBundle(_options: unknown, bundle: Record<string, unknown>) {
       const firstChunkKey = Object.keys(bundle)[0];
@@ -53,8 +75,18 @@ function monacoLocalAssetsPlugin() {
         mkdirSync(monacoDest, { recursive: true });
         cpSync(monacoSrc, monacoDest, { recursive: true, force: true });
         console.log('[monaco-local-assets] Copied Monaco assets to', monacoDest);
+
+        // Replace CSP nonce placeholder in emitted index.html with a build-time nonce
+        const outIndex = resolve(rootDir, 'out/renderer/index.html');
+        if (existsSync(outIndex)) {
+          const nonce = randomBytes(16).toString('base64');
+          const content = readFileSync(outIndex, 'utf8');
+          const replaced = content.replaceAll('__CSP_NONCE__', nonce);
+          writeFileSync(outIndex, replaced, 'utf8');
+          console.log('[monaco-local-assets] Injected CSP nonce into', outIndex);
+        }
       } catch (err) {
-        console.error('[monaco-local-assets] Failed to copy Monaco assets:', err);
+        console.error('[monaco-local-assets] Failed to copy Monaco assets or inject nonce:', err);
       }
     }
   };
