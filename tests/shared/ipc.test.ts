@@ -8,7 +8,11 @@ import {
   isDirectoryListing,
   isFsChangeEvent,
   isFileWriteResult,
-  isFileReadResult
+  isFileReadResult,
+  isWorkspaceEditInput,
+  isWorkspaceEditResult,
+  isDiffInput,
+  isDiffResult
 } from '@agentdeck/shared';
 
 describe('packages/shared ipc type guards', () => {
@@ -190,6 +194,104 @@ describe('packages/shared ipc type guards', () => {
       status: 'error',
       code: 'WRITE_CONFLICT',
       message: 'wrong code for read'
+    })).toBe(false);
+  });
+
+  // WorkspaceEdit guards
+  it('validates workspace edit input with operations', () => {
+    expect(isWorkspaceEditInput({
+      operations: [{ filePath: '/test.ts', text: 'new text' }]
+    })).toBe(true);
+  });
+
+  it('validates workspace edit input with range', () => {
+    expect(isWorkspaceEditInput({
+      operations: [{
+        filePath: '/test.ts',
+        range: { startLine: 1, startCol: 1, endLine: 5, endCol: 1 },
+        text: 'replacement'
+      }]
+    })).toBe(true);
+  });
+
+  it('rejects workspace edit input with missing operations', () => {
+    expect(isWorkspaceEditInput({})).toBe(false);
+  });
+
+  it('rejects workspace edit input with invalid operation', () => {
+    expect(isWorkspaceEditInput({
+      operations: [{ filePath: 123, text: 'new text' }]
+    })).toBe(false);
+  });
+
+  it('validates workspace edit result — ok', () => {
+    expect(isWorkspaceEditResult({ status: 'ok' })).toBe(true);
+  });
+
+  it('validates workspace edit result — error variants', () => {
+    expect(isWorkspaceEditResult({
+      status: 'error',
+      code: 'FILE_NOT_FOUND',
+      message: 'File not found'
+    })).toBe(true);
+    expect(isWorkspaceEditResult({
+      status: 'error',
+      code: 'ACCESS_DENIED',
+      message: 'Access denied'
+    })).toBe(true);
+    expect(isWorkspaceEditResult({
+      status: 'error',
+      code: 'WRITE_CONFLICT',
+      message: 'Conflict'
+    })).toBe(true);
+    expect(isWorkspaceEditResult({
+      status: 'error',
+      code: 'UNKNOWN',
+      message: 'Unknown error'
+    })).toBe(true);
+  });
+
+  // Diff guards
+  it('validates diff input', () => {
+    expect(isDiffInput({
+      original: 'original content',
+      modified: 'modified content'
+    })).toBe(true);
+  });
+
+  it('validates diff input with optional filePath', () => {
+    expect(isDiffInput({
+      original: 'original',
+      modified: 'modified',
+      filePath: '/test.ts'
+    })).toBe(true);
+  });
+
+  it('rejects diff input with missing original', () => {
+    expect(isDiffInput({ modified: 'modified' })).toBe(false);
+  });
+
+  it('rejects diff input with missing modified', () => {
+    expect(isDiffInput({ original: 'original' })).toBe(false);
+  });
+
+  it('validates diff result — ok', () => {
+    expect(isDiffResult({ status: 'ok', diff: '--- a\n+++ b\n' })).toBe(true);
+  });
+
+  it('validates diff result — error', () => {
+    expect(isDiffResult({
+      status: 'error',
+      code: 'UNKNOWN',
+      message: 'Diff failed'
+    })).toBe(true);
+  });
+
+  it('rejects diff result with invalid code', () => {
+    expect(isDiffResult({
+      status: 'error',
+      code: 'FILE_NOT_FOUND',
+      message: 'wrong code'
     })).toBe(false);
   });
 });

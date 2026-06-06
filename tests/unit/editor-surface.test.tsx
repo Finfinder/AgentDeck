@@ -198,5 +198,54 @@ describe('EditorSurface', () => {
       expect(screen.queryByText('File changed on disk')).toBeNull();
     });
   });
+
+  // External conflict overwrite/reload tests
+  it('external conflict Overwrite writes content and clears dialog', async () => {
+    const writeFileMock = vi.fn().mockResolvedValue({ status: 'ok' });
+    const setTabDirtyMock = vi.fn();
+    const agent = mockAgent({ writeFile: writeFileMock });
+    const tab = createTab({ isDirty: true });
+    const store = mockStore({ tabs: [tab], activeTabId: tab.id, setTabDirty: setTabDirtyMock });
+    const changes = new Set(['/src/app.ts']);
+
+    renderSurface({ agent, store, externalChanges: changes });
+
+    await waitFor(() => {
+      expect(screen.getByText('File changed on disk')).toBeDefined();
+    });
+
+    const overwriteButton = screen.getByRole('button', { name: /overwrite/i });
+    await userEvent.click(overwriteButton);
+
+    await waitFor(() => {
+      expect(screen.queryByText('File changed on disk')).toBeNull();
+    });
+    expect(writeFileMock).toHaveBeenCalled();
+    expect(setTabDirtyMock).toHaveBeenCalledWith(tab.id, false);
+  });
+
+  it('external conflict Reload loads file and clears dialog', async () => {
+    const readFileMock = vi.fn().mockResolvedValue({ status: 'ok', content: 'reloaded content', encoding: 'utf8' });
+    const setTabDirtyMock = vi.fn();
+    const agent = mockAgent({ readFile: readFileMock });
+    const tab = createTab({ isDirty: true });
+    const store = mockStore({ tabs: [tab], activeTabId: tab.id, setTabDirty: setTabDirtyMock });
+    const changes = new Set(['/src/app.ts']);
+
+    renderSurface({ agent, store, externalChanges: changes });
+
+    await waitFor(() => {
+      expect(screen.getByText('File changed on disk')).toBeDefined();
+    });
+
+    const reloadButton = screen.getByRole('button', { name: /reload from disk/i });
+    await userEvent.click(reloadButton);
+
+    await waitFor(() => {
+      expect(screen.queryByText('File changed on disk')).toBeNull();
+    });
+    expect(readFileMock).toHaveBeenCalled();
+    expect(setTabDirtyMock).toHaveBeenCalledWith(tab.id, false);
+  });
 });
 

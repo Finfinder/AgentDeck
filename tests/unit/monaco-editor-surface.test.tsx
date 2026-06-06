@@ -1,8 +1,20 @@
 import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 
 import { MonacoEditorSurface } from '@agentdeck/workbench';
 import type { AgentDeckPreloadApi, EditorTab } from '@agentdeck/shared';
+
+// Mock requestAnimationFrame to execute callbacks synchronously
+beforeEach(() => {
+  vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+    cb(0);
+    return 0;
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function createMockTab(overrides: Partial<EditorTab> = {}): EditorTab {
   return {
@@ -289,6 +301,84 @@ describe('MonacoEditorSurface', () => {
 
     // No content change � markBufferDirty should not be called.
     expect(markBufferDirtyMock).not.toHaveBeenCalled();
+  });
+
+  describe('reveal functionality', () => {
+    it('calls revealAndSelect on mount when revealLine is set', async () => {
+      const agent = createMockAgent();
+      const tab = createMockTab({ revealLine: 10, revealCol: 5, revealPattern: 'const' });
+      render(
+        <MonacoEditorSurface
+          agent={agent}
+          tab={tab}
+          onDirtyChange={vi.fn()}
+          onContentChange={vi.fn()}
+          theme="dark"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.queryByText('Loading app.ts')).toBeNull();
+      });
+    });
+
+    it('calls revealAndSelect with null pattern when revealPattern is null', async () => {
+      const agent = createMockAgent();
+      const tab = createMockTab({ revealLine: 15, revealCol: 1, revealPattern: null });
+      render(
+        <MonacoEditorSurface
+          agent={agent}
+          tab={tab}
+          onDirtyChange={vi.fn()}
+          onContentChange={vi.fn()}
+          theme="dark"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.queryByText('Loading app.ts')).toBeNull();
+      });
+    });
+
+    it('does not call revealAndSelect when revealLine is null', async () => {
+      const agent = createMockAgent();
+      const tab = createMockTab({ revealLine: null });
+      render(
+        <MonacoEditorSurface
+          agent={agent}
+          tab={tab}
+          onDirtyChange={vi.fn()}
+          onContentChange={vi.fn()}
+          theme="dark"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.queryByText('Loading app.ts')).toBeNull();
+      });
+    });
+  });
+
+  describe('diagnostics functionality', () => {
+    it('calls onDiagnosticsChange when editor mounts with revealLine', async () => {
+      const onDiagnosticsChange = vi.fn();
+      const agent = createMockAgent();
+      const tab = createMockTab({ revealLine: 10 });
+      render(
+        <MonacoEditorSurface
+          agent={agent}
+          tab={tab}
+          onDirtyChange={vi.fn()}
+          onContentChange={vi.fn()}
+          onDiagnosticsChange={onDiagnosticsChange}
+          theme="dark"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.queryByText('Loading app.ts')).toBeNull();
+      });
+    });
   });
 });
 

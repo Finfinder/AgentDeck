@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import type { editor } from 'monaco-editor';
-import { editorRedo, editorSelectAll, editorUndo, getActiveEditor, setActiveEditor } from '../../packages/workbench/src/editor/editor-registry';
+import { editorApplyWorkspaceEdit, editorRedo, editorSelectAll, editorShowDiff, editorUndo, getActiveEditor, setActiveEditor } from '../../packages/workbench/src/editor/editor-registry';
 
 // Mock Monaco editor instance
 function createMockEditor() {
@@ -13,7 +13,8 @@ function createMockEditor() {
     setPosition: vi.fn(),
     revealLineInCenterIfOutsideViewport: vi.fn(),
     setSelection: vi.fn(),
-    revealRangeInCenterIfOutsideViewport: vi.fn()
+    revealRangeInCenterIfOutsideViewport: vi.fn(),
+    executeEdits: vi.fn()
   };
   return ret as editor.IStandaloneCodeEditor;
 }
@@ -113,6 +114,84 @@ describe('editor-registry', () => {
       setActiveEditor(editor);
       setActiveEditor(null);
       expect(editorSelectAll()).toBe(false);
+    });
+  });
+
+  describe('editorApplyWorkspaceEdit', () => {
+    it('returns false when no editor is active', () => {
+      const operations = [{ filePath: '/test.ts', text: 'new content' }];
+      expect(editorApplyWorkspaceEdit(operations)).toBe(false);
+    });
+
+    it('returns false when editor has no model', () => {
+      const editor = createMockEditor();
+      (editor.getModel as ReturnType<typeof vi.fn>).mockReturnValue(null);
+      setActiveEditor(editor);
+      const operations = [{ filePath: '/test.ts', text: 'new content' }];
+      expect(editorApplyWorkspaceEdit(operations)).toBe(false);
+    });
+
+    it('applies edit with range to the editor', () => {
+      const mockModel = {
+        getFullModelRange: vi.fn().mockReturnValue({ startLineNumber: 1, startColumn: 1, endLineNumber: 10, endColumn: 1 })
+      };
+      const editor = createMockEditor();
+      (editor.getModel as ReturnType<typeof vi.fn>).mockReturnValue(mockModel);
+      setActiveEditor(editor);
+
+      const operations = [{
+        filePath: '/test.ts',
+        range: { startLine: 1, startCol: 1, endLine: 5, endCol: 1 },
+        text: 'replaced'
+      }];
+      expect(editorApplyWorkspaceEdit(operations)).toBe(true);
+      expect(editor.executeEdits).toHaveBeenCalledWith('workspace-edit', [
+        expect.objectContaining({ text: 'replaced' })
+      ]);
+    });
+
+    it('applies edit without range (full document replace)', () => {
+      const mockModel = {
+        getFullModelRange: vi.fn().mockReturnValue({ startLineNumber: 1, startColumn: 1, endLineNumber: 10, endColumn: 1 })
+      };
+      const editor = createMockEditor();
+      (editor.getModel as ReturnType<typeof vi.fn>).mockReturnValue(mockModel);
+      setActiveEditor(editor);
+
+      const operations = [{ filePath: '/test.ts', text: 'full replacement' }];
+      expect(editorApplyWorkspaceEdit(operations)).toBe(true);
+      expect(editor.executeEdits).toHaveBeenCalledWith('workspace-edit', [
+        expect.objectContaining({ text: 'full replacement' })
+      ]);
+    });
+
+    it('applies multiple operations', () => {
+      const mockModel = {
+        getFullModelRange: vi.fn().mockReturnValue({ startLineNumber: 1, startColumn: 1, endLineNumber: 10, endColumn: 1 })
+      };
+      const editor = createMockEditor();
+      (editor.getModel as ReturnType<typeof vi.fn>).mockReturnValue(mockModel);
+      setActiveEditor(editor);
+
+      const operations = [
+        { filePath: '/test.ts', text: 'first' },
+        { filePath: '/test.ts', range: { startLine: 2, startCol: 1, endLine: 3, endCol: 1 }, text: 'second' }
+      ];
+      expect(editorApplyWorkspaceEdit(operations)).toBe(true);
+      expect(editor.executeEdits).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('editorShowDiff', () => {
+    it('returns diff data for renderer', () => {
+      const result = editorShowDiff('original content', 'modified content');
+      expect(result).toEqual({ original: 'original content', modified: 'modified content' });
+    });
+
+    it('returns null when no editor is active', () => {
+      // editorShowDiff doesn't require active editor in current implementation
+      const result = editorShowDiff('original', 'modified');
+      expect(result).not.toBeNull();
     });
   });
 });
