@@ -3,9 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- SECURITY: Strict Content Security Policy for Electron renderer.
+         Do NOT allow remote script/worker sources (e.g. cdn.jsdelivr.net).
+         Monaco editor assets are bundled locally by the build (see
+         electron.vite.config.ts / monaco-local-assets). If an external CDN
+         is ever required this must be explicitly justified and delivered
+         with Subresource Integrity (SRI) + security review.
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* https://cdn.jsdelivr.net; worker-src 'self' blob: https://cdn.jsdelivr.net;"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:*; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
     />
     <link rel="icon" href="data:," />
     <title>AgentDeck</title>
