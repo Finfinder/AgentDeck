@@ -73,7 +73,7 @@ export function SearchPanel({ agent, workspaceModel, onFileOpen }: SearchPanelPr
       {results.length > 0 && (
         <ul className="search-results" aria-label={`${results.length.toString()} search results`}>
           {results.map(result => (
-            <li key={`${result.file}:${result.line}:${result.col}`}>
+            <li key={result.id}>
               <button
                 type="button"
                 className={`search-result-item${result.isSensitive ? ' sensitive' : ''}`}

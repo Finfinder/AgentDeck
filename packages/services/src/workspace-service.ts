@@ -453,6 +453,7 @@ export class WorkspaceService extends EventEmitter {
         if (col === -1) continue;
 
         results.push({
+          id: `${filePath}:${idx + 1}:${col + 1}`,
           file: filePath,
           line: idx + 1,
           col: col + 1,

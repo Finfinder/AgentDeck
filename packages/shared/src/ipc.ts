@@ -95,6 +95,7 @@ export type SearchQuery = Readonly<{
 }>;
 
 export type SearchResult = Readonly<{
+  id: string;
   file: string;
   line: number;
   col: number;

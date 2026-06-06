@@ -85,8 +85,8 @@ describe('SearchPanel', () => {
   it('renders search results with file basename, location and snippet', async () => {
     const user = userEvent.setup();
     const results: SearchResult[] = [
-      { file: '/workspace/src/index.ts', line: 10, col: 5, snippet: 'const x = 1;', isSensitive: false },
-      { file: '/workspace/src/utils.ts', line: 3, col: 1, snippet: 'export function', isSensitive: false }
+      { id: '/workspace/src/index.ts:10:5', file: '/workspace/src/index.ts', line: 10, col: 5, snippet: 'const x = 1;', isSensitive: false },
+      { id: '/workspace/src/utils.ts:3:1', file: '/workspace/src/utils.ts', line: 3, col: 1, snippet: 'export function', isSensitive: false }
     ];
     const searchFiles = vi.fn().mockResolvedValue(results);
     const agent = mockAgent({ searchFiles });
@@ -106,7 +106,7 @@ describe('SearchPanel', () => {
   it('marks sensitive results with sensitive class', async () => {
     const user = userEvent.setup();
     const results: SearchResult[] = [
-      { file: '/workspace/.env', line: 1, col: 1, snippet: 'SECRET=abc', isSensitive: true }
+      { id: '/workspace/.env:1:1', file: '/workspace/.env', line: 1, col: 1, snippet: 'SECRET=abc', isSensitive: true }
     ];
     const searchFiles = vi.fn().mockResolvedValue(results);
     const agent = mockAgent({ searchFiles });
@@ -279,7 +279,7 @@ describe('SearchPanel', () => {
   it('completes full search cycle including finally block', async () => {
     const user = userEvent.setup();
     const results: SearchResult[] = [
-      { file: '/workspace/a.ts', line: 1, col: 1, snippet: 'test', isSensitive: false }
+      { id: '/workspace/a.ts:1:1', file: '/workspace/a.ts', line: 1, col: 1, snippet: 'test', isSensitive: false }
     ];
     const searchFiles = vi.fn().mockResolvedValue(results);
     const agent = mockAgent({ searchFiles });
@@ -319,7 +319,7 @@ describe('SearchPanel', () => {
   it('calls searchFiles and sets results on successful search', async () => {
     const user = userEvent.setup();
     const results: SearchResult[] = [
-      { file: '/workspace/a.ts', line: 1, col: 1, snippet: 'test', isSensitive: false }
+      { id: '/workspace/a.ts:1:1', file: '/workspace/a.ts', line: 1, col: 1, snippet: 'test', isSensitive: false }
     ];
     const searchFiles = vi.fn().mockResolvedValue(results);
     const agent = mockAgent({ searchFiles });
@@ -342,9 +342,9 @@ describe('SearchPanel', () => {
   it('renders search results with correct aria-label count', async () => {
     const user = userEvent.setup();
     const results: SearchResult[] = [
-      { file: '/workspace/a.ts', line: 1, col: 1, snippet: 'test', isSensitive: false },
-      { file: '/workspace/b.ts', line: 2, col: 1, snippet: 'test', isSensitive: false },
-      { file: '/workspace/c.ts', line: 3, col: 1, snippet: 'test', isSensitive: false }
+      { id: '/workspace/a.ts:1:1', file: '/workspace/a.ts', line: 1, col: 1, snippet: 'test', isSensitive: false },
+      { id: '/workspace/b.ts:2:1', file: '/workspace/b.ts', line: 2, col: 1, snippet: 'test', isSensitive: false },
+      { id: '/workspace/c.ts:3:1', file: '/workspace/c.ts', line: 3, col: 1, snippet: 'test', isSensitive: false }
     ];
     const searchFiles = vi.fn().mockResolvedValue(results);
     const agent = mockAgent({ searchFiles });
@@ -388,7 +388,7 @@ describe('SearchPanel', () => {
   it('calls onFileOpen when search result is clicked', async () => {
     const user = userEvent.setup();
     const results: SearchResult[] = [
-      { file: '/workspace/src/index.ts', line: 10, col: 5, snippet: 'const x = 1;', isSensitive: false }
+      { id: '/workspace/src/index.ts:10:5', file: '/workspace/src/index.ts', line: 10, col: 5, snippet: 'const x = 1;', isSensitive: false }
     ];
     const searchFiles = vi.fn().mockResolvedValue(results);
     const onFileOpen = vi.fn();
