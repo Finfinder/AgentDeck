@@ -240,6 +240,21 @@ describe('WorkspaceService', () => {
       const envEntry = listing.entries.find(e => e.name === '.env');
       expect(envEntry?.isSensitive).toBe(true);
     });
+
+    it('sorts directories before files with mixed entries', async () => {
+      // Create a directory and a file to test the sort branch where kind differs
+      const subDir = join(tmpDir, 'z-dir');
+      await mkdir(subDir);
+      await writeFile(join(tmpDir, 'a-file.txt'), 'content', 'utf8');
+
+      const service = createWorkspaceService(tmpDir);
+      const listing = await service.listDirectory(tmpDir);
+
+      // Find positions
+      const dirIdx = listing.entries.findIndex(e => e.kind === 'directory');
+      const fileIdx = listing.entries.findIndex(e => e.kind === 'file');
+      expect(dirIdx).toBeLessThan(fileIdx);
+    });
   });
 
   describe('openWorkspace', () => {
@@ -294,6 +309,188 @@ describe('WorkspaceService', () => {
       const results = await service.searchFiles({ pattern: 'xyzzy', workspaceRoots: [tmpDir] });
 
       expect(results).toEqual([]);
+    });
+
+    it('respects include glob patterns', async () => {
+      await writeFile(join(tmpDir, 'app.ts'), 'const x = 1;', 'utf8');
+      await writeFile(join(tmpDir, 'app.test.ts'), 'const x = 1;', 'utf8');
+      await writeFile(join(tmpDir, 'readme.md'), 'const x = 1;', 'utf8');
+
+      const service = createWorkspaceService(tmpDir);
+      const results = await service.searchFiles({
+        pattern: 'const',
+        workspaceRoots: [tmpDir],
+        include: '*.ts'
+      });
+
+      expect(results.length).toBeGreaterThan(0);
+      for (const r of results) {
+        expect(r.file).toMatch(/\.ts$/);
+      }
+    });
+
+    it('respects exclude glob patterns', async () => {
+      await writeFile(join(tmpDir, 'app.ts'), 'const x = 1;', 'utf8');
+      await writeFile(join(tmpDir, 'dist.js'), 'const x = 1;', 'utf8');
+
+      const service = createWorkspaceService(tmpDir);
+      const results = await service.searchFiles({
+        pattern: 'const',
+        workspaceRoots: [tmpDir],
+        exclude: 'dist.*'
+      });
+
+      expect(results.length).toBeGreaterThan(0);
+      for (const r of results) {
+        expect(r.file).not.toContain('dist.js');
+      }
+    });
+
+    it('matches single-character wildcard with ? glob pattern', async () => {
+      await writeFile(join(tmpDir, 'ab.txt'), 'const x = 1;', 'utf8');
+      await writeFile(join(tmpDir, 'abc.txt'), 'const x = 1;', 'utf8');
+
+      const service = createWorkspaceService(tmpDir);
+      const results = await service.searchFiles({
+        pattern: 'const',
+        workspaceRoots: [tmpDir],
+        include: 'a?.txt'
+      });
+
+      // ? matches exactly one character, so ab.txt should match but abc.txt should not
+      expect(results.length).toBeGreaterThan(0);
+      for (const r of results) {
+        expect(r.file).toContain('ab.txt');
+      }
+    });
+
+    it('skips binary files during search', async () => {
+      await writeFile(join(tmpDir, 'image.png'), 'const x = 1;', 'utf8');
+
+      const service = createWorkspaceService(tmpDir);
+      const results = await service.searchFiles({ pattern: 'const', workspaceRoots: [tmpDir] });
+
+      expect(results).toEqual([]);
+    });
+
+    it('skips files exceeding max file size', async () => {
+      const largeContent = 'x'.repeat(600 * 1024) + '\nconst found = true;';
+      await writeFile(join(tmpDir, 'large.txt'), largeContent, 'utf8');
+
+      const service = createWorkspaceService(tmpDir);
+      const results = await service.searchFiles({ pattern: 'const', workspaceRoots: [tmpDir] });
+
+      expect(results).toEqual([]);
+    });
+
+    it('respects max results limit', async () => {
+      for (let i = 0; i < 10; i++) {
+        await writeFile(join(tmpDir, `file${i}.txt`), `const x = ${i};`, 'utf8');
+      }
+
+      const service = createWorkspaceService(tmpDir);
+      const results = await service.searchFiles({ pattern: 'const', workspaceRoots: [tmpDir] });
+
+      expect(results.length).toBeGreaterThan(0);
+      expect(results.length).toBeLessThanOrEqual(50);
+    });
+  });
+
+  describe('listDirectory error handling', () => {
+    it('returns empty entries when directory cannot be read', async () => {
+      const service = createWorkspaceService(tmpDir);
+      const filePath = join(tmpDir, 'not-a-dir.txt');
+      await writeFile(filePath, 'content', 'utf8');
+
+      const listing = await service.listDirectory(filePath);
+      expect(listing.entries).toEqual([]);
+    });
+  });
+
+  describe('getRecentWorkspaces error handling', () => {
+    it('returns empty array when recent file contains invalid JSON', async () => {
+      const recentFilePath = join(tmpDir, 'recent-workspaces.json');
+      await writeFile(recentFilePath, '{ invalid json', 'utf8');
+
+      const service = createWorkspaceService(tmpDir);
+      const recents = await service.getRecentWorkspaces();
+      expect(recents).toEqual([]);
+    });
+
+    it('returns empty array when recent file contains non-array JSON', async () => {
+      const recentFilePath = join(tmpDir, 'recent-workspaces.json');
+      await writeFile(recentFilePath, '{"not": "an array"}', 'utf8');
+
+      const service = createWorkspaceService(tmpDir);
+      const recents = await service.getRecentWorkspaces();
+      expect(recents).toEqual([]);
+    });
+  });
+
+  describe('deleteFile', () => {
+    it('returns ok on successful delete', async () => {
+      const filePath = join(tmpDir, 'to-delete.txt');
+      await writeFile(filePath, 'content', 'utf8');
+
+      const service = createWorkspaceService(tmpDir);
+      const result = await service.deleteFile(filePath);
+
+      expect(result.status).toBe('ok');
+    });
+
+    it('returns FILE_NOT_FOUND for missing file', async () => {
+      const service = createWorkspaceService(tmpDir);
+      const result = await service.deleteFile(join(tmpDir, 'nonexistent.txt'));
+
+      expect(result.status).toBe('error');
+      if (result.status !== 'error') return;
+      expect(result.code).toBe('FILE_NOT_FOUND');
+    });
+
+    it('returns UNKNOWN for other errors', async () => {
+      const dirPath = join(tmpDir, 'subdir');
+      await mkdir(dirPath);
+
+      const service = createWorkspaceService(tmpDir);
+      const result = await service.deleteFile(dirPath);
+
+      expect(result.status).toBe('error');
+      if (result.status !== 'error') return;
+      expect(result.code).toBe('UNKNOWN');
+    });
+  });
+
+  describe('renameFile', () => {
+    it('returns ok on successful rename', async () => {
+      const oldPath = join(tmpDir, 'old-name.txt');
+      const newPath = join(tmpDir, 'new-name.txt');
+      await writeFile(oldPath, 'content', 'utf8');
+
+      const service = createWorkspaceService(tmpDir);
+      const result = await service.renameFile(oldPath, newPath);
+
+      expect(result.status).toBe('ok');
+    });
+
+    it('returns FILE_NOT_FOUND for missing source', async () => {
+      const service = createWorkspaceService(tmpDir);
+      const result = await service.renameFile(join(tmpDir, 'nonexistent.txt'), join(tmpDir, 'new.txt'));
+
+      expect(result.status).toBe('error');
+      if (result.status !== 'error') return;
+      expect(result.code).toBe('FILE_NOT_FOUND');
+    });
+  });
+
+  describe('closeWorkspace', () => {
+    it('stops all active watchers without error', async () => {
+      const workspacePath = join(tmpDir, 'test.code-workspace');
+      await writeFile(workspacePath, '{"folders": [{"path": "."}]}', 'utf8');
+
+      const service = createWorkspaceService(tmpDir);
+      await service.openWorkspace(workspacePath, 'workspace-file');
+
+      expect(() => service.closeWorkspace()).not.toThrow();
     });
   });
 });

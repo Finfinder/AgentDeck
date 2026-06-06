@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -205,6 +205,159 @@ describe('SearchPanel', () => {
     expect(searchFiles).not.toHaveBeenCalled();
   });
 
+  it('does not call searchFiles for empty pattern', async () => {
+    const user = userEvent.setup();
+    const searchFiles = vi.fn().mockResolvedValue([]);
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
+
+    // Submit form with empty input (button should be disabled, but test the function directly)
+    const form = screen.getByRole('search');
+    fireEvent.submit(form);
+
+    expect(searchFiles).not.toHaveBeenCalled();
+  });
+
+  it('trims whitespace from pattern before searching', async () => {
+    const user = userEvent.setup();
+    const searchFiles = vi.fn().mockResolvedValue([]);
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), '  hello  ');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    await waitFor(() => {
+      expect(searchFiles).toHaveBeenCalledWith({
+        pattern: 'hello',
+        workspaceRoots: ['/workspace']
+      });
+    });
+  });
+
+  it('clears previous error when starting a new search', async () => {
+    const user = userEvent.setup();
+    const searchFiles = vi.fn()
+      .mockRejectedValueOnce(new Error('First search failed'))
+      .mockResolvedValueOnce([]);
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
+
+    // First search - should fail
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'fail');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('First search failed');
+
+    // Second search - should clear error
+    await user.clear(screen.getByRole('searchbox', { name: 'Search pattern' }));
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'ok');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows hasSearched state after first search', async () => {
+    const user = userEvent.setup();
+    const searchFiles = vi.fn().mockResolvedValue([]);
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'test');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('No results found.')).toBeInTheDocument();
+    });
+  });
+
+  it('completes full search cycle including finally block', async () => {
+    const user = userEvent.setup();
+    const results: SearchResult[] = [
+      { file: '/workspace/a.ts', line: 1, col: 1, snippet: 'test', isSensitive: false }
+    ];
+    const searchFiles = vi.fn().mockResolvedValue(results);
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'test');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    // Wait for search to complete (isSearching goes back to false)
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Run search' })).toHaveTextContent('Search');
+    });
+
+    // Verify results are displayed
+    expect(await screen.findByRole('list', { name: '1 search results' })).toBeInTheDocument();
+  });
+
+  it('submits search via form submit event', async () => {
+    const searchFiles = vi.fn().mockResolvedValue([]);
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
+
+    const input = screen.getByRole('searchbox', { name: 'Search pattern' });
+    fireEvent.change(input, { target: { value: 'test' } });
+    fireEvent.submit(screen.getByRole('search'));
+
+    await waitFor(() => {
+      expect(searchFiles).toHaveBeenCalledWith({
+        pattern: 'test',
+        workspaceRoots: ['/workspace']
+      });
+    });
+  });
+
+  it('calls searchFiles and sets results on successful search', async () => {
+    const user = userEvent.setup();
+    const results: SearchResult[] = [
+      { file: '/workspace/a.ts', line: 1, col: 1, snippet: 'test', isSensitive: false }
+    ];
+    const searchFiles = vi.fn().mockResolvedValue(results);
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'test');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    await waitFor(() => {
+      expect(searchFiles).toHaveBeenCalledWith({
+        pattern: 'test',
+        workspaceRoots: ['/workspace']
+      });
+    });
+
+    expect(await screen.findByRole('list', { name: '1 search results' })).toBeInTheDocument();
+  });
+
+  it('renders search results with correct aria-label count', async () => {
+    const user = userEvent.setup();
+    const results: SearchResult[] = [
+      { file: '/workspace/a.ts', line: 1, col: 1, snippet: 'test', isSensitive: false },
+      { file: '/workspace/b.ts', line: 2, col: 1, snippet: 'test', isSensitive: false },
+      { file: '/workspace/c.ts', line: 3, col: 1, snippet: 'test', isSensitive: false }
+    ];
+    const searchFiles = vi.fn().mockResolvedValue(results);
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={mockOnFileOpen} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'test');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    expect(await screen.findByRole('list', { name: '3 search results' })).toBeInTheDocument();
+  });
+
   it('uses multiple workspace roots when workspace has multiple folders', async () => {
     const user = userEvent.setup();
     const searchFiles = vi.fn().mockResolvedValue([]);
@@ -231,6 +384,32 @@ describe('SearchPanel', () => {
         workspaceRoots: ['/workspace-a', '/workspace-b']
       });
     });
+  });
+
+  it('calls onFileOpen when search result is clicked', async () => {
+    const user = userEvent.setup();
+    const results: SearchResult[] = [
+      { file: '/workspace/src/index.ts', line: 10, col: 5, snippet: 'const x = 1;', isSensitive: false }
+    ];
+    const searchFiles = vi.fn().mockResolvedValue(results);
+    const onFileOpen = vi.fn();
+    const agent = mockAgent({ searchFiles });
+
+    render(<SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={onFileOpen} />);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search pattern' }), 'const');
+    await user.click(screen.getByRole('button', { name: 'Run search' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('list', { name: '1 search results' })).toBeInTheDocument();
+    });
+
+    // Click on the search result button - use fireEvent for the button inside list item
+    const listItem = screen.getByRole('listitem');
+    const resultButton = listItem.querySelector('button')!;
+    fireEvent.click(resultButton);
+
+    expect(onFileOpen).toHaveBeenCalledWith('/workspace/src/index.ts', 10, 5, 'const', expect.any(Number));
   });
 });
 
