@@ -134,7 +134,7 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
     return showDiff(input.original, input.modified);
   });
 
-  ipcMain.handle('agentdeck:v1:devtools:toggle', () => {
+  ipcMain.handle(IPC_CHANNELS.toggleDevTools, () => {
     const focused = BrowserWindow.getFocusedWindow();
     if (focused) {
       if (focused.webContents.isDevToolsOpened()) {
