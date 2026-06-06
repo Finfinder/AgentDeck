@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { injectNonceCssRule } from './csp';
 
 import { pathBasename, normalizePathStr } from '@agentdeck/shared';
 import type { AgentDeckPreloadApi, DirectoryListing, FileEntry, WorkspaceModel } from '@agentdeck/shared';
@@ -138,6 +139,22 @@ export function Explorer({ agent, workspaceModel, onFileOpen }: ExplorerProps) {
     if (maxHeight !== undefined) style.maxHeight = `${maxHeight}px`;
     setContextMenuStyle(style);
   }, [contextMenu]);
+
+  // Create a nonce-protected CSS rule for the context menu positioning so we avoid
+  // using inline `style` attributes which are blocked by our CSP.
+  const [contextMenuClass, setContextMenuClass] = useState<string | null>(null);
+  useEffect(() => {
+    if (contextMenuStyle === null) {
+      setContextMenuClass(null);
+      return;
+    }
+    const top = contextMenuStyle.top ?? '0px';
+    const left = contextMenuStyle.left ?? '0px';
+    const maxHeightRule = contextMenuStyle.maxHeight ? `max-height: ${contextMenuStyle.maxHeight};` : '';
+    const css = `position: absolute; top: ${top}; left: ${left}; ${maxHeightRule}`;
+    const cls = injectNonceCssRule(css, 'context-menu');
+    setContextMenuClass(cls);
+  }, [contextMenuStyle]);
 
   // Adjust context menu position to avoid viewport overflow (flip or clamp)
   useEffect(() => {
@@ -468,8 +485,7 @@ export function Explorer({ agent, workspaceModel, onFileOpen }: ExplorerProps) {
       {contextMenu !== null && (
         <div
           ref={contextMenuRef}
-          className="context-menu"
-          style={contextMenuStyle ?? { top: contextMenu.y, left: contextMenu.x }}
+          className={`context-menu ${contextMenuClass ?? ''}`}
           role="menu"
           aria-label="File context menu"
         >

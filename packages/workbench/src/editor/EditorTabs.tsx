@@ -1,4 +1,6 @@
 import type { EditorTab } from '@agentdeck/shared';
+import { useMemo } from 'react';
+import { injectNonceCssRule } from '../csp';
 
 interface EditorTabsProps {
   readonly tabs: readonly EditorTab[];
@@ -12,6 +14,7 @@ function dirtyIndicator(isDirty: boolean): string {
 }
 
 export function EditorTabs({ tabs, activeTabId, onSelect, onClose }: EditorTabsProps) {
+  const noPointerClass = useMemo(() => injectNonceCssRule('pointer-events: none;', 'no-pointer'), []);
   if (tabs.length === 0) {
     return (
       <div className="editor-tabs" role="tablist" aria-label="Open editors">
@@ -49,7 +52,7 @@ export function EditorTabs({ tabs, activeTabId, onSelect, onClose }: EditorTabsP
                 onClose(tab.id);
               }}
             >
-              <span aria-hidden="true" style={{ pointerEvents: 'none' }}>✕</span>
+              <span aria-hidden="true" className={noPointerClass}>✕</span>
             </button>
           </div>
         );

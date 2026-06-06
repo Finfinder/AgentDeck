@@ -5,7 +5,8 @@ import { type editor, Selection, Range } from 'monaco-editor';
 // Ensure @monaco-editor/react uses the same monaco instance as our direct import.
 // Without this, getModelMarkers(), getModels() etc. see a different registry.
 loader.config({ monaco });
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { injectNonceCssRule } from '../csp';
 
 import type { AgentDeckPreloadApi, EditorDiagnostic, EditorTab, FileReadResult } from '@agentdeck/shared';
 
@@ -232,11 +233,18 @@ export function MonacoEditorSurface({
     [tab.id, tab.filePath, onDirtyChange, onContentChange, agent]
   );
 
+  // Pre-generate the loading overlay class so hooks run in the same order every render.
+  const loadingOverlayClass = useMemo(() => {
+    return injectNonceCssRule(
+      'position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--color-editor);',
+      'loading-overlay'
+    );
+  }, []);
+
   if (isLoading) {
     return (
       <output
-        className="editor-surface-loading"
-        style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-editor)' }}
+        className={`editor-surface-loading ${loadingOverlayClass}`}
         aria-live="polite"
         aria-label={`Loading ${tab.fileName}`}
       >
