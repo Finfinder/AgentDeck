@@ -347,4 +347,303 @@ describe('Explorer - additional coverage', () => {
       });
     });
   });
+
+  describe('onFileOpen callback', () => {
+    it('calls onFileOpen when a file entry is clicked', async () => {
+      const user = userEvent.setup();
+      const onFileOpen = vi.fn();
+      const entries = makeEntries([
+        { name: 'index.ts', path: '/workspace/index.ts', kind: 'file' }
+      ]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} onFileOpen={onFileOpen} />);
+
+      const fileButton = await screen.findByRole('treeitem', { name: 'Open file index.ts' });
+      await user.click(fileButton);
+
+      expect(onFileOpen).toHaveBeenCalledWith('/workspace/index.ts');
+    });
+  });
+
+  describe('context menu Escape key', () => {
+    it('closes context menu on Escape key down', async () => {
+      const entries = makeEntries([
+        { name: 'app.ts', path: '/workspace/app.ts', kind: 'file' }
+      ]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} />);
+
+      const fileButton = await screen.findByRole('treeitem', { name: 'Open file app.ts' });
+      fireEvent.contextMenu(fileButton);
+
+      expect(screen.getByRole('menu', { name: 'File context menu' })).toBeInTheDocument();
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+
+      await waitFor(() => {
+        expect(screen.queryByRole('menu', { name: 'File context menu' })).not.toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('copy path success paths', () => {
+    it('copies full path to clipboard and closes menu', async () => {
+      const user = userEvent.setup();
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      const origClipboard = navigator.clipboard;
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText }, configurable: true
+      });
+
+      const entries = makeEntries([
+        { name: 'app.ts', path: '/workspace/app.ts', kind: 'file' }
+      ]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} />);
+
+      const fileButton = await screen.findByRole('treeitem', { name: 'Open file app.ts' });
+      fireEvent.contextMenu(fileButton);
+
+      await user.click(screen.getByRole('menuitem', { name: 'Copy Path' }));
+
+      expect(writeText).toHaveBeenCalledWith('/workspace/app.ts');
+
+      await waitFor(() => {
+        expect(screen.queryByRole('menu', { name: 'File context menu' })).not.toBeInTheDocument();
+      });
+
+      Object.defineProperty(navigator, 'clipboard', { value: origClipboard, configurable: true });
+    });
+
+    it('copies relative path to clipboard', async () => {
+      const user = userEvent.setup();
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      const origClipboard = navigator.clipboard;
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText }, configurable: true
+      });
+
+      const entries = makeEntries([
+        { name: 'app.ts', path: '/workspace/src/app.ts', kind: 'file' }
+      ]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} />);
+
+      const fileButton = await screen.findByRole('treeitem', { name: 'Open file app.ts' });
+      fireEvent.contextMenu(fileButton);
+
+      await user.click(screen.getByRole('menuitem', { name: 'Copy Relative Path' }));
+
+      expect(writeText).toHaveBeenCalledWith('src/app.ts');
+
+      await waitFor(() => {
+        expect(screen.queryByRole('menu', { name: 'File context menu' })).not.toBeInTheDocument();
+      });
+
+      Object.defineProperty(navigator, 'clipboard', { value: origClipboard, configurable: true });
+    });
+  });
+
+  describe('rename dialog edge cases', () => {
+    it('closes rename dialog when value is unchanged or empty', async () => {
+      const user = userEvent.setup();
+      const renameFile = vi.fn();
+      const entries = makeEntries([
+        { name: 'app.ts', path: '/workspace/app.ts', kind: 'file' }
+      ]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory, renameFile })} workspaceModel={singleRootWorkspace} />);
+
+      const fileButton = await screen.findByRole('treeitem', { name: 'Open file app.ts' });
+      fireEvent.contextMenu(fileButton);
+      await user.click(screen.getByRole('menuitem', { name: 'Rename' }));
+
+      const input = screen.getByRole('textbox', { name: 'New name' }) as HTMLInputElement;
+      expect(input.value).toBe('app.ts');
+
+      // Click Rename without changing the value — should close without calling renameFile
+      await user.click(screen.getByRole('button', { name: 'Rename' }));
+      expect(renameFile).not.toHaveBeenCalled();
+      expect(screen.queryByText(/Rename "app.ts"/)).not.toBeInTheDocument();
+    });
+
+    it('submits rename on Enter key', async () => {
+      const user = userEvent.setup();
+      const renameFile = vi.fn().mockResolvedValue({ status: 'ok' });
+      const entries = makeEntries([
+        { name: 'app.ts', path: '/workspace/app.ts', kind: 'file' }
+      ]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory, renameFile })} workspaceModel={singleRootWorkspace} />);
+
+      const fileButton = await screen.findByRole('treeitem', { name: 'Open file app.ts' });
+      fireEvent.contextMenu(fileButton);
+      await user.click(screen.getByRole('menuitem', { name: 'Rename' }));
+
+      const input = screen.getByRole('textbox', { name: 'New name' });
+      await user.clear(input);
+      await user.type(input, 'renamed.ts');
+      await user.keyboard('{Enter}');
+
+      await waitFor(() => {
+        expect(renameFile).toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe('context menu scroll containment', () => {
+    it('sets up and cleans up scroll containment handlers', async () => {
+      const addSpy = vi.spyOn(globalThis, 'addEventListener');
+      const removeSpy = vi.spyOn(globalThis, 'removeEventListener');
+
+      const entries = makeEntries([
+        { name: 'app.ts', path: '/workspace/app.ts', kind: 'file' }
+      ]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      const { unmount } = render(
+        <Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} />
+      );
+
+      const fileButton = await screen.findByRole('treeitem', { name: 'Open file app.ts' });
+      fireEvent.contextMenu(fileButton);
+
+      expect(screen.getByRole('menu', { name: 'File context menu' })).toBeInTheDocument();
+
+      // Close the menu to trigger cleanup
+      fireEvent.keyDown(document, { key: 'Escape' });
+
+      await waitFor(() => {
+        expect(screen.queryByRole('menu', { name: 'File context menu' })).not.toBeInTheDocument();
+      });
+
+      unmount();
+      addSpy.mockRestore();
+      removeSpy.mockRestore();
+    });
+  });
+
+  describe('parentPath utility', () => {
+    it('navigates into subdirectory and navigates up to parent', async () => {
+      const entries = makeEntries([
+        { name: 'src', path: '/workspace/src', kind: 'directory' }
+      ]);
+      const listDirectory = vi.fn()
+        .mockResolvedValueOnce({ path: '/workspace', entries })
+        .mockResolvedValueOnce({ path: '/workspace/src', entries: [] })
+        .mockResolvedValueOnce({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} />);
+
+      const dirButton = await screen.findByRole('treeitem', { name: 'Open directory src' });
+      await userEvent.click(dirButton);
+
+      await waitFor(() => {
+        expect(listDirectory).toHaveBeenNthCalledWith(2, '/workspace/src');
+      });
+
+      // Navigate up
+      const upButton = await screen.findByRole('button', { name: 'Navigate up' });
+      await userEvent.click(upButton);
+
+      await waitFor(() => {
+        expect(listDirectory).toHaveBeenNthCalledWith(3, '/workspace');
+      });
+    });
+  });
+
+  describe('loadDir error handling', () => {
+    it('handles loadDir rejection gracefully', async () => {
+      const listDirectory = vi.fn().mockRejectedValue(new Error('network error'));
+      // Prevent console.error from cluttering output
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} />);
+
+      await screen.findByText('workspace');
+      // Loading should be finished despite error
+      await waitFor(() => {
+        expect(screen.queryByText('Loading.')).not.toBeInTheDocument();
+      });
+
+      consoleError.mockRestore();
+    });
+  });
+
+  describe('fs watcher cleanup', () => {
+    it('cleans up fs event subscription and debounce timer on unmount', async () => {
+      const unsubscribe = vi.fn();
+      const onFsEvent = vi.fn().mockReturnValue(unsubscribe);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries: [] });
+
+      const { unmount } = render(
+        <Explorer agent={mockAgent({ onFsEvent, listDirectory })} workspaceModel={singleRootWorkspace} />
+      );
+
+      await screen.findByText('workspace');
+
+      unmount();
+
+      expect(unsubscribe).toHaveBeenCalled();
+    });
+  });
+
+  describe('getRelativePath', () => {
+    it('returns full path for files outside root', async () => {
+      const user = userEvent.setup();
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      const origClipboard = navigator.clipboard;
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText }, configurable: true
+      });
+
+      // File outside root
+      const entries = makeEntries([
+        { name: 'outside.ts', path: '/other/outside.ts', kind: 'file' }
+      ]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} />);
+
+      const fileButton = await screen.findByRole('treeitem', { name: 'Open file outside.ts' });
+      fireEvent.contextMenu(fileButton);
+      await user.click(screen.getByRole('menuitem', { name: 'Copy Relative Path' }));
+
+      expect(writeText).toHaveBeenCalledWith('/other/outside.ts');
+
+      Object.defineProperty(navigator, 'clipboard', { value: origClipboard, configurable: true });
+    });
+  });
+
+  describe('rename on Enter key (handleRenameKeyDown)', () => {
+    it('cancels rename on Escape key in rename input', async () => {
+      const user = userEvent.setup();
+      const entries = makeEntries([
+        { name: 'app.ts', path: '/workspace/app.ts', kind: 'file' }
+      ]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory })} workspaceModel={singleRootWorkspace} />);
+
+      const fileButton = await screen.findByRole('treeitem', { name: 'Open file app.ts' });
+      fireEvent.contextMenu(fileButton);
+      await user.click(screen.getByRole('menuitem', { name: 'Rename' }));
+
+      expect(screen.getByText(/Rename "app.ts"/)).toBeInTheDocument();
+
+      const input = screen.getByRole('textbox', { name: 'New name' });
+      // Simulate Escape via handleRenameKeyDown
+      fireEvent.keyDown(input, { key: 'Escape' });
+
+      await waitFor(() => {
+        expect(screen.queryByText(/Rename "app.ts"/)).not.toBeInTheDocument();
+      });
+    });
+  });
 });
