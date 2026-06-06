@@ -9,9 +9,9 @@ if (nonce) {
   // Patch document.createElement so created <style> elements get the nonce
   const origCreate = Document.prototype.createElement;
 
-  const patchedCreate = function (this: Document, tagName: string, options?: ElementCreationOptions) {
+  const patchedCreate = function (this: Document, tagName: string, ...rest: unknown[]) {
     // Forward to original using apply to handle overloaded signatures safely
-    const el = (origCreate as (this: Document, tag: string, opts?: ElementCreationOptions) => HTMLElement).apply(this, arguments as unknown as [string, ElementCreationOptions?]);
+    const el = (origCreate as (this: Document, tag: string, opts?: ElementCreationOptions) => HTMLElement).apply(this, [tagName, ...rest] as [string, ElementCreationOptions?]);
     try {
       if (typeof tagName === 'string' && tagName.toLowerCase() === 'style' && !el.getAttribute('nonce')) {
         el.setAttribute('nonce', nonce);
@@ -49,7 +49,7 @@ let __nonce_id_counter = Date.now();
 
 function __secureSuffix(len = 6): string {
   try {
-    const c = typeof globalThis === 'undefined' ? undefined : (globalThis as any).crypto;
+    const c = typeof globalThis === 'undefined' ? undefined : (globalThis as { crypto?: Crypto }).crypto;
     if (c) {
       if (typeof c.randomUUID === 'function') {
         return c.randomUUID().split('-').join('').slice(0, len);
@@ -66,9 +66,8 @@ function __secureSuffix(len = 6): string {
 
   try {
     // Node/Electron fallback when `require` is available
-    const req = (globalThis as any).require;
+    const req = (globalThis as { require?: (id: string) => { randomBytes?: (n: number) => { toString: (enc: string) => string } } }).require;
     if (typeof req === 'function') {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const nodeCrypto = req('crypto');
       if (nodeCrypto && typeof nodeCrypto.randomBytes === 'function') {
         return nodeCrypto.randomBytes(Math.ceil(len / 2)).toString('hex').slice(0, len);
