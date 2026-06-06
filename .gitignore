@@ -10,5 +10,8 @@ coverage/
 .env.*
 !.env.example
 
+# Playwright report (generated artifact)
+playwright-report/
+
 # Issue templates backup (kept locally, not tracked in git)
 .github/Issue/
