@@ -387,6 +387,15 @@ const EDITOR_LANGUAGES = new Set<string>([
   'yaml',
   'markdown',
   'powershell',
+  'python',
+  'cpp',
+  'c',
+  'csharp',
+  'css',
+  'scss',
+  'less',
+  'html',
+  'dockerfile',
   'plaintext'
 ]);
 

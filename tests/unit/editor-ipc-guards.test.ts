@@ -21,7 +21,7 @@ describe('editor IPC guards', () => {
     });
 
     it('rejects invalid languages', () => {
-      expect(isEditorLanguage('python')).toBe(false);
+      expect(isEditorLanguage('cobol')).toBe(false);
       expect(isEditorLanguage('')).toBe(false);
       expect(isEditorLanguage(42)).toBe(false);
       expect(isEditorLanguage(null)).toBe(false);
