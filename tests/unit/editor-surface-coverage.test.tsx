@@ -98,7 +98,7 @@ describe('EditorSurface - additional coverage', () => {
     renderSurface({ agent, store });
 
     // Dispatch Ctrl+S — no active tab, so no save should occur
-    fireEvent.keyDown(window, { key: 's', code: 'KeyS', ctrlKey: true });
+    fireEvent.keyDown(document, { key: 's', code: 'KeyS', ctrlKey: true });
 
     await waitFor(() => {
       expect(writeFileMock).not.toHaveBeenCalled();
@@ -113,7 +113,7 @@ describe('EditorSurface - additional coverage', () => {
     renderSurface({ agent, store });
 
     // Dispatch Ctrl+S — tab not dirty, so no save
-    fireEvent.keyDown(window, { key: 's', code: 'KeyS', ctrlKey: true });
+    fireEvent.keyDown(document, { key: 's', code: 'KeyS', ctrlKey: true });
 
     await waitFor(() => {
       expect(writeFileMock).not.toHaveBeenCalled();
@@ -133,7 +133,7 @@ describe('EditorSurface - additional coverage', () => {
       expect(screen.getByRole('textbox', { name: 'Editor' })).toBeInTheDocument();
     });
     const editor = screen.getByRole('textbox', { name: 'Editor' });
-    await fireEvent.change(editor, { target: { value: 'populated content' } });
+    fireEvent.change(editor, { target: { value: 'populated content' } });
 
     globalThis.dispatchEvent(new CustomEvent('agentdeck:save-as', { detail: { tabId: tab.id } }));
 
@@ -157,7 +157,7 @@ describe('EditorSurface - additional coverage', () => {
       expect(screen.getByRole('textbox', { name: 'Editor' })).toBeInTheDocument();
     });
     const editor = screen.getByRole('textbox', { name: 'Editor' });
-    await fireEvent.change(editor, { target: { value: 'populated content' } });
+    fireEvent.change(editor, { target: { value: 'populated content' } });
 
     globalThis.dispatchEvent(new CustomEvent('agentdeck:save-as', { detail: { tabId: tab.id } }));
 
@@ -179,7 +179,7 @@ describe('EditorSurface - additional coverage', () => {
       expect(screen.getByRole('textbox', { name: 'Editor' })).toBeInTheDocument();
     });
     const editor = screen.getByRole('textbox', { name: 'Editor' });
-    await fireEvent.change(editor, { target: { value: 'populated content' } });
+    fireEvent.change(editor, { target: { value: 'populated content' } });
 
     globalThis.dispatchEvent(new CustomEvent('agentdeck:save-as', { detail: { tabId: tab.id } }));
 
@@ -315,7 +315,7 @@ describe('EditorSurface - additional coverage', () => {
     });
 
     const editor = screen.getByRole('textbox', { name: 'Editor' });
-    await fireEvent.change(editor, { target: { value: 'content A' } });
+    fireEvent.change(editor, { target: { value: 'content A' } });
 
     // Trigger Save All
     globalThis.dispatchEvent(new CustomEvent('agentdeck:save-all'));

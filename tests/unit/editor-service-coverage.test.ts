@@ -65,7 +65,9 @@ describe('EditorService - additional coverage', () => {
     it('returns UNKNOWN error when path is a directory (EISDIR)', async () => {
       // Reading a directory as a file produces an EISDIR error which falls
       // through to the UNKNOWN branch.
-      const result = await readEditorFile(tempDir!);
+      const dir = tempDir;
+      if (!dir) throw new Error('tempDir not initialized');
+      const result = await readEditorFile(dir);
 
       expect(result.status).toBe('error');
       if (result.status === 'error') {
@@ -77,7 +79,9 @@ describe('EditorService - additional coverage', () => {
 
   describe('writeEditorFile - error branches', () => {
     it('writes successfully when buffer is empty (no conflict check)', async () => {
-      const filePath = join(tempDir!, 'first-write.ts');
+      const dir = tempDir;
+      if (!dir) throw new Error('tempDir not initialized');
+      const filePath = join(dir, 'first-write.ts');
       const result = await writeEditorFile(filePath, 'fresh content');
       expect(result.status).toBe('ok');
 
@@ -88,8 +92,10 @@ describe('EditorService - additional coverage', () => {
 
   describe('applyWorkspaceEdit - extensive coverage', () => {
     it('returns FILE_NOT_FOUND when buffer is unknown', async () => {
+      const dir = tempDir;
+      if (!dir) throw new Error('tempDir not initialized');
       const result = await applyWorkspaceEdit({
-        operations: [{ filePath: join(tempDir!, 'unknown.ts'), text: 'x' }]
+        operations: [{ filePath: join(dir, 'unknown.ts'), text: 'x' }]
       });
       expect(result.status).toBe('error');
       if (result.status === 'error') {
@@ -98,7 +104,9 @@ describe('EditorService - additional coverage', () => {
     });
 
     it('applies range-based edit and writes to disk', async () => {
-      const filePath = join(tempDir!, 'edit-range.ts');
+      const dir = tempDir;
+      if (!dir) throw new Error('tempDir not initialized');
+      const filePath = join(dir, 'edit-range.ts');
       await writeFile(filePath, 'hello world', 'utf8');
       await readEditorFile(filePath);
 
@@ -116,7 +124,9 @@ describe('EditorService - additional coverage', () => {
     });
 
     it('applies range-based edit across multiple lines', async () => {
-      const filePath = join(tempDir!, 'multiline.ts');
+      const dir = tempDir;
+      if (!dir) throw new Error('tempDir not initialized');
+      const filePath = join(dir, 'multiline.ts');
       await writeFile(filePath, 'line1\nline2\nline3', 'utf8');
       await readEditorFile(filePath);
 
@@ -134,7 +144,9 @@ describe('EditorService - additional coverage', () => {
     });
 
     it('applies full-file replacement (no range)', async () => {
-      const filePath = join(tempDir!, 'replace-all.ts');
+      const dir = tempDir;
+      if (!dir) throw new Error('tempDir not initialized');
+      const filePath = join(dir, 'replace-all.ts');
       await writeFile(filePath, 'old content', 'utf8');
       await readEditorFile(filePath);
 
@@ -148,7 +160,9 @@ describe('EditorService - additional coverage', () => {
     });
 
     it('returns WRITE_CONFLICT when file changed on disk', async () => {
-      const filePath = join(tempDir!, 'conflict.ts');
+      const dir = tempDir;
+      if (!dir) throw new Error('tempDir not initialized');
+      const filePath = join(dir, 'conflict.ts');
       await writeFile(filePath, 'original', 'utf8');
       await readEditorFile(filePath);
 
@@ -165,7 +179,9 @@ describe('EditorService - additional coverage', () => {
     });
 
     it('allows write when file was deleted on disk (recreate)', async () => {
-      const filePath = join(tempDir!, 'recreate.ts');
+      const dir = tempDir;
+      if (!dir) throw new Error('tempDir not initialized');
+      const filePath = join(dir, 'recreate.ts');
       await writeFile(filePath, 'original', 'utf8');
       await readEditorFile(filePath);
 
@@ -182,7 +198,9 @@ describe('EditorService - additional coverage', () => {
     });
 
     it('returns ACCESS_DENIED when disk write fails with EACCES', async () => {
-      const filePath = join(tempDir!, 'locked-edit.ts');
+      const dir = tempDir;
+      if (!dir) throw new Error('tempDir not initialized');
+      const filePath = join(dir, 'locked-edit.ts');
       await writeFile(filePath, 'original', 'utf8');
       await readEditorFile(filePath);
       await chmod(filePath, 0o444);
@@ -202,8 +220,10 @@ describe('EditorService - additional coverage', () => {
 
     it('returns UNKNOWN when disk write throws non-EACCES error', async () => {
       // Trigger an EISDIR error by trying to write to a directory path.
+      const dir = tempDir;
+      if (!dir) throw new Error('tempDir not initialized');
       const result = await applyWorkspaceEdit({
-        operations: [{ filePath: tempDir!, text: 'x' }]
+        operations: [{ filePath: dir, text: 'x' }]
       });
 
       // Directory path is not in the buffer; the call returns FILE_NOT_FOUND

@@ -66,9 +66,9 @@ describe('Explorer - additional coverage', () => {
 
   describe('handleFsEvent (debounced fs listener)', () => {
     it('refreshes directory when fs change event fires', async () => {
-      let fsHandler: ((event: FsChangeEvent) => void) | undefined;
       const onFsEvent = vi.fn().mockImplementation((handler: (event: FsChangeEvent) => void) => {
-        fsHandler = handler;
+        // Store handler for later invocation
+        (globalThis as unknown as Record<string, unknown>).__fsHandler = handler;
         return () => undefined;
       });
       const listDirectory = vi.fn()
@@ -83,7 +83,8 @@ describe('Explorer - additional coverage', () => {
       });
 
       // Fire fs event - should trigger debounced refresh
-      fsHandler!({ kind: 'change', path: '/workspace/index.ts' });
+      const handler = (globalThis as unknown as Record<string, unknown>).__fsHandler as (e: FsChangeEvent) => void;
+      handler({ kind: 'change', path: '/workspace/index.ts' });
 
       // Wait for debounce
       await waitFor(() => {
@@ -92,9 +93,8 @@ describe('Explorer - additional coverage', () => {
     });
 
     it('coalesces multiple fs events into a single refresh', async () => {
-      let fsHandler: ((event: FsChangeEvent) => void) | undefined;
       const onFsEvent = vi.fn().mockImplementation((handler: (event: FsChangeEvent) => void) => {
-        fsHandler = handler;
+        (globalThis as unknown as Record<string, unknown>).__fsHandler = handler;
         return () => undefined;
       });
       const listDirectory = vi.fn()
@@ -108,9 +108,10 @@ describe('Explorer - additional coverage', () => {
       });
 
       // Fire multiple events quickly
-      fsHandler!({ kind: 'change', path: '/workspace/a.ts' });
-      fsHandler!({ kind: 'change', path: '/workspace/b.ts' });
-      fsHandler!({ kind: 'change', path: '/workspace/c.ts' });
+      const handler = (globalThis as unknown as Record<string, unknown>).__fsHandler as (e: FsChangeEvent) => void;
+      handler({ kind: 'change', path: '/workspace/a.ts' });
+      handler({ kind: 'change', path: '/workspace/b.ts' });
+      handler({ kind: 'change', path: '/workspace/c.ts' });
 
       // Wait for debounce - should only refresh once
       await waitFor(() => {
