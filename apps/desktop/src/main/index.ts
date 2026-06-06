@@ -8,6 +8,7 @@ import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
   isThemeSettings,
+  isWorkspaceEditInput,
   isWorkspaceOpenRequest,
   type SearchQuery,
   type StartupState,
@@ -114,9 +115,15 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
   });
 
   ipcMain.handle(IPC_CHANNELS.applyWorkspaceEdit, async (_event, edit: unknown) => {
-    // Workspace edit is handled by editor-service which manages buffers
-    // The renderer sends operations array directly
-    return applyWorkspaceEdit(edit as Parameters<typeof applyWorkspaceEdit>[0]);
+    if (!isWorkspaceEditInput(edit)) {
+      return { status: 'error', code: 'UNKNOWN', message: 'Invalid workspace edit payload.' } as const;
+    }
+    try {
+      return await applyWorkspaceEdit(edit);
+    } catch (err) {
+      console.error('[main] applyWorkspaceEdit failed:', err);
+      return { status: 'error', code: 'UNKNOWN', message: String(err) } as const;
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.showDiff, async (_event, input: unknown) => {
