@@ -129,7 +129,7 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
 
   ipcMain.handle(IPC_CHANNELS.showDiff, async (_event, input: unknown) => {
     if (!isDiffInput(input)) {
-      return { status: 'error', code: 'UNKNOWN', message: 'showDiff: invalid input — expected { original: string, modified: string }' } as const;
+      return { status: 'error', code: 'UNKNOWN', message: 'showDiff: invalid input - expected { original: string, modified: string }' } as const;
     }
     return showDiff(input.original, input.modified);
   });
