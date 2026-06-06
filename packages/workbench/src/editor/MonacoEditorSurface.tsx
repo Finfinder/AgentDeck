@@ -111,7 +111,6 @@ export function MonacoEditorSurface({
   // Configure TS/JS language workers once (must be before any conditional returns)
   // Uses monaco.languages.typescript which is deprecated in Monaco 0.55 but still
   // the only API to configure TS worker diagnostics. No replacement exists yet.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tsConfiguredRef = useRef(false);
   if (!tsConfiguredRef.current) {
     tsConfiguredRef.current = true;

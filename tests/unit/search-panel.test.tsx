@@ -206,7 +206,6 @@ describe('SearchPanel', () => {
   });
 
   it('does not call searchFiles for empty pattern', async () => {
-    const user = userEvent.setup();
     const searchFiles = vi.fn().mockResolvedValue([]);
     const agent = mockAgent({ searchFiles });
 
