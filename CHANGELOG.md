@@ -11,6 +11,10 @@ Format zgodny z [Keep a Changelog](https://keepachangelog.com/pl/1.0.0/).
 - Naprawiono 12 ESLint errors: usunięto unused imports (isDiffInput, isWorkspaceEditInput, DiffResult, WorkspaceEditResult) z preload, unused filePath parameter z editorShowDiff, unused sampleDiagnostics z integration tests, dodano eslint-disable dla deprecated monaco.languages API. Wszystkie quality gates przechodzą (lint, typecheck, 439/439 testy).
 - Zaktualizowano dompurify z 3.2.7 do 3.4.8 poprzez npm overrides — naprawiono podatności XSS (CWE-79), URI validation bypass (CWE-183), Prototype Pollution (CWE-1321) w monaco-editor.
 
+### Changed
+
+- Zaktualizowano react i react-dom z 19.2.6 do 19.2.7 — poprawka dla Server Actions (FormData entries w Server Components). react 19.2.7 wymagany przez peer dep react-dom 19.2.7.
+
 ## [0.1.0] - 2026-06-02
 
 ### Added
