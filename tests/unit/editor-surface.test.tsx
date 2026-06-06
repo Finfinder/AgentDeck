@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
@@ -245,6 +245,52 @@ describe('EditorSurface', () => {
       expect(screen.queryByText('File changed on disk')).toBeNull();
     });
     expect(readFileMock).toHaveBeenCalled();
+    expect(setTabDirtyMock).toHaveBeenCalledWith(tab.id, false);
+  });
+
+  // Save All event tests
+  it('handles agentdeck:save-all event with no dirty tabs', async () => {
+    const writeFileMock = vi.fn().mockResolvedValue({ status: 'ok' });
+    const agent = mockAgent({ writeFile: writeFileMock });
+    const tab = createTab({ isDirty: false });
+    const store = mockStore({ tabs: [tab], activeTabId: tab.id });
+
+    renderSurface({ agent, store });
+
+    // Dispatch save-all event
+    globalThis.dispatchEvent(new CustomEvent('agentdeck:save-all'));
+
+    // No dirty tabs, so writeFile should not be called
+    await waitFor(() => {
+      expect(writeFileMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it('handles agentdeck:save-all event with dirty tabs', async () => {
+    const writeFileMock = vi.fn().mockResolvedValue({ status: 'ok' });
+    const setTabDirtyMock = vi.fn();
+    const agent = mockAgent({ writeFile: writeFileMock });
+    const tab = createTab({ isDirty: true });
+    const store = mockStore({ tabs: [tab], activeTabId: tab.id, setTabDirty: setTabDirtyMock });
+
+    renderSurface({ agent, store });
+
+    // Wait for editor to load
+    await waitFor(() => {
+      expect(screen.queryByText('Loading app.ts')).toBeNull();
+    });
+
+    // Simulate content change in editor to populate contentMap
+    const editor = screen.getByRole('textbox', { name: 'Editor' });
+    await fireEvent.change(editor, { target: { value: 'modified content' } });
+
+    // Dispatch save-all event
+    globalThis.dispatchEvent(new CustomEvent('agentdeck:save-all'));
+
+    // Dirty tab should be saved with modified content
+    await waitFor(() => {
+      expect(writeFileMock).toHaveBeenCalledWith('/src/app.ts', 'modified content');
+    });
     expect(setTabDirtyMock).toHaveBeenCalledWith(tab.id, false);
   });
 });
