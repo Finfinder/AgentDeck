@@ -1,4 +1,4 @@
-﻿export { EditorSurface } from './EditorSurface';
+export { EditorSurface } from './EditorSurface';
 export { EditorTabs } from './EditorTabs';
 export { MonacoEditorSurface } from './MonacoEditorSurface';
 export { editorApplyWorkspaceEdit, editorShowDiff, setActiveEditor } from './editor-registry';

@@ -1,4 +1,4 @@
-﻿import type { EditorTab } from '@agentdeck/shared';
+import type { EditorTab } from '@agentdeck/shared';
 
 interface EditorTabsProps {
   readonly tabs: readonly EditorTab[];

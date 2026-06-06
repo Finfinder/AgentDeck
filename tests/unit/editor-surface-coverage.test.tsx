@@ -263,13 +263,13 @@ describe('EditorSurface - additional coverage', () => {
       expect(screen.getByText('File changed on disk')).toBeDefined();
     });
 
-    // Click Overwrite — should log error and dismiss dialog
+    // Click Overwrite — should log error and KEEP dialog open (don't lose unsaved changes)
     const overwriteButton = screen.getByRole('button', { name: 'Overwrite' });
     await user.click(overwriteButton);
 
-    await waitFor(() => {
-      expect(screen.queryByText('File changed on disk')).toBeNull();
-    });
+    // Dialog stays open because write failed — user can retry or cancel
+    expect(screen.getByText('File changed on disk')).toBeDefined();
+    expect(setTabDirtyMock).not.toHaveBeenCalled();
   });
 
   it('handles external conflict Reload write/read error gracefully (error status)', async () => {

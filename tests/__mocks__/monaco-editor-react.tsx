@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import type { ComponentType, ChangeEvent } from 'react';
 
 interface MockMonacoEditorProps {
   value?: string;
@@ -66,7 +66,7 @@ const mockMarkers = [
 
 const MockMonacoEditor: ComponentType<MockMonacoEditorProps> = ({ value, language, onChange, onMount }) => {
   const handleChange = onChange
-    ? (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    ? (e: ChangeEvent<HTMLTextAreaElement>) => {
         onChange(e.target.value);
       }
     : undefined;

@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import type { AgentDeckPreloadApi, EditorDiagnostic } from '@agentdeck/shared';
 import type { EditorStore } from './useEditorStore';
@@ -117,9 +117,11 @@ export function EditorSurface({ agent, store, externalChanges, onExternalChangeA
         if (result.status === 'ok') {
           store.closeTab(tabId);
           store.openTab({ filePath: newPath });
+        } else {
+          console.error('[EditorSurface] Save As failed:', result.message);
         }
-      } catch {
-        // Best-effort
+      } catch (err) {
+        console.error('[EditorSurface] Save As error:', err);
       }
     }
     globalThis.addEventListener('agentdeck:save-as', handleSaveAs);
@@ -165,14 +167,20 @@ export function EditorSurface({ agent, store, externalChanges, onExternalChangeA
       if (tab) {
         const content = contentMap[pendingConflictTabId] ?? '';
         try {
-          await agent.writeFile(tab.filePath, content);
+          const result = await agent.writeFile(tab.filePath, content);
+          if (result.status !== 'ok') {
+            console.error('[EditorSurface] Overwrite failed:', result.message);
+            return;
+          }
           store.setTabDirty(pendingConflictTabId, false);
+          setPendingConflictTabId(null);
+          doCloseTab(pendingConflictTabId);
         } catch (err) {
           console.error('[EditorSurface] Overwrite error:', err);
         }
+      } else {
+        setPendingConflictTabId(null);
       }
-      setPendingConflictTabId(null);
-      doCloseTab(pendingConflictTabId);
     }
   }, [pendingConflictTabId, contentMap, agent, store, doCloseTab]);
 
@@ -232,10 +240,15 @@ export function EditorSurface({ agent, store, externalChanges, onExternalChangeA
       if (tab) {
         const content = contentMap[externalConflictTabId] ?? '';
         try {
-          await agent.writeFile(tab.filePath, content);
+          const result = await agent.writeFile(tab.filePath, content);
+          if (result.status !== 'ok') {
+            console.error('[EditorSurface] External conflict overwrite failed:', result.message);
+            return;
+          }
           store.setTabDirty(externalConflictTabId, false);
         } catch (err) {
           console.error('[EditorSurface] External conflict overwrite error:', err);
+          return;
         }
       }
       setExternalConflictTabId(null);

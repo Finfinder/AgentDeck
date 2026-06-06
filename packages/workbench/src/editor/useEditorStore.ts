@@ -1,4 +1,4 @@
-﻿import { useCallback, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { createEditorTab, createTabId } from '@agentdeck/services';
 import type { EditorTab, EditorTabInput } from '@agentdeck/shared';

@@ -1,4 +1,4 @@
-﻿import Editor, { loader, type Monaco } from '@monaco-editor/react';
+import Editor, { loader, type Monaco } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
 import { type editor, Selection, Range } from 'monaco-editor';
 
