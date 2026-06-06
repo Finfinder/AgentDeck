@@ -337,6 +337,7 @@ export function Explorer({ agent, workspaceModel, onFileOpen }: ExplorerProps) {
   }, []);
 
   const handleRenameKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    e.stopPropagation();
     if (e.key === 'Enter') {
       e.preventDefault();
       handleRenameConfirm();
