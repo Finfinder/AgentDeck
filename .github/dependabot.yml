@@ -12,3 +12,11 @@ updates:
       - "security"
       - "priority:high"
     open-pull-requests-limit: 5
+    groups:
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+        update-types:
+          - "minor"
+          - "patch"
