@@ -50,7 +50,10 @@ describe('Identity UI — logged out state', () => {
   it('shows Sign in button when not logged in', async () => {
     await act(async () => { render(<App />); });
 
+    // Status bar shows Sign in button
     expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument();
+    // Activity bar also shows identity button
+    expect(screen.getByRole('button', { name: 'Not logged in' })).toBeInTheDocument();
   });
 
   it('calls startOAuth when Sign in is clicked', async () => {
@@ -60,7 +63,10 @@ describe('Identity UI — logged out state', () => {
 
     await act(async () => { render(<App />); });
 
-    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    // Open identity menu from activity bar
+    await user.click(screen.getByRole('button', { name: 'Not logged in' }));
+    // Click Sign in with GitHub in dropdown
+    await user.click(screen.getByRole('menuitem', { name: 'Sign in with GitHub' }));
 
     expect(startOAuth).toHaveBeenCalledOnce();
   });
@@ -94,7 +100,10 @@ describe('Identity UI — logged in state', () => {
     const avatar = await screen.findByRole('img', { name: 'octocat avatar' });
     expect(avatar).toBeInTheDocument();
     expect(screen.getByText('octocat')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+    // Open identity menu to access Sign out (status bar button)
+    const loggedInButtons = screen.getAllByRole('button', { name: 'Logged in as octocat' });
+    await userEvent.click(loggedInButtons[0]);
+    expect(screen.getByRole('menuitem', { name: 'Sign out' })).toBeInTheDocument();
   });
 
   it('calls signOut when Sign out is clicked', async () => {
@@ -107,7 +116,11 @@ describe('Identity UI — logged in state', () => {
 
     await act(async () => { render(<App />); });
 
-    await user.click(screen.getByRole('button', { name: 'Sign out' }));
+    // Open identity menu (status bar button)
+    const loggedInButtons = screen.getAllByRole('button', { name: 'Logged in as octocat' });
+    await user.click(loggedInButtons[0]);
+    // Click Sign out in dropdown
+    await user.click(screen.getByRole('menuitem', { name: 'Sign out' }));
 
     expect(signOut).toHaveBeenCalledOnce();
   });
@@ -126,7 +139,6 @@ describe('Identity UI — logged in state', () => {
 
     expect(await screen.findByText('nouser')).toBeInTheDocument();
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
   });
 });
 
@@ -158,7 +170,7 @@ describe('Identity UI — onIdentityChange subscription', () => {
     await act(async () => { changeHandler!(loggedInSession); });
 
     expect(screen.getByText('newuser')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Logged in as newuser' }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument();
   });
 
@@ -190,6 +202,7 @@ describe('Identity UI — onIdentityChange subscription', () => {
 
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
     expect(screen.queryByText('octocat')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not logged in' })).toBeInTheDocument();
   });
 });
 

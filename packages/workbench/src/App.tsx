@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { DEFAULT_THEME_SETTINGS, isIdentitySession, type IdentitySession, type AgentDeckPreloadApi, type EditorDiagnostic, type FsChangeEvent, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
 
@@ -66,6 +66,8 @@ export function App() {
   const [diagnostics, setDiagnostics] = useState<readonly EditorDiagnostic[]>([]);
   const [ipcDiagnostics, setIpcDiagnostics] = useState<readonly EditorDiagnostic[]>([]);
   const [identity, setIdentity] = useState<IdentitySession>({ isLoggedIn: false });
+  const [identityMenuOpen, setIdentityMenuOpen] = useState(false);
+  const identityMenuRef = useRef<HTMLDivElement | null>(null);
 
   const allDiagnostics = useMemo(
     () => [...ipcDiagnostics, ...diagnostics],
@@ -133,6 +135,18 @@ export function App() {
 
     return () => { active = false; if (dispose) dispose(); };
   }, [agent]);
+
+  // Close identity menu when clicking outside
+  useEffect(() => {
+    if (!identityMenuOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (identityMenuRef.current && !identityMenuRef.current.contains(e.target as Node)) {
+        setIdentityMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [identityMenuOpen]);
 
   // ?? File system watcher - track external changes ????????????????
   useEffect(() => {
@@ -315,6 +329,60 @@ export function App() {
         <button className="activity-button" type="button" aria-label="Source control" title="Source control" disabled>
           SC
         </button>
+        <div className="activity-bar-spacer" />
+        <div className="activity-identity" ref={identityMenuRef}>
+          <button
+            className={`activity-button activity-identity-button ${identityMenuOpen ? 'active' : ''}`}
+            type="button"
+            aria-label={identity.isLoggedIn ? `Logged in as ${identity.profile?.login}` : 'Not logged in'}
+            title={identity.isLoggedIn ? `Logged in as ${identity.profile?.login}` : 'Sign in'}
+            onClick={() => setIdentityMenuOpen(v => !v)}
+          >
+            {identity.isLoggedIn && identity.profile?.avatar_url ? (
+              <img className="activity-avatar" src={identity.profile.avatar_url} alt="" width={20} height={20} />
+            ) : (
+              <svg className="activity-identity-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <circle cx="8" cy="5" r="3" fill="none" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+            )}
+          </button>
+          {identityMenuOpen && (
+            <div className="identity-dropdown" role="menu">
+              {identity.isLoggedIn ? (
+                <>
+                  <div className="identity-dropdown-header">
+                    {identity.profile?.avatar_url && (
+                      <img className="identity-dropdown-avatar" src={identity.profile.avatar_url} alt="" width={32} height={32} />
+                    )}
+                    <div className="identity-dropdown-info">
+                      <span className="identity-dropdown-login">{identity.profile?.login}</span>
+                      {identity.profile?.email && (
+                        <span className="identity-dropdown-email">{identity.profile.email}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="identity-dropdown-divider" />
+                  <button
+                    className="identity-dropdown-item"
+                    role="menuitem"
+                    onClick={async () => { try { await agent.signOut(); setIdentityMenuOpen(false); } catch {} }}
+                  >
+                    Sign out
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="identity-dropdown-item"
+                  role="menuitem"
+                  onClick={async () => { try { await agent.startOAuth(); setIdentityMenuOpen(false); } catch {} }}
+                >
+                  Sign in with GitHub
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </nav>
 
       <aside className="side-bar" aria-label={activePanel === 'search' ? 'Search' : 'Explorer'}>
@@ -436,19 +504,29 @@ export function App() {
         </div>
         <div className="identity-area" aria-label="Identity">
           {identity.isLoggedIn ? (
-            <div className="profile">
+            <button
+              type="button"
+              className="identity-status logged-in"
+              onClick={() => setIdentityMenuOpen(v => !v)}
+              aria-label={`Logged in as ${identity.profile?.login}`}
+            >
               {identity.profile?.avatar_url ? (
-                // eslint-disable-next-line jsx-a11y/img-redundant-alt
-                <img className="avatar" src={identity.profile.avatar_url} alt={`${identity.profile.login} avatar`} width={20} height={20} />
+                <img className="avatar" src={identity.profile.avatar_url} alt={`${identity.profile.login} avatar`} width={18} height={18} />
               ) : null}
               <span className="login">{identity.profile?.login ?? 'user'}</span>
-              <button type="button" className="secondary-action" onClick={async () => { try { await agent.signOut(); } catch {} }}>
-                Sign out
-              </button>
-            </div>
+            </button>
           ) : (
-            <button type="button" className="primary-action" onClick={async () => { try { await agent.startOAuth(); } catch {} }}>
-              Sign in
+            <button
+              type="button"
+              className="identity-status logged-out"
+              onClick={() => setIdentityMenuOpen(v => !v)}
+              aria-label="Sign in"
+            >
+              <svg className="identity-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <circle cx="8" cy="5" r="3" fill="none" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+              <span>Sign in</span>
             </button>
           )}
         </div>
