@@ -52,3 +52,29 @@ test('identity preload API is available and returns valid session shape', async 
   expect(result.ok).toBe(true);
   expect(typeof result.isLoggedIn).toBe('boolean');
 });
+
+test('signOut returns not-logged-in session shape', async () => {
+  // Verify signOut is callable and returns a valid session shape
+  const result = await page.evaluate(async () => {
+    try {
+      const s = await (window as any).agentDeck.signOut();
+      return { ok: true, isLoggedIn: s?.isLoggedIn };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+  expect(result.ok).toBe(true);
+  expect(result.isLoggedIn).toBe(false);
+});
+
+test('session shape is valid after signOut', async () => {
+  // Sign out first
+  await page.evaluate(() => (window as any).agentDeck.signOut());
+
+  // Verify getIdentitySession returns a valid session shape after signOut
+  const session = await page.evaluate(() => (window as any).agentDeck.getIdentitySession());
+  expect(session).toBeDefined();
+  expect(typeof session.isLoggedIn).toBe('boolean');
+  // After signOut, should be not logged in
+  expect(session.isLoggedIn).toBe(false);
+});

@@ -111,4 +111,92 @@ describe('IdentityService (loopback OAuth)', () => {
 
     await expect(svc.startOAuthLoopback({ clientId: 'cid' })).rejects.toThrow();
   });
+
+  it('getSession returns profile when token exists and fetch succeeds', async () => {
+    const store: Record<string, string> = { 'agentdeck:github': 'valid-token' };
+    const secureStore = {
+      getPassword: vi.fn(async (s: string, a: string) => store[`${s}:${a}`] ?? null),
+      setPassword: vi.fn(async () => undefined),
+      deletePassword: vi.fn(async () => true)
+    };
+
+    (globalThis as any).fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ login: 'testuser', id: 42, avatar_url: 'https://example.com/a.png', name: 'Test', email: 't@e.com' })
+    })) as unknown as typeof fetch;
+
+    const svc = createIdentityService(tmp!, { secureStore });
+    const session = await svc.getSession();
+
+    expect(session.isLoggedIn).toBe(true);
+    expect(session.provider).toBe('github');
+    expect(session.profile?.login).toBe('testuser');
+    expect(session.profile?.id).toBe(42);
+  });
+
+  it('getSession returns not logged in when no token in store', async () => {
+    const secureStore = {
+      getPassword: vi.fn(async () => null),
+      setPassword: vi.fn(async () => undefined),
+      deletePassword: vi.fn(async () => true)
+    };
+
+    const svc = createIdentityService(tmp!, { secureStore });
+    const session = await svc.getSession();
+
+    expect(session.isLoggedIn).toBe(false);
+    expect(session.profile).toBeUndefined();
+  });
+
+  it('getSession returns not logged in when fetch profile fails', async () => {
+    const store: Record<string, string> = { 'agentdeck:github': 'expired-token' };
+    const secureStore = {
+      getPassword: vi.fn(async (s: string, a: string) => store[`${s}:${a}`] ?? null),
+      setPassword: vi.fn(async () => undefined),
+      deletePassword: vi.fn(async () => true)
+    };
+
+    (globalThis as any).fetch = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      json: async () => ({ message: 'Bad credentials' })
+    })) as unknown as typeof fetch;
+
+    const svc = createIdentityService(tmp!, { secureStore });
+    const session = await svc.getSession();
+
+    expect(session.isLoggedIn).toBe(false);
+    expect(session.profile).toBeUndefined();
+  });
+
+  it('getSession returns not logged in when fetch throws network error', async () => {
+    const store: Record<string, string> = { 'agentdeck:github': 'some-token' };
+    const secureStore = {
+      getPassword: vi.fn(async (s: string, a: string) => store[`${s}:${a}`] ?? null),
+      setPassword: vi.fn(async () => undefined),
+      deletePassword: vi.fn(async () => true)
+    };
+
+    (globalThis as any).fetch = vi.fn(async () => { throw new Error('Network error'); }) as unknown as typeof fetch;
+
+    const svc = createIdentityService(tmp!, { secureStore });
+    const session = await svc.getSession();
+
+    expect(session.isLoggedIn).toBe(false);
+  });
+
+  it('signOut deletes token from secure store', async () => {
+    const store: Record<string, string> = { 'agentdeck:github': 'my-token' };
+    const secureStore = {
+      getPassword: vi.fn(async (s: string, a: string) => store[`${s}:${a}`] ?? null),
+      setPassword: vi.fn(async () => undefined),
+      deletePassword: vi.fn(async (s: string, a: string) => { delete store[`${s}:${a}`]; return true; })
+    };
+
+    const svc = createIdentityService(tmp!, { secureStore });
+    await svc.signOut();
+
+    expect(secureStore.deletePassword).toHaveBeenCalledWith('agentdeck', 'github');
+    expect(store['agentdeck:github']).toBeUndefined();
+  });
 });
