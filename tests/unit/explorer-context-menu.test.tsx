@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -207,9 +207,7 @@ describe('Explorer context menu and dialogs', () => {
       await user.click(screen.getByRole('menuitem', { name: 'Rename' }));
 
       const input = screen.getByRole('textbox', { name: 'New name' });
-      await user.click(input);
-      await user.keyboard('{Control>}a{/Control}');
-      await user.keyboard('new-app.ts');
+      fireEvent.change(input, { target: { value: 'new-app.ts' } });
 
       await user.click(screen.getByRole('button', { name: 'Rename' }));
 
