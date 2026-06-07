@@ -9,6 +9,7 @@ import {
   isFileReadResult,
   isFileWriteResult,
   isFsChangeEvent,
+  isIdentitySession,
   isStartupState,
   isThemeSettings,
   isWorkspaceEditResult,
@@ -37,6 +38,19 @@ const api: AgentDeckPreloadApi = {
   getThemeSettings: async () => {
     const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.getThemeSettings);
     return isThemeSettings(value) ? value : DEFAULT_THEME_SETTINGS;
+  },
+  getIdentitySession: async () => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.identityGetSession);
+    // Validate shape before returning to renderer
+    return isIdentitySession(value) ? value : { isLoggedIn: false };
+  },
+  startOAuth: async (opts?: unknown) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.identityStartOAuth, opts);
+    return isIdentitySession(value) ? value : { isLoggedIn: false };
+  },
+  signOut: async () => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.identitySignOut);
+    return isIdentitySession(value) ? value : { isLoggedIn: false };
   },
   setThemeSettings: async settings => {
     const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.setThemeSettings, settings);
@@ -71,6 +85,13 @@ const api: AgentDeckPreloadApi = {
     };
     ipcRenderer.on(IPC_CHANNELS.fsEvent, listener);
     return () => { ipcRenderer.off(IPC_CHANNELS.fsEvent, listener); };
+  },
+  onIdentityChange: (handler: (session: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (isIdentitySession(value)) handler(value);
+    };
+    ipcRenderer.on(IPC_CHANNELS.identityChanged, listener);
+    return () => { ipcRenderer.off(IPC_CHANNELS.identityChanged, listener); };
   },
   readFile: async (filePath: string) => {
     const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.readFile, filePath);

@@ -3,7 +3,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 
-import { applyWorkspaceEdit, bootstrapDesktopServices, createSettingsService, createStartupErrorState, createWorkspaceService, getDiagnostics, markBufferDirty, readEditorFile, showDiff, type SettingsService, type WorkspaceService, writeEditorFile } from '@agentdeck/services';
+import { applyWorkspaceEdit, bootstrapDesktopServices, createSettingsService, createStartupErrorState, createWorkspaceService, getDiagnostics, markBufferDirty, readEditorFile, showDiff, createIdentityService, type SettingsService, type WorkspaceService, writeEditorFile } from '@agentdeck/services';
 import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
@@ -35,7 +35,7 @@ let startupState: StartupState = {
   message: 'Application services have not been initialized yet.'
 };
 
-function registerIpcHandlers(settingsService: SettingsService, workspaceService: WorkspaceService, mainWindow: BrowserWindow): void {
+function registerIpcHandlers(settingsService: SettingsService, workspaceService: WorkspaceService, mainWindow: BrowserWindow, identityService?: any): void {
   ipcMain.handle(IPC_CHANNELS.getStartupState, () => startupState);
   ipcMain.handle(IPC_CHANNELS.getThemeSettings, () => settingsService.readThemeSettings());
   ipcMain.handle(IPC_CHANNELS.setThemeSettings, (_event, value: unknown) => {
@@ -155,6 +155,39 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
     const result = await dialog.showSaveDialog(mainWindow, options);
     return result.canceled ? null : (result.filePath ?? null);
   });
+
+  if (identityService) {
+    ipcMain.handle(IPC_CHANNELS.identityGetSession, async () => {
+      try {
+        return await identityService.getSession();
+      } catch {
+        return { isLoggedIn: false };
+      }
+    });
+
+    ipcMain.handle(IPC_CHANNELS.identityStartOAuth, async (_event, opts: unknown) => {
+      try {
+        const session = await identityService.startOAuthLoopback({ clientId: process.env.GITHUB_CLIENT_ID ?? '', clientSecret: process.env.GITHUB_CLIENT_SECRET ?? '' });
+        if (!mainWindow.isDestroyed()) mainWindow.webContents.send(IPC_CHANNELS.identityChanged, session);
+        return session;
+      } catch (err) {
+        console.error('[main] identityStartOAuth failed:', err);
+        return { isLoggedIn: false };
+      }
+    });
+
+    ipcMain.handle(IPC_CHANNELS.identitySignOut, async () => {
+      try {
+        await identityService.signOut();
+        const session = { isLoggedIn: false };
+        if (!mainWindow.isDestroyed()) mainWindow.webContents.send(IPC_CHANNELS.identityChanged, session);
+        return session;
+      } catch (err) {
+        console.error('[main] identitySignOut failed:', err);
+        return { isLoggedIn: false };
+      }
+    });
+  }
 }
 
 function isSearchQuery(value: unknown): value is SearchQuery {
@@ -273,10 +306,11 @@ function registerDevToolsShortcut(mainWindow: BrowserWindow): void {
 async function start(): Promise<void> {
   const settingsService = createSettingsService(app.getPath('userData'));
   const workspaceService = createWorkspaceService(app.getPath('userData'));
+  const identityService = createIdentityService(app.getPath('userData'));
 
   startupState = await resolveStartupState();
   const mainWindow = createMainWindow();
-  registerIpcHandlers(settingsService, workspaceService, mainWindow);
+  registerIpcHandlers(settingsService, workspaceService, mainWindow, identityService);
   registerDevToolsShortcut(mainWindow);
 }
 

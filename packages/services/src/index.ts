@@ -106,3 +106,5 @@ export {
   showDiff,
   writeEditorFile
 } from './editor-service';
+export { createIdentityService } from './identity-service';
+export type { IdentitySession } from './identity-service';
