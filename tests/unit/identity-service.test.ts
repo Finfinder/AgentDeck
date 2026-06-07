@@ -57,8 +57,18 @@ describe('IdentityService (loopback OAuth)', () => {
       const redirect = u.searchParams.get('redirect_uri')!;
       const state = u.searchParams.get('state')!;
 
-      // simulate user completing auth by calling the redirect URL
-      await fetch(`${redirect}?code=test-code&state=${state}`);
+      // simulate user completing auth by calling the redirect URL using node http
+      const target = `${redirect}?code=test-code&state=${state}`;
+      const { request } = await import('node:http');
+      await new Promise<void>((resolve, reject) => {
+        const req = request(target, (res) => {
+          // consume body
+          res.on('data', () => {});
+          res.on('end', () => resolve());
+        });
+        req.on('error', reject);
+        req.end();
+      });
     });
 
     const svc = createIdentityService(tmp!, { secureStore, openUrl });
@@ -83,8 +93,17 @@ describe('IdentityService (loopback OAuth)', () => {
     const badOpen = vi.fn(async (url: string) => {
       const u = new URL(url);
       const redirect = u.searchParams.get('redirect_uri')!;
-      // send wrong state
-      await fetch(`${redirect}?code=whatever&state=BAD_STATE`);
+      // send wrong state via node http
+      const target = `${redirect}?code=whatever&state=BAD_STATE`;
+      const { request } = await import('node:http');
+      await new Promise<void>((resolve, reject) => {
+        const req = request(target, (res) => {
+          res.on('data', () => {});
+          res.on('end', () => resolve());
+        });
+        req.on('error', reject);
+        req.end();
+      });
     });
 
     const svc = createIdentityService(tmp!, { secureStore, openUrl: badOpen });
