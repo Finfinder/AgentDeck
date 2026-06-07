@@ -208,8 +208,8 @@ describe('Explorer context menu and dialogs', () => {
 
       const input = screen.getByRole('textbox', { name: 'New name' });
       await user.click(input);
-      await user.clear(input);
-      await user.type(input, 'new-app.ts');
+      await user.keyboard('{Control>}a{/Control}');
+      await user.keyboard('new-app.ts');
 
       await user.click(screen.getByRole('button', { name: 'Rename' }));
 
