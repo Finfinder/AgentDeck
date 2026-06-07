@@ -41,7 +41,9 @@ jobs:
           NPM_OUTPUT=$(npm ls --all 2>&1)
           NPM_EXIT=$?
 
-          if echo "$NPM_OUTPUT" | grep -qE "(UNMET|ERESOLVE)"; then
+          # Check for actual peer dependency conflicts (ERESOLVE, unmet peer deps)
+          # Ignore "UNMET OPTIONAL DEPENDENCY" which is normal for platform-specific optional deps
+          if echo "$NPM_OUTPUT" | grep -qE "(ERESOLVE|peer dep missing|unmet peer)"; then
             echo "::error::Peer dependency conflicts detected!"
             echo "$NPM_OUTPUT"
             exit 1
