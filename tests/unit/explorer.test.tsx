@@ -412,6 +412,9 @@ describe('Explorer', () => {
     await user.click(renameItem);
 
     const input = await screen.findByRole('textbox', { name: 'New name' });
+    // Wait for Explorer's auto-select timeout (50ms) to fire so select()
+    // doesn't race with user.type() and eat the first character
+    await new Promise(r => setTimeout(r, 100));
     await user.clear(input);
     await user.type(input, 'newname.ts');
     fireEvent.keyDown(input, { key: 'Enter' });
