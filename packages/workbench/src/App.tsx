@@ -77,7 +77,9 @@ function IdentityMenu({ identity, agent, menuRef, isOpen, onToggle, onClose }: I
       </button>
       {isOpen && (
         <div className="identity-dropdown" role="menu">
-          {identity.isLoggedIn ? (
+          {identity.error ? (
+            <div className="identity-dropdown-error">{identity.error}</div>
+          ) : identity.isLoggedIn ? (
             <>
               <div className="identity-dropdown-header">
                 {identity.profile?.avatar_url && (

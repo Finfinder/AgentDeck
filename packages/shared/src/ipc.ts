@@ -260,6 +260,7 @@ export type IdentitySession = Readonly<{
     name?: string;
     email?: string | null;
   }>;
+  error?: string;
 }>;
 export type AgentDeckPreloadApi = Readonly<{
   getStartupState: () => Promise<StartupState>;

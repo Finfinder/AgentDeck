@@ -167,12 +167,17 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
 
     ipcMain.handle(IPC_CHANNELS.identityStartOAuth, async (_event, opts: unknown) => {
       try {
+        const clientId = process.env.GITHUB_CLIENT_ID;
+        if (!clientId) {
+          return { isLoggedIn: false, error: 'GitHub OAuth is not configured. Set GITHUB_CLIENT_ID environment variable.' };
+        }
+
         const option = (opts as Record<string, unknown> | undefined) ?? undefined;
         let session;
         if (option?.method === 'device') {
-          session = await identityService.startDeviceFlow({ clientId: process.env.GITHUB_CLIENT_ID ?? '', scopes: (option.scopes as string[] | undefined) });
+          session = await identityService.startDeviceFlow({ clientId, scopes: (option.scopes as string[] | undefined) });
         } else {
-          session = await identityService.startOAuthLoopback({ clientId: process.env.GITHUB_CLIENT_ID ?? '', clientSecret: process.env.GITHUB_CLIENT_SECRET ?? '' });
+          session = await identityService.startOAuthLoopback({ clientId, clientSecret: process.env.GITHUB_CLIENT_SECRET ?? '' });
         }
 
         if (!mainWindow.isDestroyed()) mainWindow.webContents.send(IPC_CHANNELS.identityChanged, session);

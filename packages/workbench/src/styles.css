@@ -244,6 +244,14 @@ button[aria-selected="true"] {
   color: var(--color-danger);
 }
 
+.identity-dropdown-error {
+  padding: var(--space-3);
+  color: var(--color-danger);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  max-width: 280px;
+}
+
 .side-bar {
   grid-area: sidebar;
   display: grid;
