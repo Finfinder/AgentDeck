@@ -320,8 +320,8 @@ export function isIdentitySession(value: unknown): value is IdentitySession {
   if (!isRecord(value)) return false;
   if (typeof value.isLoggedIn !== 'boolean') return false;
   if (value.isLoggedIn) {
-    const p = value.profile;
-    if (!isRecord(p) || typeof p.login !== 'string') return false;
+    const p = (value as Record<string, unknown>).profile;
+    if (!isRecord(p) || typeof (p as Record<string, unknown>).login !== 'string') return false;
   }
   return true;
 }

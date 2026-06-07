@@ -102,7 +102,7 @@ describe('Identity UI — logged in state', () => {
     expect(screen.getByText('octocat')).toBeInTheDocument();
     // Open identity menu to access Sign out (status bar button)
     const loggedInButtons = screen.getAllByRole('button', { name: 'Logged in as octocat' });
-    await userEvent.click(loggedInButtons[0]);
+    await userEvent.click(loggedInButtons[0]!);
     expect(screen.getByRole('menuitem', { name: 'Sign out' })).toBeInTheDocument();
   });
 
@@ -118,7 +118,7 @@ describe('Identity UI — logged in state', () => {
 
     // Open identity menu (status bar button)
     const loggedInButtons = screen.getAllByRole('button', { name: 'Logged in as octocat' });
-    await user.click(loggedInButtons[0]);
+    await user.click(loggedInButtons[0]!);
     // Click Sign out in dropdown
     await user.click(screen.getByRole('menuitem', { name: 'Sign out' }));
 
@@ -248,7 +248,7 @@ describe('Identity UI — graceful handling', () => {
 
     // Send invalid session (missing profile.login when isLoggedIn=true)
     await act(async () => {
-      changeHandler!({ isLoggedIn: true } as IdentitySession);
+      changeHandler!({ isLoggedIn: true });
     });
 
     // Should still show Sign in because invalid session is rejected by isIdentitySession guard

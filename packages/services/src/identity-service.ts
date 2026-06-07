@@ -101,11 +101,16 @@ async function createDefaultSecureStore(userDataPath: string): Promise<SecureSto
 }
 
 export class IdentityService {
-  private readonly secureStorePromise: Promise<SecureStore>;
+  private secureStorePromise?: Promise<SecureStore>;
 
-  constructor(private readonly userDataPath: string, private readonly options?: { openUrl?: (url: string) => Promise<void>; secureStore?: SecureStore }) {
-    const store = options?.secureStore;
-    this.secureStorePromise = store ? Promise.resolve(store) : createDefaultSecureStore(userDataPath);
+  constructor(private readonly userDataPath: string, private readonly options?: { openUrl?: (url: string) => Promise<void>; secureStore?: SecureStore }) {}
+
+  private async getSecureStore(): Promise<SecureStore> {
+    if (!this.secureStorePromise) {
+      const store = this.options?.secureStore;
+      this.secureStorePromise = store ? Promise.resolve(store) : createDefaultSecureStore(this.userDataPath);
+    }
+    return this.secureStorePromise;
   }
 
   private async openUrl(url: string) {
@@ -114,7 +119,7 @@ export class IdentityService {
   }
 
   async getSession(): Promise<IdentitySession> {
-    const store = await this.secureStorePromise;
+    const store = await this.getSecureStore();
     const token = await store.getPassword('agentdeck', 'github');
     if (!token) return { isLoggedIn: false };
 
@@ -129,7 +134,7 @@ export class IdentityService {
   }
 
   async signOut(): Promise<void> {
-    const store = await this.secureStorePromise;
+    const store = await this.getSecureStore();
     await store.deletePassword('agentdeck', 'github');
   }
 
@@ -138,7 +143,7 @@ export class IdentityService {
 
     // Test mode: shortcut for E2E tests
     if (process.env.TEST_IDENTITY_AUTO === '1') {
-      const store = await this.secureStorePromise;
+      const store = await this.getSecureStore();
       const token = process.env.TEST_IDENTITY_TOKEN ?? 'test-token';
       await store.setPassword('agentdeck', 'github', token);
       return { isLoggedIn: true, provider: 'github', profile: { login: process.env.TEST_IDENTITY_LOGIN ?? 'e2e-octo', id: 42 } };
@@ -191,7 +196,7 @@ export class IdentityService {
               return;
             }
 
-            const store = await this.secureStorePromise;
+            const store = await this.getSecureStore();
             await store.setPassword('agentdeck', 'github', accessToken);
 
             // Fetch profile
@@ -262,7 +267,7 @@ export class IdentityService {
   }
 
   private async createTestSession(): Promise<IdentitySession> {
-    const store = await this.secureStorePromise;
+    const store = await this.getSecureStore();
     const token = process.env.TEST_IDENTITY_TOKEN ?? 'test-device-token';
     await store.setPassword('agentdeck', 'github', token);
     return { isLoggedIn: true, provider: 'github', profile: { login: process.env.TEST_IDENTITY_LOGIN ?? 'e2e-octo', id: 99 } };
@@ -317,7 +322,7 @@ export class IdentityService {
     const json = await resp.json();
     if (json.access_token) {
       const accessToken = json.access_token as string;
-      const store = await this.secureStorePromise;
+      const store = await this.getSecureStore();
       await store.setPassword('agentdeck', 'github', accessToken);
       const profileResp = await (globalThis as any).fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
       const profile = await profileResp.json();

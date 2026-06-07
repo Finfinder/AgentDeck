@@ -47,6 +47,73 @@ function getPreloadApi(): AgentDeckPreloadApi {
   return (globalThis as unknown as { agentDeck?: AgentDeckPreloadApi }).agentDeck ?? DEV_PRELOAD_API;
 }
 
+interface IdentityMenuProps {
+  identity: IdentitySession;
+  agent: AgentDeckPreloadApi;
+  menuRef: React.RefObject<HTMLDivElement | null>;
+  isOpen: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+}
+
+function IdentityMenu({ identity, agent, menuRef, isOpen, onToggle, onClose }: IdentityMenuProps) {
+  return (
+    <div className="activity-identity" ref={menuRef}>
+      <button
+        className={`activity-button activity-identity-button ${isOpen ? 'active' : ''}`}
+        type="button"
+        aria-label={identity.isLoggedIn ? `Logged in as ${identity.profile?.login}` : 'Not logged in'}
+        title={identity.isLoggedIn ? `Logged in as ${identity.profile?.login}` : 'Sign in'}
+        onClick={onToggle}
+      >
+        {identity.isLoggedIn && identity.profile?.avatar_url ? (
+          <img className="activity-avatar" src={identity.profile.avatar_url} alt="" width={20} height={20} />
+        ) : (
+          <svg className="activity-identity-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <circle cx="8" cy="5" r="3" fill="none" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+        )}
+      </button>
+      {isOpen && (
+        <div className="identity-dropdown" role="menu">
+          {identity.isLoggedIn ? (
+            <>
+              <div className="identity-dropdown-header">
+                {identity.profile?.avatar_url && (
+                  <img className="identity-dropdown-avatar" src={identity.profile.avatar_url} alt="" width={32} height={32} />
+                )}
+                <div className="identity-dropdown-info">
+                  <span className="identity-dropdown-login">{identity.profile?.login}</span>
+                  {identity.profile?.email && (
+                    <span className="identity-dropdown-email">{identity.profile.email}</span>
+                  )}
+                </div>
+              </div>
+              <div className="identity-dropdown-divider" />
+              <button
+                className="identity-dropdown-item"
+                role="menuitem"
+                onClick={async () => { try { await agent.signOut(); onClose(); } catch { /* noop */ } }}
+              >
+                Sign out
+              </button>
+            </>
+          ) : (
+            <button
+              className="identity-dropdown-item"
+              role="menuitem"
+              onClick={async () => { try { await agent.startOAuth(); onClose(); } catch { /* noop */ } }}
+            >
+              Sign in with GitHub
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function App() {
   const agent = useMemo(getPreloadApi, []);
   const [startupState, setStartupState] = useState<StartupState | null>(null);
@@ -330,59 +397,14 @@ export function App() {
           SC
         </button>
         <div className="activity-bar-spacer" />
-        <div className="activity-identity" ref={identityMenuRef}>
-          <button
-            className={`activity-button activity-identity-button ${identityMenuOpen ? 'active' : ''}`}
-            type="button"
-            aria-label={identity.isLoggedIn ? `Logged in as ${identity.profile?.login}` : 'Not logged in'}
-            title={identity.isLoggedIn ? `Logged in as ${identity.profile?.login}` : 'Sign in'}
-            onClick={() => setIdentityMenuOpen(v => !v)}
-          >
-            {identity.isLoggedIn && identity.profile?.avatar_url ? (
-              <img className="activity-avatar" src={identity.profile.avatar_url} alt="" width={20} height={20} />
-            ) : (
-              <svg className="activity-identity-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                <circle cx="8" cy="5" r="3" fill="none" stroke="currentColor" strokeWidth="1.5"/>
-                <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              </svg>
-            )}
-          </button>
-          {identityMenuOpen && (
-            <div className="identity-dropdown" role="menu">
-              {identity.isLoggedIn ? (
-                <>
-                  <div className="identity-dropdown-header">
-                    {identity.profile?.avatar_url && (
-                      <img className="identity-dropdown-avatar" src={identity.profile.avatar_url} alt="" width={32} height={32} />
-                    )}
-                    <div className="identity-dropdown-info">
-                      <span className="identity-dropdown-login">{identity.profile?.login}</span>
-                      {identity.profile?.email && (
-                        <span className="identity-dropdown-email">{identity.profile.email}</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="identity-dropdown-divider" />
-                  <button
-                    className="identity-dropdown-item"
-                    role="menuitem"
-                    onClick={async () => { try { await agent.signOut(); setIdentityMenuOpen(false); } catch {} }}
-                  >
-                    Sign out
-                  </button>
-                </>
-              ) : (
-                <button
-                  className="identity-dropdown-item"
-                  role="menuitem"
-                  onClick={async () => { try { await agent.startOAuth(); setIdentityMenuOpen(false); } catch {} }}
-                >
-                  Sign in with GitHub
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+        <IdentityMenu
+          identity={identity}
+          agent={agent}
+          menuRef={identityMenuRef}
+          isOpen={identityMenuOpen}
+          onToggle={() => setIdentityMenuOpen(v => !v)}
+          onClose={() => setIdentityMenuOpen(false)}
+        />
       </nav>
 
       <aside className="side-bar" aria-label={activePanel === 'search' ? 'Search' : 'Explorer'}>
