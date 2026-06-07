@@ -38,7 +38,9 @@ jobs:
       - name: Verify peer dependencies
         run: |
           echo "Checking peer dependency consistency..."
-          npm ls --all 2>&1 | grep -E "(peer|UNMET|ERESOLVE)" && {
+          # Check for actual peer dependency conflicts (ERESOLVE, unmet peer deps)
+          # Ignore UNMET OPTIONAL DEPENDENCY which is normal for platform-specific optional deps
+          npm ls --all 2>&1 | grep -E "(ERESOLVE|peer dep missing|unmet peer)" && {
             echo "::error::Peer dependency conflicts detected!"
             exit 1
           } || {
