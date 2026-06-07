@@ -27,6 +27,10 @@ function mockPreloadApi(overrides: Partial<Record<string, unknown>> = {}) {
     listDirectory: vi.fn().mockResolvedValue({ path: '/', entries: [] }),
     searchFiles: vi.fn().mockResolvedValue([]),
     getRecentWorkspaces: vi.fn().mockResolvedValue([]),
+    getIdentitySession: vi.fn().mockResolvedValue({ isLoggedIn: false }),
+    startOAuth: vi.fn().mockResolvedValue({ isLoggedIn: false }),
+    signOut: vi.fn().mockResolvedValue({ isLoggedIn: false }),
+    onIdentityChange: vi.fn().mockReturnValue(() => undefined),
     ...overrides
   };
 

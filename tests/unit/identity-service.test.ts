@@ -31,6 +31,7 @@ describe('IdentityService (loopback OAuth)', () => {
       }),
       deletePassword: vi.fn(async () => {
         // noop
+        return true;
       })
     };
 
@@ -85,7 +86,7 @@ describe('IdentityService (loopback OAuth)', () => {
     const secureStore = {
       getPassword: vi.fn(async () => null),
       setPassword: vi.fn(async () => undefined),
-      deletePassword: vi.fn(async () => undefined)
+      deletePassword: vi.fn(async () => true)
     };
 
     (globalThis as any).fetch = vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) } as unknown as Response));

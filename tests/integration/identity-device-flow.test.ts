@@ -23,7 +23,7 @@ describe('IdentityService device flow (integration)', () => {
     const secureStore = {
       getPassword: vi.fn(async (s: string, a: string) => store[`${s}:${a}`] ?? null),
       setPassword: vi.fn(async (s: string, a: string, p: string) => { store[`${s}:${a}`] = p; }),
-      deletePassword: vi.fn(async () => undefined)
+      deletePassword: vi.fn(async () => true)
     };
 
     let userCompleted = false;
