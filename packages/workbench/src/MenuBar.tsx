@@ -43,6 +43,12 @@ const DEV_PRELOAD_API: AgentDeckPreloadApi = {
   showDiff: async () => ({ status: 'error' as const, code: 'UNKNOWN' as const, message: 'Dev mode' }),
   showSaveDialog: async () => null,
   toggleDevTools: async () => undefined
+  ,
+  // Identity dev stubs
+  getIdentitySession: async () => ({ isLoggedIn: false }),
+  startOAuth: async () => ({ isLoggedIn: false }),
+  signOut: async () => ({ isLoggedIn: false }),
+  onIdentityChange: () => () => undefined
 };
 
 function getPreloadApi(): AgentDeckPreloadApi {

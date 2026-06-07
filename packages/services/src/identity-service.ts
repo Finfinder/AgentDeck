@@ -21,7 +21,7 @@ export type IdentitySession = Readonly<{
 export type SecureStore = Readonly<{
   getPassword(service: string, account: string): Promise<string | null>;
   setPassword(service: string, account: string, password: string): Promise<void>;
-  deletePassword(service: string, account: string): Promise<void>;
+  deletePassword(service: string, account: string): Promise<boolean>;
 }>;
 
 function defaultOpenUrl(url: string): Promise<void> {
@@ -74,6 +74,7 @@ async function createFallbackFileStore(userDataPath: string): Promise<SecureStor
       const data = await read();
       delete data[`${service}:${account}`];
       await write(data);
+      return true;
     }
   };
 }

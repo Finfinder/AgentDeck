@@ -20,6 +20,8 @@ export {
 	isDiffInput,
 	isDiffResult
 } from './ipc';
+export type { IdentitySession } from './ipc';
+export { isIdentitySession } from './ipc';
 export { pathBasename, normalizePathStr } from './path';
 export type { DomainEntityName, DomainOwnership, ModuleName } from './domain';
 export type {

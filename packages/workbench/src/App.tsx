@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { DEFAULT_THEME_SETTINGS, type AgentDeckPreloadApi, type EditorDiagnostic, type FsChangeEvent, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
+import { DEFAULT_THEME_SETTINGS, isIdentitySession, type IdentitySession, type AgentDeckPreloadApi, type EditorDiagnostic, type FsChangeEvent, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
 
 import { EditorSurface } from './editor';
 import { useEditorStore } from './editor/useEditorStore';
@@ -35,6 +35,12 @@ const DEV_PRELOAD_API: AgentDeckPreloadApi = {
   showDiff: async () => ({ status: 'error', code: 'UNKNOWN', message: 'Dev mode - no diff.' }),
   showSaveDialog: async () => null,
   toggleDevTools: async () => undefined
+  ,
+  // Identity dev stubs
+  getIdentitySession: async () => ({ isLoggedIn: false }),
+  startOAuth: async () => ({ isLoggedIn: false }),
+  signOut: async () => ({ isLoggedIn: false }),
+  onIdentityChange: () => () => undefined
 };
 
 function getPreloadApi(): AgentDeckPreloadApi {
@@ -59,6 +65,7 @@ export function App() {
   const editorStore = useEditorStore();
   const [diagnostics, setDiagnostics] = useState<readonly EditorDiagnostic[]>([]);
   const [ipcDiagnostics, setIpcDiagnostics] = useState<readonly EditorDiagnostic[]>([]);
+  const [identity, setIdentity] = useState<IdentitySession>({ isLoggedIn: false });
 
   const allDiagnostics = useMemo(
     () => [...ipcDiagnostics, ...diagnostics],
@@ -100,6 +107,31 @@ export function App() {
       isActive = false;
       clearTimeout(timer);
     };
+  }, [agent]);
+
+  // Identity: initial fetch + subscribe to changes
+  useEffect(() => {
+    let active = true;
+
+    (async () => {
+      try {
+        if (typeof agent.getIdentitySession === 'function') {
+          const sess = await agent.getIdentitySession();
+          if (active && isIdentitySession(sess)) setIdentity(sess);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+
+    let dispose: (() => void) | undefined;
+    if (typeof agent.onIdentityChange === 'function') {
+      dispose = agent.onIdentityChange((s) => {
+        if (isIdentitySession(s)) setIdentity(s);
+      });
+    }
+
+    return () => { active = false; if (dispose) dispose(); };
   }, [agent]);
 
   // ?? File system watcher - track external changes ????????????????
@@ -401,6 +433,24 @@ export function App() {
           <button type="button" onClick={() => updateTheme('light')} aria-pressed={themeSettings.theme === 'light'}>
             Light
           </button>
+        </div>
+        <div className="identity-area" aria-label="Identity">
+          {identity.isLoggedIn ? (
+            <div className="profile">
+              {identity.profile?.avatar_url ? (
+                // eslint-disable-next-line jsx-a11y/img-redundant-alt
+                <img className="avatar" src={identity.profile.avatar_url} alt={`${identity.profile.login} avatar`} width={20} height={20} />
+              ) : null}
+              <span className="login">{identity.profile?.login ?? 'user'}</span>
+              <button type="button" className="secondary-action" onClick={async () => { try { await agent.signOut(); } catch {} }}>
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <button type="button" className="primary-action" onClick={async () => { try { await agent.startOAuth(); } catch {} }}>
+              Sign in
+            </button>
+          )}
         </div>
       </footer>
     </main>
