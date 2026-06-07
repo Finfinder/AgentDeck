@@ -169,7 +169,7 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
       try {
         const option = (opts as Record<string, unknown> | undefined) ?? undefined;
         let session;
-        if (option && option.method === 'device') {
+        if (option?.method === 'device') {
           session = await identityService.startDeviceFlow({ clientId: process.env.GITHUB_CLIENT_ID ?? '', scopes: (option.scopes as string[] | undefined) });
         } else {
           session = await identityService.startOAuthLoopback({ clientId: process.env.GITHUB_CLIENT_ID ?? '', clientSecret: process.env.GITHUB_CLIENT_SECRET ?? '' });

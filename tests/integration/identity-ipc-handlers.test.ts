@@ -17,7 +17,12 @@ import { isIdentitySession, type IdentitySession } from '@agentdeck/shared';
 
 let tmpDir: string | null = null;
 
-function createMockSecureStore(): SecureStore & { _store: Record<string, string> } {
+interface MockSecureStore extends SecureStore {
+  _store: Record<string, string>;
+  deletePassword: SecureStore['deletePassword'];
+}
+
+function createMockSecureStore(): MockSecureStore {
   const store: Record<string, string> = {};
   return {
     _store: store,

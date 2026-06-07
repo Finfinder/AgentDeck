@@ -27,13 +27,14 @@ export type SecureStore = Readonly<{
 function defaultOpenUrl(url: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const platform = process.platform;
+    const escaped = url.replaceAll('"', String.raw`\"`);
     let cmd: string;
     if (platform === 'win32') {
-      cmd = `start "" "${url.replace(/"/g, '\\"')}"`;
+      cmd = String.raw`start "" "${escaped}"`;
     } else if (platform === 'darwin') {
-      cmd = `open "${url.replace(/"/g, '\\"')}"`;
+      cmd = String.raw`open "${escaped}"`;
     } else {
-      cmd = `xdg-open "${url.replace(/"/g, '\\"')}"`;
+      cmd = String.raw`xdg-open "${escaped}"`;
     }
 
     exec(cmd, (err) => {
@@ -103,7 +104,8 @@ export class IdentityService {
   private readonly secureStorePromise: Promise<SecureStore>;
 
   constructor(private readonly userDataPath: string, private readonly options?: { openUrl?: (url: string) => Promise<void>; secureStore?: SecureStore }) {
-    this.secureStorePromise = (async () => options?.secureStore ?? createDefaultSecureStore(userDataPath))();
+    const store = options?.secureStore;
+    this.secureStorePromise = store ? Promise.resolve(store) : createDefaultSecureStore(userDataPath);
   }
 
   private async openUrl(url: string) {
@@ -247,72 +249,85 @@ export class IdentityService {
   async startDeviceFlow(params: { clientId: string; scopes?: string[]; timeoutMs?: number; intervalMs?: number }): Promise<IdentitySession> {
     const { clientId, scopes = ['read:user', 'user:email'], timeoutMs = 2 * 60 * 1000 } = params;
 
-    // Test mode: shortcut for E2E tests
     if (process.env.TEST_IDENTITY_AUTO === '1') {
-      const store = await this.secureStorePromise;
-      const token = process.env.TEST_IDENTITY_TOKEN ?? 'test-device-token';
-      await store.setPassword('agentdeck', 'github', token);
-      return { isLoggedIn: true, provider: 'github', profile: { login: process.env.TEST_IDENTITY_LOGIN ?? 'e2e-octo', id: 99 } };
+      return this.createTestSession();
     }
 
-    const deviceResp = await (globalThis as any).fetch('https://github.com/login/device/code', {
+    const { deviceCode, userCode, verificationUri, verificationUriComplete, pollInterval } =
+      await this.initiateDeviceCode(clientId, scopes);
+
+    await this.openVerificationUrl(verificationUri, verificationUriComplete, userCode);
+
+    return this.pollForDeviceToken(clientId, deviceCode, pollInterval, timeoutMs);
+  }
+
+  private async createTestSession(): Promise<IdentitySession> {
+    const store = await this.secureStorePromise;
+    const token = process.env.TEST_IDENTITY_TOKEN ?? 'test-device-token';
+    await store.setPassword('agentdeck', 'github', token);
+    return { isLoggedIn: true, provider: 'github', profile: { login: process.env.TEST_IDENTITY_LOGIN ?? 'e2e-octo', id: 99 } };
+  }
+
+  private async initiateDeviceCode(clientId: string, scopes: string[]) {
+    const resp = await (globalThis as any).fetch('https://github.com/login/device/code', {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify({ client_id: clientId, scope: scopes.join(' ') })
     });
+    if (!resp.ok) throw new Error('Failed to start device flow');
+    const json = await resp.json();
+    return {
+      deviceCode: json.device_code as string,
+      userCode: json.user_code as string,
+      verificationUri: json.verification_uri as string,
+      verificationUriComplete: json.verification_uri_complete as string | undefined,
+      pollInterval: (json.interval ?? 5) * 1000
+    };
+  }
 
-    if (!deviceResp.ok) throw new Error('Failed to start device flow');
-    const deviceJson = await deviceResp.json();
-    const deviceCode = deviceJson.device_code as string;
-    const userCode = deviceJson.user_code as string;
-    const verificationUri = deviceJson.verification_uri as string;
-    const verificationUriComplete = deviceJson.verification_uri_complete as string | undefined;
-    let pollInterval = (deviceJson.interval ?? 5) * 1000;
-
-    const openTarget = verificationUriComplete ?? verificationUri;
+  private async openVerificationUrl(verificationUri: string, verificationUriComplete: string | undefined, userCode: string) {
+    const target = verificationUriComplete ?? verificationUri;
+    const url = verificationUriComplete ? target : `${target}?user_code=${encodeURIComponent(userCode)}`;
     try {
-      await this.openUrl(openTarget + (verificationUriComplete ? '' : `?user_code=${encodeURIComponent(userCode)}`));
+      await this.openUrl(url);
     } catch {
       // Opening browser is best-effort
     }
+  }
 
+  private async pollForDeviceToken(clientId: string, deviceCode: string, pollInterval: number, timeoutMs: number): Promise<IdentitySession> {
     const start = Date.now();
+    let interval = pollInterval;
     while (Date.now() - start < timeoutMs) {
-      const tokenResp = await (globalThis as any).fetch('https://github.com/login/oauth/access_token', {
-        method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client_id: clientId, device_code: deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' })
-      });
-
-      if (!tokenResp.ok) throw new Error('Device flow token request failed');
-      const json = await tokenResp.json();
-      if (json.access_token) {
-        const accessToken = json.access_token as string;
-        const store = await this.secureStorePromise;
-        await store.setPassword('agentdeck', 'github', accessToken);
-
-        const profileResp = await (globalThis as any).fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
-        const profile = await profileResp.json();
-        return { isLoggedIn: true, provider: 'github', profile: { login: profile.login, id: profile.id, avatar_url: profile.avatar_url, name: profile.name, email: profile.email } };
-      }
-
-      if (json.error === 'authorization_pending') {
-        await new Promise((r) => setTimeout(r, pollInterval));
-        continue;
-      }
-
-      if (json.error === 'slow_down') {
-        pollInterval += 5000;
-        await new Promise((r) => setTimeout(r, pollInterval));
-        continue;
-      }
-
-      if (json.error === 'access_denied') throw new Error('User denied device authorization');
-      if (json.error === 'expired_token') throw new Error('Device flow expired');
-      throw new Error(`Device flow error: ${json.error}`);
+      const result = await this.fetchDeviceToken(clientId, deviceCode);
+      if (result.kind === 'success') return result.session;
+      if (result.kind === 'slow_down') { interval += 5000; }
+      await new Promise((r) => setTimeout(r, interval));
     }
-
     throw new Error('Device flow timed out');
+  }
+
+  private async fetchDeviceToken(clientId: string, deviceCode: string): Promise<{ kind: 'success'; session: IdentitySession } | { kind: 'pending' } | { kind: 'slow_down' }> {
+    const resp = await (globalThis as any).fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: clientId, device_code: deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' })
+    });
+    if (!resp.ok) throw new Error('Device flow token request failed');
+    const json = await resp.json();
+    if (json.access_token) {
+      const accessToken = json.access_token as string;
+      const store = await this.secureStorePromise;
+      await store.setPassword('agentdeck', 'github', accessToken);
+      const profileResp = await (globalThis as any).fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
+      const profile = await profileResp.json();
+      return { kind: 'success', session: { isLoggedIn: true, provider: 'github', profile: { login: profile.login, id: profile.id, avatar_url: profile.avatar_url, name: profile.name, email: profile.email } } };
+    }
+    if (json.error === 'authorization_pending') return { kind: 'pending' };
+    if (json.error === 'slow_down') return { kind: 'slow_down' };
+    if (json.error === 'access_denied') throw new Error('User denied device authorization');
+    if (json.error === 'expired_token') throw new Error('Device flow expired');
+    throw new Error(`Device flow error: ${json.error}`);
   }
 }
 

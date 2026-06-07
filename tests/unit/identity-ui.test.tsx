@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -235,7 +235,7 @@ describe('Identity UI — graceful handling', () => {
 
     // Send invalid session (missing profile.login when isLoggedIn=true)
     await act(async () => {
-      changeHandler!({ isLoggedIn: true } as unknown as IdentitySession);
+      changeHandler!({ isLoggedIn: true } as IdentitySession);
     });
 
     // Should still show Sign in because invalid session is rejected by isIdentitySession guard

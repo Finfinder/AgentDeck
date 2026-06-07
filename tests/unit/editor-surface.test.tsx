@@ -286,7 +286,7 @@ describe('EditorSurface', () => {
 
     // Simulate content change in editor to populate contentMap
     const editor = screen.getByRole('textbox', { name: 'Editor' });
-    await fireEvent.change(editor, { target: { value: 'modified content' } });
+    fireEvent.change(editor, { target: { value: 'modified content' } });
 
     // Dispatch save-all event
     globalThis.dispatchEvent(new CustomEvent('agentdeck:save-all'));
