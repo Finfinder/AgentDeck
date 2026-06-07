@@ -28,7 +28,7 @@ function createMockSecureStore(): SecureStore & { _store: Record<string, string>
 }
 
 describe('Identity IPC handlers (integration)', () => {
-  let savedFetch: typeof global.fetch | undefined;
+  let savedFetch: typeof globalThis.fetch | undefined;
 
   beforeEach(async () => {
     savedFetch = (globalThis as any).fetch;
@@ -50,7 +50,7 @@ describe('Identity IPC handlers (integration)', () => {
       (globalThis as any).fetch = vi.fn(async () => ({
         ok: true,
         json: async () => ({ login: 'ipc-user', id: 10, avatar_url: 'https://example.com/a.png' })
-      })) as unknown as typeof fetch;
+      }));
 
       const svc = createIdentityService(tmpDir!, { secureStore });
       const session = await svc.getSession();
@@ -76,7 +76,7 @@ describe('Identity IPC handlers (integration)', () => {
 
       (globalThis as any).fetch = vi.fn(async () => ({
         ok: false, status: 401, json: async () => ({})
-      })) as unknown as typeof fetch;
+      }));
 
       const svc = createIdentityService(tmpDir!, { secureStore });
       const session = await svc.getSession();
@@ -88,7 +88,7 @@ describe('Identity IPC handlers (integration)', () => {
     it('returns fallback when getSession throws unexpectedly', async () => {
       const secureStore = createMockSecureStore();
       // Don't mock fetch — let it fail with no network
-      (globalThis as any).fetch = vi.fn(async () => { throw new Error('ECONNREFUSED'); }) as unknown as typeof fetch;
+      (globalThis as any).fetch = vi.fn(async () => { throw new Error('ECONNREFUSED'); });
 
       const svc = createIdentityService(tmpDir!, { secureStore });
       const session = await svc.getSession();
@@ -118,7 +118,7 @@ describe('Identity IPC handlers (integration)', () => {
 
     it('returns not-logged-in even when signOut throws', async () => {
       const secureStore = createMockSecureStore();
-      secureStore.deletePassword = vi.fn(async () => { throw new Error('Keychain locked'); return false; });
+      secureStore.deletePassword = vi.fn(async () => { throw new Error('Keychain locked'); });
 
       const svc = createIdentityService(tmpDir!, { secureStore });
 
@@ -148,8 +148,8 @@ describe('Identity IPC handlers (integration)', () => {
 
       const openUrl = vi.fn(async (url: string) => {
         const u = new URL(url);
-        const redirect = u.searchParams.get('redirect_uri')!;
-        const state = u.searchParams.get('state')!;
+        const redirect = u.searchParams.get('redirect_uri') ?? '';
+        const state = u.searchParams.get('state') ?? '';
         const { request } = await import('node:http');
         await new Promise<void>((resolve, reject) => {
           const req = request(`${redirect}?code=abc&state=${state}`, (res) => {
@@ -172,12 +172,12 @@ describe('Identity IPC handlers (integration)', () => {
     it('returns not-logged-in when OAuth fails', async () => {
       const secureStore = createMockSecureStore();
 
-      (globalThis as any).fetch = vi.fn(async () => ({ ok: false, status: 400, json: async () => ({}) })) as unknown as typeof fetch;
+      (globalThis as any).fetch = vi.fn(async () => ({ ok: false, status: 400, json: async () => ({}) }));
 
       const openUrl = vi.fn(async (url: string) => {
         const u = new URL(url);
-        const redirect = u.searchParams.get('redirect_uri')!;
-        const state = u.searchParams.get('state')!;
+        const redirect = u.searchParams.get('redirect_uri') ?? '';
+        const state = u.searchParams.get('state') ?? '';
         const { request } = await import('node:http');
         await new Promise<void>((resolve, reject) => {
           const req = request(`${redirect}?code=abc&state=${state}`, (res) => {

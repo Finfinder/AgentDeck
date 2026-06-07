@@ -36,14 +36,14 @@ test.afterAll(async () => {
 
 test('identity preload API is available and returns valid session shape', async () => {
   // Verify getIdentitySession returns a valid session shape
-  const session = await page.evaluate(() => (window as any).agentDeck.getIdentitySession());
+  const session = await page.evaluate(() => (globalThis as any).agentDeck.getIdentitySession());
   expect(session).toBeDefined();
   expect(typeof session.isLoggedIn).toBe('boolean');
 
   // Verify startOAuth is callable (returns a promise that resolves to a session shape)
   const result = await page.evaluate(async () => {
     try {
-      const s = await (window as any).agentDeck.startOAuth({ method: 'device' });
+      const s = await (globalThis as any).agentDeck.startOAuth({ method: 'device' });
       return { ok: true, isLoggedIn: s?.isLoggedIn };
     } catch (err) {
       return { ok: false, error: String(err) };
@@ -57,7 +57,7 @@ test('signOut returns not-logged-in session shape', async () => {
   // Verify signOut is callable and returns a valid session shape
   const result = await page.evaluate(async () => {
     try {
-      const s = await (window as any).agentDeck.signOut();
+      const s = await (globalThis as any).agentDeck.signOut();
       return { ok: true, isLoggedIn: s?.isLoggedIn };
     } catch (err) {
       return { ok: false, error: String(err) };
@@ -69,12 +69,12 @@ test('signOut returns not-logged-in session shape', async () => {
 
 test('session shape is valid after signOut', async () => {
   // Sign out first
-  await page.evaluate(() => (window as any).agentDeck.signOut());
+  await page.evaluate(() => (globalThis as any).agentDeck.signOut());
 
   // Verify getIdentitySession returns a valid session shape after signOut
-  const session = await page.evaluate(() => (window as any).agentDeck.getIdentitySession());
-  expect(session).toBeDefined();
-  expect(typeof session.isLoggedIn).toBe('boolean');
+  const afterLogoutSession = await page.evaluate(() => (globalThis as any).agentDeck.getIdentitySession());
+  expect(afterLogoutSession).toBeDefined();
+  expect(typeof afterLogoutSession.isLoggedIn).toBe('boolean');
   // After signOut, should be not logged in
-  expect(session.isLoggedIn).toBe(false);
+  expect(afterLogoutSession.isLoggedIn).toBe(false);
 });

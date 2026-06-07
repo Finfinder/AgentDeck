@@ -107,4 +107,4 @@ export {
   writeEditorFile
 } from './editor-service';
 export { createIdentityService } from './identity-service';
-export type { IdentitySession } from './identity-service';
+export type { IdentitySession, SecureStore } from './identity-service';
