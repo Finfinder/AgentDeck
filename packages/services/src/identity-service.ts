@@ -206,7 +206,7 @@ export class IdentityService {
               return;
             }
 
-            // Fetch profile BEFORE storing token — only persist token if profile is valid
+            // Fetch profile BEFORE storing token -- only persist token if profile is valid
             const profileResp = await globalThis.fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
             if (!profileResp.ok) {
               reject(new Error('Failed to fetch GitHub profile'));
@@ -357,7 +357,7 @@ export class IdentityService {
     try {
       json = await resp.json() as Record<string, unknown>;
     } catch {
-      // Non-JSON response (e.g. 502 HTML) — treat as transient error
+      // Non-JSON response (e.g. 502 HTML) -- treat as transient error
       return { kind: 'pending' };
     }
 
@@ -390,7 +390,7 @@ export class IdentityService {
     if (!accessToken) {
       throw new Error('Empty access token in device flow success response');
     }
-    // Fetch profile BEFORE storing token — only persist token if profile is valid
+    // Fetch profile BEFORE storing token -- only persist token if profile is valid
     const profileResp = await globalThis.fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
     if (!profileResp.ok) {
       throw new Error('Failed to fetch GitHub profile');
