@@ -10,10 +10,12 @@ import {
   isFileWriteResult,
   isFsChangeEvent,
   isIdentitySession,
+  isIdentitySessionWarning,
   isStartupState,
   isThemeSettings,
   isWorkspaceEditResult,
   type IdentitySession,
+  type IdentitySessionWarning,
   isWorkspaceModel,
   isWorkspaceSelection,
   type AgentDeckPreloadApi,
@@ -102,6 +104,13 @@ const api: AgentDeckPreloadApi = {
     };
     ipcRenderer.on(IPC_CHANNELS.identityDeviceCode, listener);
     return () => { ipcRenderer.off(IPC_CHANNELS.identityDeviceCode, listener); };
+  },
+  onIdentityWarning: (handler: (warning: IdentitySessionWarning) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (isIdentitySessionWarning(value)) handler(value);
+    };
+    ipcRenderer.on(IPC_CHANNELS.identityWarning, listener);
+    return () => { ipcRenderer.off(IPC_CHANNELS.identityWarning, listener); };
   },
   readFile: async (filePath: string) => {
     const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.readFile, filePath);

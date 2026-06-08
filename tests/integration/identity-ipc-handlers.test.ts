@@ -3,8 +3,13 @@ import { tmpdir } from 'node:os';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { createIdentityService, type SecureStore } from '@agentdeck/services';
-import { isIdentitySession, type IdentitySession } from '@agentdeck/shared';
+import { createIdentityService, type SecureStore, type SecureStoreWarning } from '@agentdeck/services';
+import { isIdentitySession, isIdentitySessionWarning, type IdentitySession } from '@agentdeck/shared';
+
+// Mock keytar to simulate unavailability for fallback warning tests
+vi.mock('keytar', () => {
+  throw new Error('keytar native module not found');
+});
 
 /**
  * Integration tests for the identity IPC handlers logic.
@@ -229,6 +234,56 @@ describe('Identity IPC handlers (integration)', () => {
       expect(session.isLoggedIn).toBe(true);
       expect(session.profile?.login).toBe('dev-user');
       expect(isIdentitySession(session)).toBe(true);
+    });
+  });
+
+  describe('identityWarning IPC channel (fallback file store)', () => {
+    it('onFallbackWarning callback fires when keytar is unavailable', async () => {
+      const warnings: SecureStoreWarning[] = [];
+
+      const svc = createIdentityService(tmpDir, {
+        onFallbackWarning: (w) => { warnings.push(w); }
+      });
+
+      // Trigger lazy secure store initialization
+      const session = await svc.getSession();
+      expect(session.isLoggedIn).toBe(false);
+
+      // In test env keytar is not available, so fallback should trigger
+      expect(warnings.length).toBeGreaterThanOrEqual(1);
+      const fallbackWarning = warnings.find(w => w.type === 'FALLBACK_FILE_STORE');
+      expect(fallbackWarning).toBeDefined();
+      expect(fallbackWarning!.path).toBe(tmpDir);
+      expect(typeof fallbackWarning!.reason).toBe('string');
+    });
+
+    it('warning payload passes isIdentitySessionWarning type guard', async () => {
+      const warnings: SecureStoreWarning[] = [];
+
+      const svc = createIdentityService(tmpDir, {
+        onFallbackWarning: (w) => { warnings.push(w); }
+      });
+
+      await svc.getSession();
+
+      for (const w of warnings) {
+        expect(isIdentitySessionWarning(w)).toBe(true);
+      }
+    });
+
+    it('no warning when custom secureStore is provided', async () => {
+      const warnings: SecureStoreWarning[] = [];
+      const secureStore = createMockSecureStore();
+
+      const svc = createIdentityService(tmpDir, {
+        secureStore,
+        onFallbackWarning: (w) => { warnings.push(w); }
+      });
+
+      await svc.getSession();
+
+      // With a custom secureStore, fallback should NOT be triggered
+      expect(warnings.length).toBe(0);
     });
   });
 });

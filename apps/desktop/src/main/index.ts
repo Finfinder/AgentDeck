@@ -362,7 +362,15 @@ function registerDevToolsShortcut(mainWindow: BrowserWindow): void {
 async function start(): Promise<void> {
   const settingsService = createSettingsService(app.getPath('userData'));
   const workspaceService = createWorkspaceService(app.getPath('userData'));
-  const identityService = createIdentityService(app.getPath('userData'));
+  const identityService = createIdentityService(app.getPath('userData'), {
+    onFallbackWarning: (warning) => {
+      // Send warning to renderer so UI can display it to the user
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win && !win.isDestroyed()) {
+        win.webContents.send(IPC_CHANNELS.identityWarning, warning);
+      }
+    }
+  });
 
   startupState = await resolveStartupState();
   const mainWindow = createMainWindow();

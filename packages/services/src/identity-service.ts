@@ -1,8 +1,8 @@
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { dirname, join } from 'node:path';
-import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { exec } from 'node:child_process';
+import { writeFile, readFile, mkdir, chmod } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 import type { IdentitySession } from '@agentdeck/shared';
 
@@ -51,9 +51,52 @@ function defaultOpenUrl(url: string): Promise<void> {
   });
 }
 
+export type SecureStoreWarning = Readonly<{
+  type: 'FALLBACK_FILE_STORE';
+  reason: string;
+  path: string;
+}>;
+
+async function createDefaultSecureStore(
+  userDataPath: string,
+  onFallbackWarning?: (warning: SecureStoreWarning) => void
+): Promise<SecureStore> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    const keytarModule = await import('keytar');
+    // Handle ESM/CJS interop: keytar may be in .default
+    const keytar = keytarModule.default ?? keytarModule;
+    if (keytar && typeof keytar.getPassword === 'function' && typeof keytar.setPassword === 'function') {
+      return {
+        getPassword: (s, a) => keytar.getPassword(s, a),
+        setPassword: (s, a, p) => keytar.setPassword(s, a, p),
+        deletePassword: (s, a) => keytar.deletePassword(s, a)
+      };
+    }
+  } catch (err) {
+    // keytar failed to load — log diagnostic info for troubleshooting
+    const reason = err instanceof Error ? err.message : String(err);
+    console.warn(
+      '[IdentityService] Secure storage (keytar) unavailable:',
+      reason,
+      '— falling back to file store in',
+      userDataPath
+    );
+  }
+
+  const warning: SecureStoreWarning = {
+    type: 'FALLBACK_FILE_STORE',
+    reason: 'keytar not available',
+    path: userDataPath
+  };
+  onFallbackWarning?.(warning);
+
+  return createFallbackFileStore(userDataPath);
+}
+
 async function createFallbackFileStore(userDataPath: string): Promise<SecureStore> {
   const file = join(userDataPath, '.secure_store.json');
-  await mkdir(dirname(file), { recursive: true });
 
   async function read(): Promise<Record<string, string>> {
     try {
@@ -65,7 +108,9 @@ async function createFallbackFileStore(userDataPath: string): Promise<SecureStor
   }
 
   async function write(data: Record<string, string>) {
-    await writeFile(file, JSON.stringify(data, null, 2), 'utf8');
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+    await chmod(file, 0o600); // ensure permissions even if file already exists
   }
 
   return {
@@ -87,37 +132,23 @@ async function createFallbackFileStore(userDataPath: string): Promise<SecureStor
   };
 }
 
-async function createDefaultSecureStore(userDataPath: string): Promise<SecureStore> {
-  try {
-    // Try to load keytar if available (preferred secure storage)
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
-    const keytarModule = await import('keytar');
-    // Handle ESM/CJS interop: keytar may be in .default
-    const keytar = keytarModule.default ?? keytarModule;
-    if (keytar && typeof keytar.getPassword === 'function' && typeof keytar.setPassword === 'function') {
-      return {
-        getPassword: (s, a) => keytar.getPassword(s, a),
-        setPassword: (s, a, p) => keytar.setPassword(s, a, p),
-        deletePassword: (s, a) => keytar.deletePassword(s, a)
-      };
-    }
-  } catch {
-    // fallback to file-based store
-  }
-
-  return createFallbackFileStore(userDataPath);
-}
+export type IdentityServiceOptions = Readonly<{
+  openUrl?: (url: string) => Promise<void>;
+  secureStore?: SecureStore;
+  onFallbackWarning?: (warning: SecureStoreWarning) => void;
+}>;
 
 export class IdentityService {
   private secureStorePromise?: Promise<SecureStore>;
 
-  constructor(private readonly userDataPath: string, private readonly options?: { openUrl?: (url: string) => Promise<void>; secureStore?: SecureStore }) {}
+  constructor(private readonly userDataPath: string, private readonly options?: IdentityServiceOptions) {}
 
   private async getSecureStore(): Promise<SecureStore> {
     if (!this.secureStorePromise) {
       const store = this.options?.secureStore;
-      this.secureStorePromise = store ? Promise.resolve(store) : createDefaultSecureStore(this.userDataPath);
+      this.secureStorePromise = store
+        ? Promise.resolve(store)
+        : createDefaultSecureStore(this.userDataPath, this.options?.onFallbackWarning);
     }
     return this.secureStorePromise;
   }
@@ -395,7 +426,7 @@ export class IdentityService {
   }
 }
 
-export function createIdentityService(userDataPath: string, opts?: { openUrl?: (url: string) => Promise<void>; secureStore?: SecureStore }): IdentityService {
+export function createIdentityService(userDataPath: string, opts?: IdentityServiceOptions): IdentityService {
   return new IdentityService(userDataPath, opts);
 }
 

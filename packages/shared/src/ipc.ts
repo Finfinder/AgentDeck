@@ -22,7 +22,8 @@ export const IPC_CHANNELS = {
   identityStartOAuth: 'agentdeck:v1:identity:start-oauth',
   identitySignOut: 'agentdeck:v1:identity:sign-out',
   identityChanged: 'agentdeck:v1:identity:changed',
-  identityDeviceCode: 'agentdeck:v1:identity:device-code'
+  identityDeviceCode: 'agentdeck:v1:identity:device-code',
+  identityWarning: 'agentdeck:v1:identity:warning'
 } as const satisfies Record<string, string>;
 
 export type ThemePreference = 'dark' | 'light';
@@ -263,13 +264,20 @@ export type IdentitySession = Readonly<{
   }>;
   error?: string;
 }>;
+export type IdentitySessionWarning = Readonly<{
+  type: 'FALLBACK_FILE_STORE';
+  reason: string;
+  path: string;
+}>;
+
 export type AgentDeckPreloadApi = Readonly<{
   getStartupState: () => Promise<StartupState>;
   getIdentitySession: () => Promise<IdentitySession>;
   startOAuth: (opts?: unknown) => Promise<IdentitySession>;
   signOut: () => Promise<IdentitySession>;
-  onIdentityChange: (handler: (session: IdentitySession) => void) => () => void;
+  onIdentityChange?: (handler: (session: IdentitySession) => void) => (() => void) | undefined;
   onDeviceCode?: (handler: (data: { userCode: string; verificationUri: string; verificationUriComplete?: string }) => void) => (() => void) | undefined;
+  onIdentityWarning?: (handler: (warning: IdentitySessionWarning) => void) => (() => void) | undefined;
   getThemeSettings: () => Promise<ThemeSettings>;
   setThemeSettings: (settings: ThemeSettings) => Promise<ThemeSettings>;
   selectWorkspaceEntry: (request: WorkspaceOpenRequest) => Promise<WorkspaceSelection>;
@@ -327,6 +335,11 @@ export function isIdentitySession(value: unknown): value is IdentitySession {
     if (!isRecord(p) || typeof p.login !== 'string') return false;
   }
   return true;
+}
+
+export function isIdentitySessionWarning(value: unknown): value is IdentitySessionWarning {
+  if (!isRecord(value)) return false;
+  return value.type === 'FALLBACK_FILE_STORE' && typeof value.reason === 'string' && typeof value.path === 'string';
 }
 
 export function isWorkspaceOpenRequest(value: unknown): value is WorkspaceOpenRequest {

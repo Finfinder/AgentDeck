@@ -221,7 +221,6 @@ describe('Identity UI - graceful handling', () => {
   it('does not crash when onIdentityChange is not provided (optional)', async () => {
     // Mock without onIdentityChange - simulates older preload
     const api = mockPreloadApi();
-    // @ts-expect-error - intentionally omitting optional method for resilience test
     delete api.onIdentityChange;
     setAgentDeck(api);
 
