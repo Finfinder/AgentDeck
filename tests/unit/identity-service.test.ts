@@ -485,23 +485,6 @@ describe('IdentityService (loopback OAuth)', () => {
   });
 
   it('rejects when getSecureStore throws during OAuth callback', async () => {
-    const secureStore = {
-      getPassword: vi.fn(async () => null),
-      setPassword: vi.fn(async () => undefined),
-      deletePassword: vi.fn(async () => true)
-    };
-
-    let callCount = 0;
-    const throwingStore = {
-      getPassword: vi.fn(async () => null),
-      setPassword: vi.fn(async () => undefined),
-      deletePassword: vi.fn(async () => true),
-    };
-
-    // We need getSecureStore to throw. Since it's called after profile fetch,
-    // we use a custom secureStore that throws on first call (during getSession)
-    // but the OAuth flow calls getSecureStore() internally.
-    // Instead, let's use the options.secureStore to inject a store that throws.
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: unknown) => {
       const url = typeof input === 'string' ? input : (input as Request).url;
       if (url.includes('login/oauth/access_token')) {
@@ -532,12 +515,10 @@ describe('IdentityService (loopback OAuth)', () => {
       });
     });
 
-    // Create a store that throws when getSecureStore resolves and is called
-    let storeCallCount = 0;
+    // Create a store that throws when setPassword is called
     const errStore = {
       getPassword: vi.fn(async () => null),
-      setPassword: vi.fn(async (s: string, a: string, p: string) => {
-        storeCallCount++;
+      setPassword: vi.fn(async () => {
         throw new Error('Secure store unavailable');
       }),
       deletePassword: vi.fn(async () => true),
