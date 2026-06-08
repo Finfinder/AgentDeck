@@ -212,4 +212,98 @@ describe('IdentityService (loopback OAuth)', () => {
     expect(secureStore.deletePassword).toHaveBeenCalledWith('agentdeck', 'github');
     expect(store['agentdeck:github']).toBeUndefined();
   });
+
+  // --- Edge-case tests from code review ---
+
+  it('loopback OAuth does not store token when profile fetch fails', async () => {
+    const store: Record<string, string> = {};
+    const secureStore = {
+      getPassword: vi.fn(async (s: string, a: string) => store[`${s}:${a}`] ?? null),
+      setPassword: vi.fn(async (s: string, a: string, p: string) => {
+        store[`${s}:${a}`] = p;
+      }),
+      deletePassword: vi.fn(async () => true)
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: unknown) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('login/oauth/access_token')) {
+        return { ok: true, json: async () => ({ access_token: 'fake-token' }) } as unknown as Response;
+      }
+      // Profile endpoint returns 401
+      if (url.includes('api.github.com/user')) {
+        return { ok: false, status: 401, json: async () => ({ message: 'Bad credentials' }) } as unknown as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
+    });
+
+    const openUrl = vi.fn(async (url: string) => {
+      const u = new URL(url);
+      const redirect = u.searchParams.get('redirect_uri')!;
+      const state = u.searchParams.get('state')!;
+      const target = `${redirect}?code=test-code&state=${state}`;
+      const { request } = await import('node:http');
+      await new Promise<void>((resolve, reject) => {
+        const req = request(target, (res) => {
+          res.on('data', () => {});
+          res.on('end', () => resolve());
+        });
+        req.on('error', reject);
+        req.end();
+      });
+    });
+
+    const svc = createIdentityService(tmp!, { secureStore, openUrl });
+
+    await expect(svc.startOAuthLoopback({ clientId: 'cid', clientSecret: 'secret' })).rejects.toThrow('Failed to fetch GitHub profile');
+
+    // Token must NOT be stored when profile fetch fails
+    expect(store['agentdeck:github']).toBeUndefined();
+    expect(secureStore.setPassword).not.toHaveBeenCalled();
+  });
+
+  it('loopback OAuth handles non-JSON response from token endpoint', async () => {
+    const store: Record<string, string> = {};
+    const secureStore = {
+      getPassword: vi.fn(async (s: string, a: string) => store[`${s}:${a}`] ?? null),
+      setPassword: vi.fn(async (s: string, a: string, p: string) => {
+        store[`${s}:${a}`] = p;
+      }),
+      deletePassword: vi.fn(async () => true)
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: unknown) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('login/oauth/access_token')) {
+        // Return a non-JSON response (simulating 502 HTML)
+        return {
+          ok: false,
+          status: 502,
+          json: async () => { throw new SyntaxError('Unexpected token < in JSON'); }
+        } as unknown as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
+    });
+
+    const openUrl = vi.fn(async (url: string) => {
+      const u = new URL(url);
+      const redirect = u.searchParams.get('redirect_uri')!;
+      const state = u.searchParams.get('state')!;
+      const target = `${redirect}?code=test-code&state=${state}`;
+      const { request } = await import('node:http');
+      await new Promise<void>((resolve, reject) => {
+        const req = request(target, (res) => {
+          res.on('data', () => {});
+          res.on('end', () => resolve());
+        });
+        req.on('error', reject);
+        req.end();
+      });
+    });
+
+    const svc = createIdentityService(tmp!, { secureStore, openUrl });
+
+    await expect(svc.startOAuthLoopback({ clientId: 'cid', clientSecret: 'secret' })).rejects.toThrow();
+    expect(store['agentdeck:github']).toBeUndefined();
+  });
 });

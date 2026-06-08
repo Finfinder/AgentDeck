@@ -206,14 +206,20 @@ export class IdentityService {
               return;
             }
 
-            const store = await this.getSecureStore();
-            await store.setPassword('agentdeck', 'github', accessToken);
-
-            // Fetch profile
+            // Fetch profile BEFORE storing token — only persist token if profile is valid
             const profileResp = await globalThis.fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
+            if (!profileResp.ok) {
+              reject(new Error('Failed to fetch GitHub profile'));
+              server.close();
+              return;
+            }
             const profile = await profileResp.json() as Record<string, unknown>;
 
             const session: IdentitySession = { isLoggedIn: true, provider: 'github', profile: buildProfile(profile) };
+
+            // Store token only after profile fetch succeeds
+            const store = await this.getSecureStore();
+            await store.setPassword('agentdeck', 'github', accessToken);
             resolve(session);
           } catch (err) {
             reject(err);
@@ -347,16 +353,22 @@ export class IdentityService {
     });
     
     // Parse error response even for HTTP errors (GitHub returns 400 for authorization_pending, etc.)
-    const json = await resp.json() as Record<string, unknown>;
-    
+    let json: Record<string, unknown>;
+    try {
+      json = await resp.json() as Record<string, unknown>;
+    } catch {
+      // Non-JSON response (e.g. 502 HTML) — treat as transient error
+      return { kind: 'pending' };
+    }
+
     if (!resp.ok) {
       return this.handleDeviceTokenError(json);
     }
-    
+
     if (json.access_token) {
       return this.handleDeviceTokenSuccess(json);
     }
-    
+
     return this.handleDeviceTokenError(json);
   }
 
@@ -366,16 +378,28 @@ export class IdentityService {
     if (errorCode === 'slow_down') return { kind: 'slow_down' };
     if (errorCode === 'access_denied') throw new Error('User denied device authorization');
     if (errorCode === 'expired_token') throw new Error('Device flow expired');
-    throw new Error(`Device flow token request failed: ${errorCode ?? 'unknown'}`);
+    if (errorCode === 'unsupported_grant_type') throw new Error('Device flow configuration error');
+    if (errorCode === 'incorrect_client_credentials') throw new Error('Device flow configuration error');
+    if (errorCode === 'incorrect_device_code') throw new Error('Device flow invalid code');
+    // For any other unexpected error, include the code for debugging but keep message generic
+    throw new Error(`Device flow failed: ${errorCode ?? 'unknown error'}`);
   }
 
   private async handleDeviceTokenSuccess(json: Record<string, unknown>): Promise<{ kind: 'success'; session: IdentitySession }> {
     const accessToken = json.access_token as string;
-    const store = await this.getSecureStore();
-    await store.setPassword('agentdeck', 'github', accessToken);
+    if (!accessToken) {
+      throw new Error('Empty access token in device flow success response');
+    }
+    // Fetch profile BEFORE storing token — only persist token if profile is valid
     const profileResp = await globalThis.fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
+    if (!profileResp.ok) {
+      throw new Error('Failed to fetch GitHub profile');
+    }
     const profile = await profileResp.json() as Record<string, unknown>;
     const session: IdentitySession = { isLoggedIn: true, provider: 'github', profile: buildProfile(profile) };
+    // Store token only after profile fetch succeeds
+    const store = await this.getSecureStore();
+    await store.setPassword('agentdeck', 'github', accessToken);
     return { kind: 'success', session };
   }
 }
