@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { writeFile, readFile, mkdir, chmod } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
@@ -32,20 +32,31 @@ export type SecureStore = Readonly<{
 }>;
 
 function defaultOpenUrl(url: string): Promise<void> {
+  // Validate URL protocol to prevent opening unsafe protocols (e.g. file://, javascript:)
+  if (!url.startsWith('https://') && !url.startsWith('http://')) {
+    return Promise.reject(new Error(`Unsafe URL protocol: only http/https allowed, got "${url.slice(0, 20)}..."`));
+  }
+
   return new Promise((resolve, reject) => {
     const platform = process.platform;
-    const escaped = url.replaceAll('"', String.raw`\"`);
-    let cmd: string;
+    let file: string;
+    let args: string[];
+
     if (platform === 'win32') {
-      cmd = String.raw`start "" "${escaped}"`;
+      // 'start' is a cmd.exe built-in, so we must invoke via cmd.exe /c
+      // The empty first arg after /c is the window title for 'start'
+      file = 'cmd.exe';
+      args = ['/c', 'start', '', url];
     } else if (platform === 'darwin') {
-      cmd = String.raw`open "${escaped}"`;
+      file = 'open';
+      args = [url];
     } else {
-      cmd = String.raw`xdg-open "${escaped}"`;
+      file = 'xdg-open';
+      args = [url];
     }
 
-    exec(cmd, (err) => {
-      if (err) return reject(err);
+    execFile(file, args, (err) => {
+      if (err) return reject(err instanceof Error ? err : new Error(String(err)));
       resolve();
     });
   });
