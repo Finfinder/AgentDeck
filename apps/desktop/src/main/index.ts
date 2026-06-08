@@ -171,15 +171,12 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
 
     ipcMain.handle(IPC_CHANNELS.identityStartOAuth, async (_event, opts: unknown) => {
       try {
-        // ALWAYS start with demo mode (no configuration needed)
-        // Real GitHub OAuth only if GITHUB_CLIENT_ID is set in .env
+        // Explicit demo mode: only when GITHUB_OVERRIDE_DEMO=1 (opt-in, never silent fallback)
+        const demoOverride = process.env.GITHUB_OVERRIDE_DEMO === '1';
         const clientId = process.env.GITHUB_CLIENT_ID;
-        
-        if (!clientId) {
-          console.log('[Identity] No GITHUB_CLIENT_ID set. Using demo mode (no configuration needed).');
-          console.log('[Identity] To use real GitHub OAuth, fill in GITHUB_CLIENT_ID in .env file.');
-          
-          // Demo session - works immediately without any configuration
+
+        if (demoOverride && !clientId) {
+          console.log('[Identity] GITHUB_OVERRIDE_DEMO=1. Using explicit demo mode.');
           const demoSession = {
             isLoggedIn: true,
             provider: 'github' as const,
@@ -187,13 +184,23 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
               login: 'demo-user',
               id: 0,
               avatar_url: '',
-              name: 'Demo Mode (configure .env for real GitHub OAuth)',
+              name: 'Demo Mode',
               email: 'demo@agentdeck.local'
             }
           };
-          
           if (!mainWindow.isDestroyed()) mainWindow.webContents.send(IPC_CHANNELS.identityChanged, demoSession);
           return demoSession;
+        }
+
+        // Require GITHUB_CLIENT_ID for real OAuth. Missing config = explicit error, never silent demo.
+        if (!clientId) {
+          console.error('[Identity] GITHUB_CLIENT_ID not set. Cannot start OAuth. Set GITHUB_CLIENT_ID in .env or use GITHUB_OVERRIDE_DEMO=1 for demo.');
+          const errorSession = {
+            isLoggedIn: false,
+            error: 'Missing GITHUB_CLIENT_ID. Set it in .env for real GitHub OAuth, or set GITHUB_OVERRIDE_DEMO=1 for demo mode.'
+          };
+          if (!mainWindow.isDestroyed()) mainWindow.webContents.send(IPC_CHANNELS.identityChanged, errorSession);
+          return errorSession;
         }
 
         // Real GitHub OAuth - device flow (no localhost needed)
