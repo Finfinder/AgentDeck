@@ -75,12 +75,12 @@ async function createDefaultSecureStore(
       };
     }
   } catch (err) {
-    // keytar failed to load — log diagnostic info for troubleshooting
+    // keytar failed to load - log diagnostic info for troubleshooting
     const reason = err instanceof Error ? err.message : String(err);
     console.warn(
       '[IdentityService] Secure storage (keytar) unavailable:',
       reason,
-      '— falling back to file store in',
+      '- falling back to file store in',
       userDataPath
     );
   }
