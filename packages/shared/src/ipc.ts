@@ -21,7 +21,8 @@ export const IPC_CHANNELS = {
   identityGetSession: 'agentdeck:v1:identity:get-session',
   identityStartOAuth: 'agentdeck:v1:identity:start-oauth',
   identitySignOut: 'agentdeck:v1:identity:sign-out',
-  identityChanged: 'agentdeck:v1:identity:changed'
+  identityChanged: 'agentdeck:v1:identity:changed',
+  identityDeviceCode: 'agentdeck:v1:identity:device-code'
 } as const satisfies Record<string, string>;
 
 export type ThemePreference = 'dark' | 'light';
@@ -268,6 +269,7 @@ export type AgentDeckPreloadApi = Readonly<{
   startOAuth: (opts?: unknown) => Promise<IdentitySession>;
   signOut: () => Promise<IdentitySession>;
   onIdentityChange: (handler: (session: IdentitySession) => void) => () => void;
+  onDeviceCode?: (handler: (data: { userCode: string; verificationUri: string; verificationUriComplete?: string }) => void) => (() => void) | undefined;
   getThemeSettings: () => Promise<ThemeSettings>;
   setThemeSettings: (settings: ThemeSettings) => Promise<ThemeSettings>;
   selectWorkspaceEntry: (request: WorkspaceOpenRequest) => Promise<WorkspaceSelection>;
@@ -321,8 +323,8 @@ export function isIdentitySession(value: unknown): value is IdentitySession {
   if (!isRecord(value)) return false;
   if (typeof value.isLoggedIn !== 'boolean') return false;
   if (value.isLoggedIn) {
-    const p = (value as Record<string, unknown>).profile;
-    if (!isRecord(p) || typeof (p as Record<string, unknown>).login !== 'string') return false;
+    const p = value.profile;
+    if (!isRecord(p) || typeof p.login !== 'string') return false;
   }
   return true;
 }

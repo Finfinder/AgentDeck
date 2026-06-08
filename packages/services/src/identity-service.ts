@@ -4,18 +4,14 @@ import { dirname, join } from 'node:path';
 import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { exec } from 'node:child_process';
 
+import type { IdentitySession } from '@agentdeck/shared';
+
 export type GithubProfile = Readonly<{
   login: string;
   id?: number;
   avatar_url?: string;
   name?: string;
   email?: string | null;
-}>;
-
-export type IdentitySession = Readonly<{
-  isLoggedIn: boolean;
-  provider?: 'github';
-  profile?: GithubProfile;
 }>;
 
 export type SecureStore = Readonly<{
@@ -85,8 +81,10 @@ async function createDefaultSecureStore(userDataPath: string): Promise<SecureSto
     // Try to load keytar if available (preferred secure storage)
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
-    const keytar = await import('keytar');
-    if (keytar && typeof keytar.getPassword === 'function') {
+    const keytarModule = await import('keytar');
+    // Handle ESM/CJS interop: keytar may be in .default
+    const keytar = keytarModule.default ?? keytarModule;
+    if (keytar && typeof keytar.getPassword === 'function' && typeof keytar.setPassword === 'function') {
       return {
         getPassword: (s, a) => keytar.getPassword(s, a),
         setPassword: (s, a, p) => keytar.setPassword(s, a, p),
@@ -124,10 +122,21 @@ export class IdentityService {
     if (!token) return { isLoggedIn: false };
 
     try {
-      const profileResp = await (globalThis as any).fetch('https://api.github.com/user', { headers: { Authorization: `token ${token}`, Accept: 'application/json' } });
+      const profileResp = await globalThis.fetch('https://api.github.com/user', { headers: { Authorization: `token ${token}`, Accept: 'application/json' } });
       if (!profileResp.ok) return { isLoggedIn: false };
-      const profile = await profileResp.json();
-      return { isLoggedIn: true, provider: 'github', profile: { login: profile.login, id: profile.id, avatar_url: profile.avatar_url, name: profile.name, email: profile.email } };
+      const profile = await profileResp.json() as Record<string, unknown>;
+      const result: IdentitySession = {
+        isLoggedIn: true,
+        provider: 'github',
+        profile: {
+          login: profile.login as string,
+          ...(profile.id != null ? { id: profile.id as number } : {}),
+          ...(profile.avatar_url != null ? { avatar_url: profile.avatar_url as string } : {}),
+          ...(profile.name != null ? { name: profile.name as string } : {}),
+          ...(profile.email != null ? { email: profile.email as string } : {}),
+        }
+      };
+      return result;
     } catch {
       return { isLoggedIn: false };
     }
@@ -154,7 +163,8 @@ export class IdentityService {
     return new Promise<IdentitySession>((resolve, reject) => {
       const server = createServer(async (req, res) => {
         try {
-          const url = new URL(req.url ?? '', `http://127.0.0.1:${(server.address() as any)?.port ?? 0}`);
+          const address = server.address() as { port: number } | null;
+          const url = new URL(req.url ?? '', `http://127.0.0.1:${address?.port ?? 0}`);
           if (url.pathname !== '/callback') {
             res.writeHead(404);
             res.end('Not found');
@@ -176,7 +186,7 @@ export class IdentityService {
 
           // Exchange code for token
           try {
-            const tokenResp = await (globalThis as any).fetch('https://github.com/login/oauth/access_token', {
+            const tokenResp = await globalThis.fetch('https://github.com/login/oauth/access_token', {
               method: 'POST',
               headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
               body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code })
@@ -188,7 +198,7 @@ export class IdentityService {
               return;
             }
 
-            const tokenJson = await tokenResp.json();
+            const tokenJson = await tokenResp.json() as Record<string, unknown>;
             const accessToken = tokenJson.access_token as string | undefined;
             if (!accessToken) {
               reject(new Error('No access token returned'));
@@ -200,10 +210,21 @@ export class IdentityService {
             await store.setPassword('agentdeck', 'github', accessToken);
 
             // Fetch profile
-            const profileResp = await (globalThis as any).fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
-            const profile = await profileResp.json();
+            const profileResp = await globalThis.fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
+            const profile = await profileResp.json() as Record<string, unknown>;
 
-            resolve({ isLoggedIn: true, provider: 'github', profile: { login: profile.login, id: profile.id, avatar_url: profile.avatar_url, name: profile.name, email: profile.email } });
+            const session: IdentitySession = {
+              isLoggedIn: true,
+              provider: 'github',
+              profile: {
+                login: profile.login as string,
+                ...(profile.id != null ? { id: profile.id as number } : {}),
+                ...(profile.avatar_url != null ? { avatar_url: profile.avatar_url as string } : {}),
+                ...(profile.name != null ? { name: profile.name as string } : {}),
+                ...(profile.email != null ? { email: profile.email as string } : {}),
+              }
+            };
+            resolve(session);
           } catch (err) {
             reject(err);
           } finally {
@@ -216,7 +237,8 @@ export class IdentityService {
       });
 
       server.listen(0, '127.0.0.1', async () => {
-        const port = (server.address() as any).port as number;
+        const address = server.address() as { port: number } | null;
+        const port = address!.port;
         const redirectUri = `http://127.0.0.1:${port}/callback`;
         const authUrl = `https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes.join(' '))}&state=${encodeURIComponent(state)}`;
 
@@ -233,26 +255,36 @@ export class IdentityService {
       const timer = setTimeout(() => {
         try {
           server.close();
-        } catch {}
+        } catch {
+          // server already closed
+        }
         reject(new Error('OAuth flow timed out'));
       }, timeoutMs);
 
-      // Ensure timer cleared on resolution
-      const origResolve = resolve;
-      const origReject = reject;
-      (resolve as any) = (value: IdentitySession) => {
+      // Ensure timer cleared on resolution -- replace resolve/reject with wrapped versions
+      // that clear the timeout timer before calling the original
+      const originalResolve = resolve;
+      const originalReject = reject;
+      // Wrap resolve/reject to clear the timeout timer before calling the original
+      resolve = ((value: IdentitySession) => {
         clearTimeout(timer);
-        origResolve(value);
-      };
-      (reject as any) = (err: any) => {
+        originalResolve(value);
+      }) as typeof resolve;
+      reject = ((err: unknown) => {
         clearTimeout(timer);
-        origReject(err);
-      };
+        originalReject(err);
+      }) as typeof reject;
     });
   }
 
-  async startDeviceFlow(params: { clientId: string; scopes?: string[]; timeoutMs?: number; intervalMs?: number }): Promise<IdentitySession> {
-    const { clientId, scopes = ['read:user', 'user:email'], timeoutMs = 2 * 60 * 1000 } = params;
+  async startDeviceFlow(params: { 
+    clientId: string; 
+    scopes?: string[]; 
+    timeoutMs?: number; 
+    intervalMs?: number;
+    onDeviceCode?: (userCode: string, verificationUri: string, verificationUriComplete?: string) => void 
+  }): Promise<IdentitySession> {
+    const { clientId, scopes = ['read:user', 'user:email'], timeoutMs = 2 * 60 * 1000, onDeviceCode } = params;
 
     if (process.env.TEST_IDENTITY_AUTO === '1') {
       return this.createTestSession();
@@ -260,6 +292,11 @@ export class IdentityService {
 
     const { deviceCode, userCode, verificationUri, verificationUriComplete, pollInterval } =
       await this.initiateDeviceCode(clientId, scopes);
+
+    // Notify UI about the device code BEFORE opening browser
+    if (onDeviceCode) {
+      onDeviceCode(userCode, verificationUri, verificationUriComplete);
+    }
 
     await this.openVerificationUrl(verificationUri, verificationUriComplete, userCode);
 
@@ -274,19 +311,19 @@ export class IdentityService {
   }
 
   private async initiateDeviceCode(clientId: string, scopes: string[]) {
-    const resp = await (globalThis as any).fetch('https://github.com/login/device/code', {
+    const resp = await globalThis.fetch('https://github.com/login/device/code', {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify({ client_id: clientId, scope: scopes.join(' ') })
     });
     if (!resp.ok) throw new Error('Failed to start device flow');
-    const json = await resp.json();
+    const json = await resp.json() as Record<string, unknown>;
     return {
       deviceCode: json.device_code as string,
       userCode: json.user_code as string,
       verificationUri: json.verification_uri as string,
       verificationUriComplete: json.verification_uri_complete as string | undefined,
-      pollInterval: (json.interval ?? 5) * 1000
+      pollInterval: ((json.interval as number) ?? 5) * 1000
     };
   }
 
@@ -296,7 +333,7 @@ export class IdentityService {
     try {
       await this.openUrl(url);
     } catch {
-      // Opening browser is best-effort
+      // Opening browser is best-effort; continue with polling
     }
   }
 
@@ -313,31 +350,53 @@ export class IdentityService {
   }
 
   private async fetchDeviceToken(clientId: string, deviceCode: string): Promise<{ kind: 'success'; session: IdentitySession } | { kind: 'pending' } | { kind: 'slow_down' }> {
-    const resp = await (globalThis as any).fetch('https://github.com/login/oauth/access_token', {
+    const resp = await globalThis.fetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify({ client_id: clientId, device_code: deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' })
     });
-    if (!resp.ok) throw new Error('Device flow token request failed');
-    const json = await resp.json();
+    
+    // Parse error response even for HTTP errors (GitHub returns 400 for authorization_pending, etc.)
+    const json = await resp.json() as Record<string, unknown>;
+    
+    if (!resp.ok) {
+      const errorCode = json.error as string | undefined;
+      if (errorCode === 'authorization_pending') return { kind: 'pending' };
+      if (errorCode === 'slow_down') return { kind: 'slow_down' };
+      if (errorCode === 'access_denied') throw new Error('User denied device authorization');
+      if (errorCode === 'expired_token') throw new Error('Device flow expired');
+      throw new Error(`Device flow token request failed: ${errorCode ?? resp.statusText}`);
+    }
+    
     if (json.access_token) {
       const accessToken = json.access_token as string;
       const store = await this.getSecureStore();
       await store.setPassword('agentdeck', 'github', accessToken);
-      const profileResp = await (globalThis as any).fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
-      const profile = await profileResp.json();
-      return { kind: 'success', session: { isLoggedIn: true, provider: 'github', profile: { login: profile.login, id: profile.id, avatar_url: profile.avatar_url, name: profile.name, email: profile.email } } };
+      const profileResp = await globalThis.fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
+      const profile = await profileResp.json() as Record<string, unknown>;
+      const session: IdentitySession = {
+        isLoggedIn: true,
+        provider: 'github',
+        profile: {
+          login: profile.login as string,
+          ...(profile.id != null ? { id: profile.id as number } : {}),
+          ...(profile.avatar_url != null ? { avatar_url: profile.avatar_url as string } : {}),
+          ...(profile.name != null ? { name: profile.name as string } : {}),
+          ...(profile.email != null ? { email: profile.email as string } : {}),
+        }
+      };
+      return { kind: 'success', session };
     }
     if (json.error === 'authorization_pending') return { kind: 'pending' };
     if (json.error === 'slow_down') return { kind: 'slow_down' };
     if (json.error === 'access_denied') throw new Error('User denied device authorization');
     if (json.error === 'expired_token') throw new Error('Device flow expired');
-    throw new Error(`Device flow error: ${json.error}`);
+    throw new Error('Unexpected device flow response');
   }
 }
 
-export function createIdentityService(userDataPath: string, opts?: { openUrl?: (url: string) => Promise<void>; secureStore?: SecureStore }) {
+export function createIdentityService(userDataPath: string, opts?: { openUrl?: (url: string) => Promise<void>; secureStore?: SecureStore }): IdentityService {
   return new IdentityService(userDataPath, opts);
 }
 
-export default IdentityService;
+

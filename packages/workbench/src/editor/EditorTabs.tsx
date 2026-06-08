@@ -1,4 +1,4 @@
-import type { EditorTab } from '@agentdeck/shared';
+﻿import type { EditorTab } from '@agentdeck/shared';
 import { useMemo } from 'react';
 import { injectNonceCssRule } from '../csp';
 

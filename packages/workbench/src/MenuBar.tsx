@@ -48,7 +48,8 @@ const DEV_PRELOAD_API: AgentDeckPreloadApi = {
   getIdentitySession: async () => ({ isLoggedIn: false }),
   startOAuth: async () => ({ isLoggedIn: false }),
   signOut: async () => ({ isLoggedIn: false }),
-  onIdentityChange: () => () => undefined
+  onIdentityChange: () => () => undefined,
+  onDeviceCode: () => () => undefined
 };
 
 function getPreloadApi(): AgentDeckPreloadApi {

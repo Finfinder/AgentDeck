@@ -1,9 +1,10 @@
+import { config } from 'dotenv';
 import { app, BrowserWindow, dialog, ipcMain, Menu, globalShortcut } from 'electron';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 
-import { applyWorkspaceEdit, bootstrapDesktopServices, createSettingsService, createStartupErrorState, createWorkspaceService, getDiagnostics, markBufferDirty, readEditorFile, showDiff, createIdentityService, type SettingsService, type WorkspaceService, writeEditorFile } from '@agentdeck/services';
+import { applyWorkspaceEdit, bootstrapDesktopServices, createSettingsService, createStartupErrorState, createWorkspaceService, getDiagnostics, markBufferDirty, readEditorFile, showDiff, createIdentityService, type IdentityService, type SettingsService, type WorkspaceService, writeEditorFile } from '@agentdeck/services';
 import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
@@ -28,6 +29,9 @@ function findProjectRoot(startDir: string): string {
 }
 const rootDir = findProjectRoot(dirname(fileURLToPath(import.meta.url)));
 
+// Load .env file from project root
+config({ path: join(rootDir, '.env') });
+
 let startupState: StartupState = {
   status: 'error',
   appVersion: app.getVersion(),
@@ -35,7 +39,7 @@ let startupState: StartupState = {
   message: 'Application services have not been initialized yet.'
 };
 
-function registerIpcHandlers(settingsService: SettingsService, workspaceService: WorkspaceService, mainWindow: BrowserWindow, identityService?: any): void {
+function registerIpcHandlers(settingsService: SettingsService, workspaceService: WorkspaceService, mainWindow: BrowserWindow, identityService?: IdentityService): void {
   ipcMain.handle(IPC_CHANNELS.getStartupState, () => startupState);
   ipcMain.handle(IPC_CHANNELS.getThemeSettings, () => settingsService.readThemeSettings());
   ipcMain.handle(IPC_CHANNELS.setThemeSettings, (_event, value: unknown) => {
@@ -167,24 +171,64 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
 
     ipcMain.handle(IPC_CHANNELS.identityStartOAuth, async (_event, opts: unknown) => {
       try {
+        // ALWAYS start with demo mode (no configuration needed)
+        // Real GitHub OAuth only if GITHUB_CLIENT_ID is set in .env
         const clientId = process.env.GITHUB_CLIENT_ID;
+        
         if (!clientId) {
-          return { isLoggedIn: false, error: 'GitHub OAuth is not configured. Set GITHUB_CLIENT_ID environment variable.' };
+          console.log('[Identity] No GITHUB_CLIENT_ID set. Using demo mode (no configuration needed).');
+          console.log('[Identity] To use real GitHub OAuth, fill in GITHUB_CLIENT_ID in .env file.');
+          
+          // Demo session - works immediately without any configuration
+          const demoSession = {
+            isLoggedIn: true,
+            provider: 'github' as const,
+            profile: {
+              login: 'demo-user',
+              id: 0,
+              avatar_url: '',
+              name: 'Demo Mode (configure .env for real GitHub OAuth)',
+              email: 'demo@agentdeck.local'
+            }
+          };
+          
+          if (!mainWindow.isDestroyed()) mainWindow.webContents.send(IPC_CHANNELS.identityChanged, demoSession);
+          return demoSession;
         }
 
+        // Real GitHub OAuth - device flow (no localhost needed)
+        console.log('[Identity] GITHUB_CLIENT_ID found. Using device flow (no localhost required).');
+        
         const option = (opts as Record<string, unknown> | undefined) ?? undefined;
-        let session;
-        if (option?.method === 'device') {
-          session = await identityService.startDeviceFlow({ clientId, scopes: (option.scopes as string[] | undefined) });
-        } else {
-          session = await identityService.startOAuthLoopback({ clientId, clientSecret: process.env.GITHUB_CLIENT_SECRET ?? '' });
-        }
+        const scopes = option && typeof option === 'object' && 'scopes' in option 
+          ? (option as { scopes?: string[] }).scopes
+          : undefined;
+
+        // Callback to send device code to renderer UI
+        const onDeviceCode = (userCode: string, verificationUri: string, verificationUriComplete?: string) => {
+          if (!mainWindow?.isDestroyed()) {
+            mainWindow.webContents.send(IPC_CHANNELS.identityDeviceCode, {
+              userCode,
+              verificationUri,
+              verificationUriComplete
+            });
+          }
+        };
+
+        const session = await identityService.startDeviceFlow({ 
+          clientId, 
+          scopes: scopes ?? ['read:user', 'user:email'],
+          onDeviceCode
+        });
 
         if (!mainWindow.isDestroyed()) mainWindow.webContents.send(IPC_CHANNELS.identityChanged, session);
         return session;
       } catch (err) {
         console.error('[main] identityStartOAuth failed:', err);
-        return { isLoggedIn: false };
+        return { 
+          isLoggedIn: false, 
+          error: `OAuth failed: ${err instanceof Error ? err.message : String(err)}` 
+        };
       }
     });
 

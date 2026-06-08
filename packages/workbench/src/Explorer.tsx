@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useRef, useState } from 'react';
 import { injectNonceCssRule } from './csp';
 
 import { pathBasename, normalizePathStr } from '@agentdeck/shared';

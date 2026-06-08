@@ -13,6 +13,7 @@ import {
   isStartupState,
   isThemeSettings,
   isWorkspaceEditResult,
+  type IdentitySession,
   isWorkspaceModel,
   isWorkspaceSelection,
   type AgentDeckPreloadApi,
@@ -86,12 +87,21 @@ const api: AgentDeckPreloadApi = {
     ipcRenderer.on(IPC_CHANNELS.fsEvent, listener);
     return () => { ipcRenderer.off(IPC_CHANNELS.fsEvent, listener); };
   },
-  onIdentityChange: (handler: (session: any) => void) => {
+  onIdentityChange: (handler: (session: IdentitySession) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, value: unknown) => {
       if (isIdentitySession(value)) handler(value);
     };
     ipcRenderer.on(IPC_CHANNELS.identityChanged, listener);
     return () => { ipcRenderer.off(IPC_CHANNELS.identityChanged, listener); };
+  },
+  onDeviceCode: (handler: (data: { userCode: string; verificationUri: string; verificationUriComplete?: string }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, data: unknown) => {
+      if (data && typeof data === 'object' && 'userCode' in data && 'verificationUri' in data) {
+        handler(data as { userCode: string; verificationUri: string; verificationUriComplete?: string });
+      }
+    };
+    ipcRenderer.on(IPC_CHANNELS.identityDeviceCode, listener);
+    return () => { ipcRenderer.off(IPC_CHANNELS.identityDeviceCode, listener); };
   },
   readFile: async (filePath: string) => {
     const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.readFile, filePath);

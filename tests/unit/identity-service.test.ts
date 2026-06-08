@@ -8,15 +8,11 @@ import { createIdentityService } from '@agentdeck/services';
 let tmp: string | null = null;
 
 describe('IdentityService (loopback OAuth)', () => {
-  let savedFetch: typeof globalThis.fetch | undefined;
-
   beforeEach(async () => {
-    savedFetch = (globalThis as any).fetch;
     tmp = await mkdtemp(join(tmpdir(), 'agentdeck-identity-'));
   });
 
   afterEach(async () => {
-    if (savedFetch) (globalThis as any).fetch = savedFetch;
     if (tmp) await rm(tmp, { recursive: true, force: true });
     tmp = null;
     vi.restoreAllMocks();
@@ -36,7 +32,8 @@ describe('IdentityService (loopback OAuth)', () => {
     };
 
     // Stub fetch for token exchange and profile
-    (globalThis as any).fetch = vi.fn(async (input: unknown, init?: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: unknown, _init?: unknown) => {
       const url = typeof input === 'string' ? input : (input as Request).url;
       if (url.includes('login/oauth/access_token')) {
         return { ok: true, json: async () => ({ access_token: 'fake-token' }) } as unknown as Response;
@@ -89,7 +86,7 @@ describe('IdentityService (loopback OAuth)', () => {
       deletePassword: vi.fn(async () => true)
     };
 
-    (globalThis as any).fetch = vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) } as unknown as Response));
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({ ok: false, status: 404, json: async () => ({}) } as unknown as Response));
 
     const badOpen = vi.fn(async (url: string) => {
       const u = new URL(url);
@@ -120,10 +117,10 @@ describe('IdentityService (loopback OAuth)', () => {
       deletePassword: vi.fn(async () => true)
     };
 
-    (globalThis as any).fetch = vi.fn(async () => ({
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({
       ok: true,
       json: async () => ({ login: 'testuser', id: 42, avatar_url: 'https://example.com/a.png', name: 'Test', email: 't@e.com' })
-    }));
+    }) as unknown as Response);
 
     const svc = createIdentityService(tmp!, { secureStore });
     const session = await svc.getSession();
@@ -156,11 +153,11 @@ describe('IdentityService (loopback OAuth)', () => {
       deletePassword: vi.fn(async () => true)
     };
 
-    (globalThis as any).fetch = vi.fn(async () => ({
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({
       ok: false,
       status: 401,
       json: async () => ({ message: 'Bad credentials' })
-    }));
+    }) as unknown as Response);
 
     const svc = createIdentityService(tmp!, { secureStore });
     const session = await svc.getSession();
@@ -177,7 +174,7 @@ describe('IdentityService (loopback OAuth)', () => {
       deletePassword: vi.fn(async () => true)
     };
 
-    (globalThis as any).fetch = vi.fn(async () => { throw new Error('Network error'); });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => { throw new Error('Network error'); });
 
     const svc = createIdentityService(tmp!, { secureStore });
     const session = await svc.getSession();

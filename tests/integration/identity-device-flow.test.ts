@@ -30,7 +30,8 @@ describe('IdentityService device flow (integration)', () => {
     let userCompleted = false;
 
     // Mock fetch behavior for device endpoints
-    (globalThis as any).fetch = vi.fn(async (input: unknown, init?: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    globalThis.fetch = vi.fn(async (input: unknown, _init?: unknown) => {
       const url = typeof input === 'string' ? input : (input as Request).url;
       if (url.includes('/login/device/code')) {
         return { ok: true, json: async () => ({ device_code: 'dev-code', user_code: 'USER-CODE', verification_uri: 'https://example.com/verify', interval: 1 }) } as unknown as Response;
@@ -51,7 +52,8 @@ describe('IdentityService device flow (integration)', () => {
       return { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
     });
 
-    const openUrl = vi.fn(async (url: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const openUrl = vi.fn(async (_url: string) => {
       // simulate user visiting verification URI and completing authorization
       userCompleted = true;
     });
@@ -76,7 +78,8 @@ describe('IdentityService device flow (integration)', () => {
     };
 
     let callCount = 0;
-    (globalThis as any).fetch = vi.fn(async (input: unknown, _init?: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: unknown, _init?: unknown) => {
       const url = typeof input === 'string' ? input : (input as Request).url;
       if (url.includes('/login/device/code')) {
         return { ok: true, json: async () => ({ device_code: 'dev-code', user_code: 'UC', verification_uri: 'https://example.com/v', interval: 0 }) } as unknown as Response;
@@ -121,7 +124,8 @@ describe('IdentityService device flow (integration)', () => {
       deletePassword: vi.fn(async () => true)
     };
 
-    (globalThis as any).fetch = vi.fn(async (input: unknown, _init?: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: unknown, _init?: unknown) => {
       const url = typeof input === 'string' ? input : (input as Request).url;
       if (url.includes('/login/device/code')) {
         return { ok: true, json: async () => ({ device_code: 'dc', user_code: 'UC', verification_uri: 'https://example.com/v', interval: 1 }) } as unknown as Response;
@@ -143,7 +147,8 @@ describe('IdentityService device flow (integration)', () => {
       deletePassword: vi.fn(async () => true)
     };
 
-    (globalThis as any).fetch = vi.fn(async (input: unknown, _init?: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: unknown, _init?: unknown) => {
       const url = typeof input === 'string' ? input : (input as Request).url;
       if (url.includes('/login/device/code')) {
         return { ok: true, json: async () => ({ device_code: 'dc', user_code: 'UC', verification_uri: 'https://example.com/v', interval: 1 }) } as unknown as Response;
@@ -165,7 +170,8 @@ describe('IdentityService device flow (integration)', () => {
       deletePassword: vi.fn(async () => true)
     };
 
-    (globalThis as any).fetch = vi.fn(async (input: unknown, _init?: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: unknown, _init?: unknown) => {
       const url = typeof input === 'string' ? input : (input as Request).url;
       if (url.includes('/login/device/code')) {
         return { ok: true, json: async () => ({ device_code: 'dc', user_code: 'UC', verification_uri: 'https://example.com/v', interval: 1 }) } as unknown as Response;

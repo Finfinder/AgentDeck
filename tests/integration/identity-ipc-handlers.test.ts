@@ -33,15 +33,11 @@ function createMockSecureStore(): MockSecureStore {
 }
 
 describe('Identity IPC handlers (integration)', () => {
-  let savedFetch: typeof globalThis.fetch | undefined;
-
   beforeEach(async () => {
-    savedFetch = (globalThis as any).fetch;
     tmpDir = await mkdtemp(join(tmpdir(), 'agentdeck-ipc-'));
   });
 
   afterEach(async () => {
-    if (savedFetch) (globalThis as any).fetch = savedFetch;
     if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
     tmpDir = null;
     vi.restoreAllMocks();
@@ -52,10 +48,10 @@ describe('Identity IPC handlers (integration)', () => {
       const secureStore = createMockSecureStore();
       secureStore._store['agentdeck:github'] = 'valid-token';
 
-      (globalThis as any).fetch = vi.fn(async () => ({
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({
         ok: true,
         json: async () => ({ login: 'ipc-user', id: 10, avatar_url: 'https://example.com/a.png' })
-      }));
+      }) as unknown as Response);
 
       const svc = createIdentityService(tmpDir!, { secureStore });
       const session = await svc.getSession();
@@ -79,9 +75,9 @@ describe('Identity IPC handlers (integration)', () => {
       const secureStore = createMockSecureStore();
       secureStore._store['agentdeck:github'] = 'bad-token';
 
-      (globalThis as any).fetch = vi.fn(async () => ({
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({
         ok: false, status: 401, json: async () => ({})
-      }));
+      }) as unknown as Response);
 
       const svc = createIdentityService(tmpDir!, { secureStore });
       const session = await svc.getSession();
@@ -93,7 +89,7 @@ describe('Identity IPC handlers (integration)', () => {
     it('returns fallback when getSession throws unexpectedly', async () => {
       const secureStore = createMockSecureStore();
       // Don't mock fetch — let it fail with no network
-      (globalThis as any).fetch = vi.fn(async () => { throw new Error('ECONNREFUSED'); });
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () => { throw new Error('ECONNREFUSED'); });
 
       const svc = createIdentityService(tmpDir!, { secureStore });
       const session = await svc.getSession();
@@ -140,7 +136,7 @@ describe('Identity IPC handlers (integration)', () => {
     it('returns session after successful OAuth loopback', async () => {
       const secureStore = createMockSecureStore();
 
-      (globalThis as any).fetch = vi.fn(async (input: unknown) => {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: unknown) => {
         const url = typeof input === 'string' ? input : '';
         if (url.includes('login/oauth/access_token')) {
           return { ok: true, json: async () => ({ access_token: 'new-token' }) } as unknown as Response;
@@ -177,7 +173,7 @@ describe('Identity IPC handlers (integration)', () => {
     it('returns not-logged-in when OAuth fails', async () => {
       const secureStore = createMockSecureStore();
 
-      (globalThis as any).fetch = vi.fn(async () => ({ ok: false, status: 400, json: async () => ({}) }));
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({ ok: false, status: 400, json: async () => ({}) }) as unknown as Response);
 
       const openUrl = vi.fn(async (url: string) => {
         const u = new URL(url);
@@ -210,7 +206,7 @@ describe('Identity IPC handlers (integration)', () => {
       const secureStore = createMockSecureStore();
       let completed = false;
 
-      (globalThis as any).fetch = vi.fn(async (input: unknown) => {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: unknown) => {
         const url = typeof input === 'string' ? input : '';
         if (url.includes('/login/device/code')) {
           return { ok: true, json: async () => ({ device_code: 'dc', user_code: 'UC', verification_uri: 'https://example.com/v', interval: 1 }) } as unknown as Response;
