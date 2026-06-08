@@ -334,8 +334,8 @@ export class IdentityService {
   private async initiateDeviceCode(clientId: string, scopes: string[]) {
     const resp = await globalThis.fetch('https://github.com/login/device/code', {
       method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: clientId, scope: scopes.join(' ') })
+      headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: clientId, scope: scopes.join(' ') }).toString()
     });
     if (!resp.ok) throw new Error('Failed to start device flow');
     const json = await resp.json() as Record<string, unknown>;
@@ -373,8 +373,8 @@ export class IdentityService {
   private async fetchDeviceToken(clientId: string, deviceCode: string): Promise<{ kind: 'success'; session: IdentitySession } | { kind: 'pending' } | { kind: 'slow_down' }> {
     const resp = await globalThis.fetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: clientId, device_code: deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' })
+      headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: clientId, device_code: deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' }).toString()
     });
     
     // Parse error response even for HTTP errors (GitHub returns 400 for authorization_pending, etc.)
