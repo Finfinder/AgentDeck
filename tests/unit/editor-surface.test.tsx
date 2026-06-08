@@ -28,6 +28,10 @@ function mockAgent(overrides: Partial<AgentDeckPreloadApi> = {}): AgentDeckPrelo
     showDiff: vi.fn().mockResolvedValue({ status: 'ok', diff: '' }),
     showSaveDialog: vi.fn().mockResolvedValue(null),
     toggleDevTools: vi.fn().mockResolvedValue(undefined),
+    getIdentitySession: vi.fn().mockResolvedValue({ isLoggedIn: false }),
+    startOAuth: vi.fn().mockResolvedValue({ isLoggedIn: false }),
+    signOut: vi.fn().mockResolvedValue({ isLoggedIn: false }),
+    onIdentityChange: vi.fn().mockReturnValue(() => undefined),
     ...overrides
   };
 }
@@ -282,7 +286,7 @@ describe('EditorSurface', () => {
 
     // Simulate content change in editor to populate contentMap
     const editor = screen.getByRole('textbox', { name: 'Editor' });
-    await fireEvent.change(editor, { target: { value: 'modified content' } });
+    fireEvent.change(editor, { target: { value: 'modified content' } });
 
     // Dispatch save-all event
     globalThis.dispatchEvent(new CustomEvent('agentdeck:save-all'));

@@ -106,3 +106,6 @@ export {
   showDiff,
   writeEditorFile
 } from './editor-service';
+export { createIdentityService, IdentityService } from './identity-service';
+export type { SecureStore, SecureStoreWarning, IdentityServiceOptions } from './identity-service';
+export type { IdentitySession } from '@agentdeck/shared';

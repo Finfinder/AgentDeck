@@ -15,7 +15,7 @@ function pathExtname(p: string): string {
   return normalized.slice(idx);
 }
 
-// Simple hash for tab IDs — works without node:crypto.
+// Simple hash for tab IDs - works without node:crypto.
 function simpleHash(str: string): string {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -165,7 +165,7 @@ export async function writeEditorFile(filePath: string, content: string): Promis
         };
       }
     } catch {
-      // File may have been deleted on disk � allow write (recreate).
+      // File may have been deleted on disk - allow write (recreate).
     }
   }
 
@@ -316,13 +316,13 @@ function generateUnifiedDiff(original: string, modified: string): string {
   return diffLines.join('\n');
 }
 
-// Minimal diagnostics stub � returns empty array.
+// Minimal diagnostics stub - returns empty array.
 // LSP integration will replace this in a later phase.
 export async function getDiagnostics(): Promise<readonly EditorDiagnostic[]> {
   return [];
 }
 
-// Clear all buffers � useful for testing.
+// Clear all buffers - useful for testing.
 export function clearBuffers(): void {
   editorBuffers.clear();
 }

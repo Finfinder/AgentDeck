@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
+    "keytar": "^7.9.0",
     "monaco-editor": "^0.55.1",
     "react": "19.2.7",
     "react-dom": "19.2.7"
@@ -50,6 +51,7 @@
     "@vitejs/plugin-react": "6.0.2",
     "@vitest/coverage-v8": "4.1.8",
     "dependency-cruiser": "17.4.3",
+    "dotenv": "^17.4.2",
     "electron": "42.3.3",
     "electron-playwright-helpers": "^2.1.0",
     "electron-vite": "6.0.0-beta.1",

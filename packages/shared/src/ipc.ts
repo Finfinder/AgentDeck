@@ -17,7 +17,13 @@ export const IPC_CHANNELS = {
   applyWorkspaceEdit: 'agentdeck:v1:editor:apply-workspace-edit',
   showDiff: 'agentdeck:v1:editor:show-diff',
   showSaveDialog: 'agentdeck:v1:dialog:show-save',
-  toggleDevTools: 'agentdeck:v1:devtools:toggle'
+  toggleDevTools: 'agentdeck:v1:devtools:toggle',
+  identityGetSession: 'agentdeck:v1:identity:get-session',
+  identityStartOAuth: 'agentdeck:v1:identity:start-oauth',
+  identitySignOut: 'agentdeck:v1:identity:sign-out',
+  identityChanged: 'agentdeck:v1:identity:changed',
+  identityDeviceCode: 'agentdeck:v1:identity:device-code',
+  identityWarning: 'agentdeck:v1:identity:warning'
 } as const satisfies Record<string, string>;
 
 export type ThemePreference = 'dark' | 'light';
@@ -245,8 +251,33 @@ export type DiffInput = Readonly<{
 export type DiffResult =
   | Readonly<{ status: 'ok'; diff: string }>
   | Readonly<{ status: 'error'; code: 'UNKNOWN'; message: string }>;
+
+export type IdentitySession = Readonly<{
+  isLoggedIn: boolean;
+  provider?: 'github';
+  profile?: Readonly<{
+    login: string;
+    id?: number;
+    avatar_url?: string;
+    name?: string;
+    email?: string | null;
+  }>;
+  error?: string;
+}>;
+export type IdentitySessionWarning = Readonly<{
+  type: 'FALLBACK_FILE_STORE';
+  reason: string;
+  path: string;
+}>;
+
 export type AgentDeckPreloadApi = Readonly<{
   getStartupState: () => Promise<StartupState>;
+  getIdentitySession: () => Promise<IdentitySession>;
+  startOAuth: (opts?: unknown) => Promise<IdentitySession>;
+  signOut: () => Promise<IdentitySession>;
+  onIdentityChange?: (handler: (session: IdentitySession) => void) => (() => void) | undefined;
+  onDeviceCode?: (handler: (data: { userCode: string; verificationUri: string; verificationUriComplete?: string }) => void) => (() => void) | undefined;
+  onIdentityWarning?: (handler: (warning: IdentitySessionWarning) => void) => (() => void) | undefined;
   getThemeSettings: () => Promise<ThemeSettings>;
   setThemeSettings: (settings: ThemeSettings) => Promise<ThemeSettings>;
   selectWorkspaceEntry: (request: WorkspaceOpenRequest) => Promise<WorkspaceSelection>;
@@ -294,6 +325,21 @@ export function isString(value: unknown): value is string {
 
 export function isThemeSettings(value: unknown): value is ThemeSettings {
   return isRecord(value) && (value.theme === 'dark' || value.theme === 'light');
+}
+
+export function isIdentitySession(value: unknown): value is IdentitySession {
+  if (!isRecord(value)) return false;
+  if (typeof value.isLoggedIn !== 'boolean') return false;
+  if (value.isLoggedIn) {
+    const p = value.profile;
+    if (!isRecord(p) || typeof p.login !== 'string') return false;
+  }
+  return true;
+}
+
+export function isIdentitySessionWarning(value: unknown): value is IdentitySessionWarning {
+  if (!isRecord(value)) return false;
+  return value.type === 'FALLBACK_FILE_STORE' && typeof value.reason === 'string' && typeof value.path === 'string';
 }
 
 export function isWorkspaceOpenRequest(value: unknown): value is WorkspaceOpenRequest {

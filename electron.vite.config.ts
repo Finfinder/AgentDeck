@@ -119,7 +119,12 @@ export default defineConfig({
       // the app can load Monaco assets locally (avoids a runtime CDN dependency).
       monacoLocalAssetsPlugin()
     ],
-    resolve: { alias },
+    resolve: {
+      alias: {
+        ...alias,
+        keytar: resolve(rootDir, 'packages/workbench/src/keytar-mock.ts')
+      }
+    },
     build: {
       emptyOutDir: true,
       outDir: resolve(rootDir, 'out/renderer'),

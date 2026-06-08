@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { DEFAULT_THEME_SETTINGS, type AgentDeckPreloadApi, type EditorDiagnostic, type FsChangeEvent, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
+import { DEFAULT_THEME_SETTINGS, isIdentitySession, type IdentitySession, type AgentDeckPreloadApi, type EditorDiagnostic, type FsChangeEvent, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
 
 import { EditorSurface } from './editor';
 import { useEditorStore } from './editor/useEditorStore';
@@ -35,10 +35,164 @@ const DEV_PRELOAD_API: AgentDeckPreloadApi = {
   showDiff: async () => ({ status: 'error', code: 'UNKNOWN', message: 'Dev mode - no diff.' }),
   showSaveDialog: async () => null,
   toggleDevTools: async () => undefined
+  ,
+  // Identity dev stubs
+  getIdentitySession: async () => ({ isLoggedIn: false }),
+  startOAuth: async () => ({ isLoggedIn: false }),
+  signOut: async () => ({ isLoggedIn: false }),
+  onIdentityChange: () => () => undefined,
+  onDeviceCode: () => () => undefined
 };
 
 function getPreloadApi(): AgentDeckPreloadApi {
   return (globalThis as unknown as { agentDeck?: AgentDeckPreloadApi }).agentDeck ?? DEV_PRELOAD_API;
+}
+
+interface IdentityMenuProps {
+  identity: IdentitySession;
+  agent: AgentDeckPreloadApi;
+  menuRef: React.RefObject<HTMLDivElement | null>;
+  readonly isOpen: boolean;
+  readonly onToggle: () => void;
+  readonly onClose: () => void;
+  readonly deviceCode: { userCode: string; verificationUri: string; verificationUriComplete?: string } | null;
+  readonly onClearDeviceCode: () => void;
+}
+
+function IdentityMenu({ identity, agent, menuRef, isOpen, onToggle, onClose, deviceCode, onClearDeviceCode }: Readonly<IdentityMenuProps>) {
+  const [copied, setCopied] = useState(false);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleCopyCode = useCallback(async () => {
+    if (!deviceCode?.userCode) return;
+    try {
+      await navigator.clipboard.writeText(deviceCode.userCode);
+      setCopied(true);
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard write failed - silently ignore
+    }
+  }, [deviceCode?.userCode]);
+
+  useEffect(() => {
+    return () => { if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current); };
+  }, []);
+  
+  // Determine dropdown content based on state
+  let dropdownContent: React.ReactNode;
+  
+  if (identity.error) {
+    dropdownContent = <div className="identity-dropdown-error">{identity.error}</div>;
+  } else if (deviceCode) {
+    dropdownContent = (
+      <>
+        <div className="identity-dropdown-header">
+          <div className="identity-dropdown-info">
+            <span className="identity-dropdown-login">Device Authorization</span>
+            <span className="identity-dropdown-email">Enter this code at GitHub:</span>
+          </div>
+        </div>
+        <div className="identity-dropdown-divider" />
+        <div className="identity-device-code" style={{ 
+          padding: '12px', 
+          textAlign: 'center',
+          fontFamily: 'monospace',
+          fontSize: '24px',
+          fontWeight: 'bold',
+          letterSpacing: '2px',
+          backgroundColor: '#1e1e1e',
+          borderRadius: '4px',
+          margin: '8px'
+        }}>
+          {deviceCode.userCode}
+        </div>
+        <div style={{ display: 'flex', gap: '8px', padding: '0 12px 8px', justifyContent: 'center' }}>
+          <button
+            className="identity-dropdown-item"
+            role="menuitem"
+            onClick={handleCopyCode}
+            style={{ fontSize: '12px', padding: '4px 12px' }}
+          >
+            {copied ? '✓ Copied!' : '📋 Copy code'}
+          </button>
+        </div>
+        <div style={{ padding: '0 12px 12px', fontSize: '12px', color: '#888' }}>
+          Or visit: <a href={deviceCode.verificationUriComplete || deviceCode.verificationUri} target="_blank" rel="noreferrer">{deviceCode.verificationUriComplete ? 'Open GitHub' : deviceCode.verificationUri}</a>
+        </div>
+        <button
+          className="identity-dropdown-item"
+          role="menuitem"
+          onClick={() => { 
+            if (onClearDeviceCode) onClearDeviceCode();
+            onClose(); 
+          }}
+        >
+          Cancel
+        </button>
+      </>
+    );
+  } else if (identity.isLoggedIn) {
+    dropdownContent = (
+      <>
+        <div className="identity-dropdown-header">
+          {identity.profile?.avatar_url && (
+            <img className="identity-dropdown-avatar" src={identity.profile.avatar_url} alt="" width={32} height={32} />
+          )}
+          <div className="identity-dropdown-info">
+            <span className="identity-dropdown-login">{identity.profile?.login}</span>
+            {identity.profile?.email && (
+              <span className="identity-dropdown-email">{identity.profile.email}</span>
+            )}
+          </div>
+        </div>
+        <div className="identity-dropdown-divider" />
+        <button
+          className="identity-dropdown-item"
+          role="menuitem"
+          onClick={async () => { try { await agent.signOut(); onClose(); } catch { /* noop */ } }}
+        >
+          Sign out
+        </button>
+      </>
+    );
+  } else {
+    dropdownContent = (
+      <button
+        className="identity-dropdown-item"
+        role="menuitem"
+        onClick={async () => { try { await agent.startOAuth(); onClose(); } catch { /* noop */ } }}
+      >
+        Sign in with GitHub
+      </button>
+    );
+  }
+
+  return (
+    <div className="activity-identity" ref={menuRef}>
+      <button
+        className={`activity-button activity-identity-button ${isOpen ? 'active' : ''}`}
+        type="button"
+        aria-label={identity.isLoggedIn ? `Logged in as ${identity.profile?.login}` : 'Not logged in'}
+        title={identity.isLoggedIn ? `Logged in as ${identity.profile?.login}` : 'Sign in'}
+        onClick={onToggle}
+      >
+        {identity.isLoggedIn && identity.profile?.avatar_url ? (
+          <img className="activity-avatar" src={identity.profile.avatar_url} alt="" width={20} height={20} />
+        ) : (
+          <svg className="activity-identity-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <circle cx="8" cy="5" r="3" fill="none" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+        )}
+      </button>
+      {isOpen && (
+        <div className="identity-dropdown" role="menu">
+          {dropdownContent}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function App() {
@@ -59,6 +213,10 @@ export function App() {
   const editorStore = useEditorStore();
   const [diagnostics, setDiagnostics] = useState<readonly EditorDiagnostic[]>([]);
   const [ipcDiagnostics, setIpcDiagnostics] = useState<readonly EditorDiagnostic[]>([]);
+  const [identity, setIdentity] = useState<IdentitySession>({ isLoggedIn: false });
+  const [deviceCode, setDeviceCode] = useState<{ userCode: string; verificationUri: string; verificationUriComplete?: string } | null>(null);
+  const [identityMenuOpen, setIdentityMenuOpen] = useState(false);
+  const identityMenuRef = useRef<HTMLDivElement | null>(null);
 
   const allDiagnostics = useMemo(
     () => [...ipcDiagnostics, ...diagnostics],
@@ -101,6 +259,74 @@ export function App() {
       clearTimeout(timer);
     };
   }, [agent]);
+
+  // Identity: initial fetch + subscribe to changes
+  useEffect(() => {
+    let active = true;
+
+    (async () => {
+      try {
+        if (typeof agent.getIdentitySession === 'function') {
+          const sess = await agent.getIdentitySession();
+          if (active && isIdentitySession(sess)) setIdentity(sess);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+
+    let dispose: (() => void) | undefined;
+    if (typeof agent.onIdentityChange === 'function') {
+      dispose = agent.onIdentityChange((s) => {
+        if (isIdentitySession(s)) {
+          setIdentity(s);
+          // Clear device code when user logs in
+          if (s.isLoggedIn) setDeviceCode(null);
+        }
+      });
+    }
+
+    return () => { active = false; if (dispose) dispose(); };
+  }, [agent]);
+
+  // Device flow: subscribe to device code events
+  useEffect(() => {
+    let active = true;
+
+    if (typeof agent.onDeviceCode === 'function') {
+      const dispose = agent.onDeviceCode((data) => {
+        if (active && data?.userCode) {
+          // exactOptionalPropertyTypes: true � don't set property if null/undefined
+          if (data.verificationUriComplete == null) {
+            setDeviceCode({
+              userCode: data.userCode,
+              verificationUri: data.verificationUri
+            });
+          } else {
+            setDeviceCode({
+              userCode: data.userCode,
+              verificationUri: data.verificationUri,
+              verificationUriComplete: data.verificationUriComplete
+            });
+          }
+        }
+      });
+
+      return () => { active = false; if (dispose) dispose(); };
+    }
+  }, [agent]);
+
+  // Close identity menu when clicking outside
+  useEffect(() => {
+    if (!identityMenuOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (identityMenuRef.current && !identityMenuRef.current.contains(e.target as Node)) {
+        setIdentityMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [identityMenuOpen]);
 
   // ?? File system watcher - track external changes ????????????????
   useEffect(() => {
@@ -283,6 +509,17 @@ export function App() {
         <button className="activity-button" type="button" aria-label="Source control" title="Source control" disabled>
           SC
         </button>
+        <div className="activity-bar-spacer" />
+        <IdentityMenu
+          identity={identity}
+          agent={agent}
+          menuRef={identityMenuRef}
+          isOpen={identityMenuOpen}
+          onToggle={() => setIdentityMenuOpen(v => !v)}
+          onClose={() => setIdentityMenuOpen(false)}
+          deviceCode={deviceCode}
+          onClearDeviceCode={() => setDeviceCode(null)}
+        />
       </nav>
 
       <aside className="side-bar" aria-label={activePanel === 'search' ? 'Search' : 'Explorer'}>
@@ -401,6 +638,34 @@ export function App() {
           <button type="button" onClick={() => updateTheme('light')} aria-pressed={themeSettings.theme === 'light'}>
             Light
           </button>
+        </div>
+        <div className="identity-area" aria-label="Identity">
+          {identity.isLoggedIn ? (
+            <button
+              type="button"
+              className="identity-status logged-in"
+              onClick={() => setIdentityMenuOpen(v => !v)}
+              aria-label={`Logged in as ${identity.profile?.login}`}
+            >
+              {identity.profile?.avatar_url ? (
+                <img className="avatar" src={identity.profile.avatar_url} alt={`${identity.profile.login} avatar`} width={18} height={18} />
+              ) : null}
+              <span className="login">{identity.profile?.login ?? 'user'}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="identity-status logged-out"
+              onClick={() => setIdentityMenuOpen(v => !v)}
+              aria-label="Sign in"
+            >
+              <svg className="identity-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <circle cx="8" cy="5" r="3" fill="none" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+              <span>Sign in</span>
+            </button>
+          )}
         </div>
       </footer>
     </main>

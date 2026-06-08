@@ -54,6 +54,10 @@ function createMockAgent(overrides: Partial<AgentDeckPreloadApi> = {}): AgentDec
     showDiff: vi.fn().mockResolvedValue({ status: 'ok', diff: '' }),
     showSaveDialog: vi.fn().mockResolvedValue(null),
     toggleDevTools: vi.fn().mockResolvedValue(undefined),
+    getIdentitySession: vi.fn().mockResolvedValue({ isLoggedIn: false }),
+    startOAuth: vi.fn().mockResolvedValue({ isLoggedIn: false }),
+    signOut: vi.fn().mockResolvedValue({ isLoggedIn: false }),
+    onIdentityChange: vi.fn().mockReturnValue(() => undefined),
     ...overrides
   };
 }

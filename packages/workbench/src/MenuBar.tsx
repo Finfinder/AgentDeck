@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { AgentDeckPreloadApi, EditorTab, RecentWorkspace, WorkspaceOpenKind } from '@agentdeck/shared';
 
@@ -20,34 +20,6 @@ interface MenuBarProps {
   readonly onSave: () => void;
   readonly onSaveAs: () => void;
   readonly onSaveAll: () => void;
-}
-
-const DEV_PRELOAD_API: AgentDeckPreloadApi = {
-  getStartupState: async () => ({ status: 'ready', appVersion: '0.1.0', services: [] }),
-  versions: { chrome: 'dev', electron: 'dev', node: 'dev' },
-  getThemeSettings: async () => ({ theme: 'dark' as const }),
-  setThemeSettings: async () => ({} as never),
-  selectWorkspaceEntry: async () => ({ status: 'cancelled' as const }),
-  openWorkspace: async () => ({ status: 'error' as const, code: 'FILE_NOT_FOUND' as const, message: 'Dev mode' }),
-  listDirectory: async () => ({ path: '', entries: [] }),
-  searchFiles: async () => [],
-  getRecentWorkspaces: async () => [],
-  onFsEvent: () => () => undefined,
-  readFile: async () => ({ status: 'error' as const, code: 'FILE_NOT_FOUND' as const, message: 'Dev mode' }),
-  writeFile: async () => ({ status: 'error' as const, code: 'ACCESS_DENIED' as const, message: 'Dev mode' }),
-  markBufferDirty: async () => undefined,
-  deleteFile: async () => ({ status: 'error' as const, code: 'ACCESS_DENIED' as const, message: 'Dev mode' }),
-  renameFile: async () => ({ status: 'error' as const, code: 'ACCESS_DENIED' as const, message: 'Dev mode' }),
-  getEditorDiagnostics: async () => [],
-  applyWorkspaceEdit: async () => ({ status: 'error' as const, code: 'UNKNOWN' as const, message: 'Dev mode' }),
-  showDiff: async () => ({ status: 'error' as const, code: 'UNKNOWN' as const, message: 'Dev mode' }),
-  showSaveDialog: async () => null,
-  toggleDevTools: async () => undefined
-};
-
-function getPreloadApi(): AgentDeckPreloadApi {
-  const preloadApi = (globalThis as unknown as { agentDeck?: AgentDeckPreloadApi }).agentDeck;
-  return preloadApi ?? DEV_PRELOAD_API;
 }
 
 function MenuDropdown({ items, onClose }: { readonly items: readonly MenuItem[]; readonly onClose: () => void }) {
@@ -122,7 +94,7 @@ function MenuButton({ label, items }: { readonly label: string; readonly items: 
 }
 
 export function MenuBar({ agent, editorTabs, onOpenWorkspace, onOpenWorkspaceDirect, onSave, onSaveAs, onSaveAll }: MenuBarProps) {
-  const preloadApi = useMemo(() => agent ?? getPreloadApi(), [agent]);
+  const preloadApi = agent;
   const [recentWorkspaces, setRecentWorkspaces] = useState<readonly RecentWorkspace[]>([]);
 
   const refreshRecents = useCallback(() => {
