@@ -6,6 +6,17 @@ import { exec } from 'node:child_process';
 
 import type { IdentitySession } from '@agentdeck/shared';
 
+function buildProfile(profile: Record<string, unknown>): NonNullable<IdentitySession['profile']> {
+  const login = profile.login;
+  if (typeof login !== 'string') throw new Error('Missing login in GitHub profile');
+  const result: Record<string, unknown> = { login };
+  if (profile.id != null) result.id = profile.id;
+  if (profile.avatar_url != null) result.avatar_url = profile.avatar_url;
+  if (profile.name != null) result.name = profile.name;
+  if (profile.email != null) result.email = profile.email;
+  return result as NonNullable<IdentitySession['profile']>;
+}
+
 export type GithubProfile = Readonly<{
   login: string;
   id?: number;
@@ -125,18 +136,7 @@ export class IdentityService {
       const profileResp = await globalThis.fetch('https://api.github.com/user', { headers: { Authorization: `token ${token}`, Accept: 'application/json' } });
       if (!profileResp.ok) return { isLoggedIn: false };
       const profile = await profileResp.json() as Record<string, unknown>;
-      const result: IdentitySession = {
-        isLoggedIn: true,
-        provider: 'github',
-        profile: {
-          login: profile.login as string,
-          ...(profile.id != null ? { id: profile.id as number } : {}),
-          ...(profile.avatar_url != null ? { avatar_url: profile.avatar_url as string } : {}),
-          ...(profile.name != null ? { name: profile.name as string } : {}),
-          ...(profile.email != null ? { email: profile.email as string } : {}),
-        }
-      };
-      return result;
+      return { isLoggedIn: true, provider: 'github', profile: buildProfile(profile) };
     } catch {
       return { isLoggedIn: false };
     }
@@ -213,17 +213,7 @@ export class IdentityService {
             const profileResp = await globalThis.fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
             const profile = await profileResp.json() as Record<string, unknown>;
 
-            const session: IdentitySession = {
-              isLoggedIn: true,
-              provider: 'github',
-              profile: {
-                login: profile.login as string,
-                ...(profile.id != null ? { id: profile.id as number } : {}),
-                ...(profile.avatar_url != null ? { avatar_url: profile.avatar_url as string } : {}),
-                ...(profile.name != null ? { name: profile.name as string } : {}),
-                ...(profile.email != null ? { email: profile.email as string } : {}),
-              }
-            };
+            const session: IdentitySession = { isLoggedIn: true, provider: 'github', profile: buildProfile(profile) };
             resolve(session);
           } catch (err) {
             reject(err);
@@ -360,38 +350,33 @@ export class IdentityService {
     const json = await resp.json() as Record<string, unknown>;
     
     if (!resp.ok) {
-      const errorCode = json.error as string | undefined;
-      if (errorCode === 'authorization_pending') return { kind: 'pending' };
-      if (errorCode === 'slow_down') return { kind: 'slow_down' };
-      if (errorCode === 'access_denied') throw new Error('User denied device authorization');
-      if (errorCode === 'expired_token') throw new Error('Device flow expired');
-      throw new Error(`Device flow token request failed: ${errorCode ?? resp.statusText}`);
+      return this.handleDeviceTokenError(json);
     }
     
     if (json.access_token) {
-      const accessToken = json.access_token as string;
-      const store = await this.getSecureStore();
-      await store.setPassword('agentdeck', 'github', accessToken);
-      const profileResp = await globalThis.fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
-      const profile = await profileResp.json() as Record<string, unknown>;
-      const session: IdentitySession = {
-        isLoggedIn: true,
-        provider: 'github',
-        profile: {
-          login: profile.login as string,
-          ...(profile.id != null ? { id: profile.id as number } : {}),
-          ...(profile.avatar_url != null ? { avatar_url: profile.avatar_url as string } : {}),
-          ...(profile.name != null ? { name: profile.name as string } : {}),
-          ...(profile.email != null ? { email: profile.email as string } : {}),
-        }
-      };
-      return { kind: 'success', session };
+      return this.handleDeviceTokenSuccess(json);
     }
-    if (json.error === 'authorization_pending') return { kind: 'pending' };
-    if (json.error === 'slow_down') return { kind: 'slow_down' };
-    if (json.error === 'access_denied') throw new Error('User denied device authorization');
-    if (json.error === 'expired_token') throw new Error('Device flow expired');
-    throw new Error('Unexpected device flow response');
+    
+    return this.handleDeviceTokenError(json);
+  }
+
+  private handleDeviceTokenError(json: Record<string, unknown>): { kind: 'pending' } | { kind: 'slow_down' } {
+    const errorCode = json.error as string | undefined;
+    if (errorCode === 'authorization_pending') return { kind: 'pending' };
+    if (errorCode === 'slow_down') return { kind: 'slow_down' };
+    if (errorCode === 'access_denied') throw new Error('User denied device authorization');
+    if (errorCode === 'expired_token') throw new Error('Device flow expired');
+    throw new Error(`Device flow token request failed: ${errorCode ?? 'unknown'}`);
+  }
+
+  private async handleDeviceTokenSuccess(json: Record<string, unknown>): Promise<{ kind: 'success'; session: IdentitySession }> {
+    const accessToken = json.access_token as string;
+    const store = await this.getSecureStore();
+    await store.setPassword('agentdeck', 'github', accessToken);
+    const profileResp = await globalThis.fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
+    const profile = await profileResp.json() as Record<string, unknown>;
+    const session: IdentitySession = { isLoggedIn: true, provider: 'github', profile: buildProfile(profile) };
+    return { kind: 'success', session };
   }
 }
 

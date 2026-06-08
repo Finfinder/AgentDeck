@@ -15,7 +15,7 @@ import { isIdentitySession, type IdentitySession } from '@agentdeck/shared';
  * identity service methods and validating the session shapes.
  */
 
-let tmpDir: string | null = null;
+let tmpDir = '';
 
 interface MockSecureStore extends SecureStore {
   _store: Record<string, string>;
@@ -39,7 +39,7 @@ describe('Identity IPC handlers (integration)', () => {
 
   afterEach(async () => {
     if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
-    tmpDir = null;
+    tmpDir = '';
     vi.restoreAllMocks();
   });
 
@@ -53,7 +53,7 @@ describe('Identity IPC handlers (integration)', () => {
         json: async () => ({ login: 'ipc-user', id: 10, avatar_url: 'https://example.com/a.png' })
       }) as unknown as Response);
 
-      const svc = createIdentityService(tmpDir!, { secureStore });
+      const svc = createIdentityService(tmpDir, { secureStore });
       const session = await svc.getSession();
 
       // Simulate what preload does: validate with isIdentitySession
@@ -64,7 +64,7 @@ describe('Identity IPC handlers (integration)', () => {
 
     it('returns not-logged-in when no token', async () => {
       const secureStore = createMockSecureStore();
-      const svc = createIdentityService(tmpDir!, { secureStore });
+      const svc = createIdentityService(tmpDir, { secureStore });
       const session = await svc.getSession();
 
       expect(isIdentitySession(session)).toBe(true);
@@ -79,7 +79,7 @@ describe('Identity IPC handlers (integration)', () => {
         ok: false, status: 401, json: async () => ({})
       }) as unknown as Response);
 
-      const svc = createIdentityService(tmpDir!, { secureStore });
+      const svc = createIdentityService(tmpDir, { secureStore });
       const session = await svc.getSession();
 
       expect(isIdentitySession(session)).toBe(true);
@@ -91,7 +91,7 @@ describe('Identity IPC handlers (integration)', () => {
       // Don't mock fetch — let it fail with no network
       vi.spyOn(globalThis, 'fetch').mockImplementation(async () => { throw new Error('ECONNREFUSED'); });
 
-      const svc = createIdentityService(tmpDir!, { secureStore });
+      const svc = createIdentityService(tmpDir, { secureStore });
       const session = await svc.getSession();
 
       // Should gracefully return not logged in
@@ -104,7 +104,7 @@ describe('Identity IPC handlers (integration)', () => {
       const secureStore = createMockSecureStore();
       secureStore._store['agentdeck:github'] = 'token-to-delete';
 
-      const svc = createIdentityService(tmpDir!, { secureStore });
+      const svc = createIdentityService(tmpDir, { secureStore });
       await svc.signOut();
 
       // Token should be deleted
@@ -121,7 +121,7 @@ describe('Identity IPC handlers (integration)', () => {
       const secureStore = createMockSecureStore();
       secureStore.deletePassword = vi.fn(async () => { throw new Error('Keychain locked'); });
 
-      const svc = createIdentityService(tmpDir!, { secureStore });
+      const svc = createIdentityService(tmpDir, { secureStore });
 
       // signOut should throw
       await expect(svc.signOut()).rejects.toThrow('Keychain locked');
@@ -162,7 +162,7 @@ describe('Identity IPC handlers (integration)', () => {
         });
       });
 
-      const svc = createIdentityService(tmpDir!, { secureStore, openUrl });
+      const svc = createIdentityService(tmpDir, { secureStore, openUrl });
       const session = await svc.startOAuthLoopback({ clientId: 'test-cid', clientSecret: 'test-secret' });
 
       expect(session.isLoggedIn).toBe(true);
@@ -190,7 +190,7 @@ describe('Identity IPC handlers (integration)', () => {
         });
       });
 
-      const svc = createIdentityService(tmpDir!, { secureStore, openUrl });
+      const svc = createIdentityService(tmpDir, { secureStore, openUrl });
 
       // OAuth with bad credentials should throw
       await expect(svc.startOAuthLoopback({ clientId: 'bad-cid' })).rejects.toThrow();
@@ -223,7 +223,7 @@ describe('Identity IPC handlers (integration)', () => {
 
       const openUrl = vi.fn(async () => { completed = true; });
 
-      const svc = createIdentityService(tmpDir!, { secureStore, openUrl });
+      const svc = createIdentityService(tmpDir, { secureStore, openUrl });
       const session = await svc.startDeviceFlow({ clientId: 'cid' });
 
       expect(session.isLoggedIn).toBe(true);
