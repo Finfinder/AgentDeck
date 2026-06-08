@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { DEFAULT_THEME_SETTINGS, isIdentitySession, type IdentitySession, type AgentDeckPreloadApi, type EditorDiagnostic, type FsChangeEvent, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
 

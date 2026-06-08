@@ -42,7 +42,7 @@ function setAgentDeck(api: AgentDeckPreloadApi) {
   });
 }
 
-describe('Identity UI — logged out state', () => {
+describe('Identity UI - logged out state', () => {
   beforeEach(() => {
     setAgentDeck(mockPreloadApi());
   });
@@ -81,7 +81,7 @@ describe('Identity UI — logged out state', () => {
   });
 });
 
-describe('Identity UI — logged in state', () => {
+describe('Identity UI - logged in state', () => {
   const loggedInSession: IdentitySession = {
     isLoggedIn: true,
     provider: 'github',
@@ -142,7 +142,7 @@ describe('Identity UI — logged in state', () => {
   });
 });
 
-describe('Identity UI — onIdentityChange subscription', () => {
+describe('Identity UI - onIdentityChange subscription', () => {
   it('updates UI when onIdentityChange fires after login', async () => {
     let changeHandler: ((s: IdentitySession) => void) | null = null;
     const onIdentityChange = vi.fn().mockImplementation((cb: (s: IdentitySession) => void) => {
@@ -206,7 +206,7 @@ describe('Identity UI — onIdentityChange subscription', () => {
   });
 });
 
-describe('Identity UI — graceful handling', () => {
+describe('Identity UI - graceful handling', () => {
   it('does not crash when getIdentitySession rejects', async () => {
     setAgentDeck(mockPreloadApi({
       getIdentitySession: vi.fn().mockRejectedValue(new Error('IPC failure'))
@@ -219,9 +219,9 @@ describe('Identity UI — graceful handling', () => {
   });
 
   it('does not crash when onIdentityChange is not provided (optional)', async () => {
-    // Mock without onIdentityChange — simulates older preload
+    // Mock without onIdentityChange - simulates older preload
     const api = mockPreloadApi();
-    // @ts-expect-error — intentionally omitting optional method for resilience test
+    // @ts-expect-error - intentionally omitting optional method for resilience test
     delete api.onIdentityChange;
     setAgentDeck(api);
 

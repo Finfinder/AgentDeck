@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import type { AgentDeckPreloadApi, EditorDiagnostic } from '@agentdeck/shared';
 import type { EditorStore } from './useEditorStore';
