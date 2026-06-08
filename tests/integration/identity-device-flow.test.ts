@@ -103,10 +103,10 @@ describe('IdentityService device flow (integration)', () => {
     const svc = createIdentityService(tmpDir!, { secureStore, openUrl: vi.fn() });
 
     // Start the device flow and advance timers to skip real waits
-    const sessionPromise = svc.startDeviceFlow({ clientId: 'cid', timeoutMs: 30000, intervalMs: 100 });
+    const sessionPromise = svc.startDeviceFlow({ clientId: 'cid', timeoutMs: 30000, intervalMs: 1 });
 
     // Advance timers to let the polling loop run through pending ? slow_down ? success
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.runAllTimersAsync();
 
     const session = await sessionPromise;
 

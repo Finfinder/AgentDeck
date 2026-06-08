@@ -305,7 +305,7 @@ export class IdentityService {
     intervalMs?: number;
     onDeviceCode?: (userCode: string, verificationUri: string, verificationUriComplete?: string) => void 
   }): Promise<IdentitySession> {
-    const { clientId, scopes = ['read:user', 'user:email'], timeoutMs = 2 * 60 * 1000, onDeviceCode } = params;
+    const { clientId, scopes = ['read:user', 'user:email'], timeoutMs = 2 * 60 * 1000, intervalMs, onDeviceCode } = params;
 
     if (process.env.TEST_IDENTITY_AUTO === '1') {
       return this.createTestSession();
@@ -321,7 +321,8 @@ export class IdentityService {
 
     await this.openVerificationUrl(verificationUri, verificationUriComplete, userCode);
 
-    return this.pollForDeviceToken(clientId, deviceCode, pollInterval, timeoutMs);
+    const effectivePollInterval = intervalMs ?? pollInterval;
+    return this.pollForDeviceToken(clientId, deviceCode, effectivePollInterval, timeoutMs);
   }
 
   private async createTestSession(): Promise<IdentitySession> {
