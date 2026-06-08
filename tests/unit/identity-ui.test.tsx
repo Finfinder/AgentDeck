@@ -220,9 +220,10 @@ describe('Identity UI - graceful handling', () => {
 
   it('does not crash when onIdentityChange is not provided (optional)', async () => {
     // Mock without onIdentityChange - simulates older preload
-    const api = mockPreloadApi();
+    const fullApi = mockPreloadApi();
+    const api: Record<string, unknown> = { ...fullApi };
     delete api.onIdentityChange;
-    setAgentDeck(api);
+    setAgentDeck(api as unknown as ReturnType<typeof mockPreloadApi>);
 
     await act(async () => { render(<App />); });
 
