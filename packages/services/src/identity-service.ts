@@ -185,47 +185,41 @@ export class IdentityService {
           res.end('<html><body><h1>You may now return to AgentDeck.</h1></body></html>');
 
           // Exchange code for token
-          try {
-            const tokenResp = await globalThis.fetch('https://github.com/login/oauth/access_token', {
-              method: 'POST',
-              headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-              body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code })
-            });
+          const tokenResp = await globalThis.fetch('https://github.com/login/oauth/access_token', {
+            method: 'POST',
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code })
+          });
 
-            if (!tokenResp.ok) {
-              reject(new Error('Failed to exchange code'));
-              server.close();
-              return;
-            }
-
-            const tokenJson = await tokenResp.json() as Record<string, unknown>;
-            const accessToken = tokenJson.access_token as string | undefined;
-            if (!accessToken) {
-              reject(new Error('No access token returned'));
-              server.close();
-              return;
-            }
-
-            // Fetch profile BEFORE storing token -- only persist token if profile is valid
-            const profileResp = await globalThis.fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
-            if (!profileResp.ok) {
-              reject(new Error('Failed to fetch GitHub profile'));
-              server.close();
-              return;
-            }
-            const profile = await profileResp.json() as Record<string, unknown>;
-
-            const session: IdentitySession = { isLoggedIn: true, provider: 'github', profile: buildProfile(profile) };
-
-            // Store token only after profile fetch succeeds
-            const store = await this.getSecureStore();
-            await store.setPassword('agentdeck', 'github', accessToken);
-            resolve(session);
-          } catch (err) {
-            reject(err);
-          } finally {
+          if (!tokenResp.ok) {
+            reject(new Error('Failed to exchange code'));
             server.close();
+            return;
           }
+
+          const tokenJson = await tokenResp.json() as Record<string, unknown>;
+          const accessToken = tokenJson.access_token as string | undefined;
+          if (!accessToken) {
+            reject(new Error('No access token returned'));
+            server.close();
+            return;
+          }
+
+          // Fetch profile BEFORE storing token -- only persist token if profile is valid
+          const profileResp = await globalThis.fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
+          if (!profileResp.ok) {
+            reject(new Error('Failed to fetch GitHub profile'));
+            server.close();
+            return;
+          }
+          const profile = await profileResp.json() as Record<string, unknown>;
+
+          const session: IdentitySession = { isLoggedIn: true, provider: 'github', profile: buildProfile(profile) };
+
+          // Store token only after profile fetch succeeds
+          const store = await this.getSecureStore();
+          await store.setPassword('agentdeck', 'github', accessToken);
+          resolve(session);
         } catch (err) {
           reject(err);
           server.close();
@@ -387,9 +381,6 @@ export class IdentityService {
 
   private async handleDeviceTokenSuccess(json: Record<string, unknown>): Promise<{ kind: 'success'; session: IdentitySession }> {
     const accessToken = json.access_token as string;
-    if (!accessToken) {
-      throw new Error('Empty access token in device flow success response');
-    }
     // Fetch profile BEFORE storing token -- only persist token if profile is valid
     const profileResp = await globalThis.fetch('https://api.github.com/user', { headers: { Authorization: `token ${accessToken}`, Accept: 'application/json' } });
     if (!profileResp.ok) {

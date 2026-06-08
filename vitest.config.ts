@@ -13,7 +13,8 @@ export default defineConfig({
       '@agentdeck/services': resolve(rootDir, 'packages/services/src/index.ts'),
       '@agentdeck/shared': resolve(rootDir, 'packages/shared/src/index.ts'),
       '@agentdeck/workbench': resolve(rootDir, 'packages/workbench/src/index.ts'),
-      '@monaco-editor/react': resolve(rootDir, 'tests/__mocks__/monaco-editor-react.tsx')
+      '@monaco-editor/react': resolve(rootDir, 'tests/__mocks__/monaco-editor-react.tsx'),
+      keytar: resolve(rootDir, 'packages/workbench/src/keytar-mock.ts')
     }
   },
   test: {

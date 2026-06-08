@@ -344,4 +344,6 @@ describe('MenuBar - additional coverage', () => {
       });
     });
   });
+
+
 });
