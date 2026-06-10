@@ -128,7 +128,7 @@ describe('IdentityService (loopback OAuth)', () => {
       json: async () => ({ login: 'testuser', id: 42, avatar_url: 'https://example.com/a.png', name: 'Test', email: 't@e.com' })
     }) as unknown as Response);
 
-    const svc = createIdentityService(tmp!, { secureStore });
+    const svc = createIdentityService(tmp!, { secureStore, openUrl: vi.fn() });
     const session = await svc.getSession();
 
     expect(session.isLoggedIn).toBe(true);
@@ -144,7 +144,7 @@ describe('IdentityService (loopback OAuth)', () => {
       deletePassword: vi.fn(async () => true)
     };
 
-    const svc = createIdentityService(tmp!, { secureStore });
+    const svc = createIdentityService(tmp!, { secureStore, openUrl: vi.fn() });
     const session = await svc.getSession();
 
     expect(session.isLoggedIn).toBe(false);
@@ -165,7 +165,7 @@ describe('IdentityService (loopback OAuth)', () => {
       json: async () => ({ message: 'Bad credentials' })
     }) as unknown as Response);
 
-    const svc = createIdentityService(tmp!, { secureStore });
+    const svc = createIdentityService(tmp!, { secureStore, openUrl: vi.fn() });
     const session = await svc.getSession();
 
     expect(session.isLoggedIn).toBe(false);
@@ -182,7 +182,7 @@ describe('IdentityService (loopback OAuth)', () => {
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => { throw new Error('Network error'); });
 
-    const svc = createIdentityService(tmp!, { secureStore });
+    const svc = createIdentityService(tmp!, { secureStore, openUrl: vi.fn() });
     const session = await svc.getSession();
 
     expect(session.isLoggedIn).toBe(false);
@@ -212,7 +212,7 @@ describe('IdentityService (loopback OAuth)', () => {
       deletePassword: vi.fn(async (s: string, a: string) => { delete store[`${s}:${a}`]; return true; })
     };
 
-    const svc = createIdentityService(tmp!, { secureStore });
+    const svc = createIdentityService(tmp!, { secureStore, openUrl: vi.fn() });
     await svc.signOut();
 
     expect(secureStore.deletePassword).toHaveBeenCalledWith('agentdeck', 'github');
@@ -342,7 +342,7 @@ describe('IdentityService (loopback OAuth)', () => {
       json: async () => ({ id: 1, name: 'No Login' })  // missing login
     }) as unknown as Response);
 
-    const svc = createIdentityService(tmp!, { secureStore });
+    const svc = createIdentityService(tmp!, { secureStore, openUrl: vi.fn() });
     const session = await svc.getSession();
 
     // Should return not logged in because buildProfile throws
@@ -362,7 +362,7 @@ describe('IdentityService (loopback OAuth)', () => {
       json: async () => ({ id: 1, avatar_url: 'https://example.com/a.png' })  // no login field
     }) as unknown as Response);
 
-    const svc = createIdentityService(tmp!, { secureStore });
+    const svc = createIdentityService(tmp!, { secureStore, openUrl: vi.fn() });
     const session = await svc.getSession();
 
     expect(session.isLoggedIn).toBe(false);
@@ -391,7 +391,7 @@ describe('IdentityService (loopback OAuth)', () => {
       return { ok: false, json: async () => ({}) } as unknown as Response;
     });
 
-    const svc = createIdentityService(tmp!, { secureStore: fallbackStore });
+    const svc = createIdentityService(tmp!, { secureStore: fallbackStore, openUrl: vi.fn() });
 
     // getSession should find the token and return profile
     const session = await svc.getSession();
@@ -614,7 +614,7 @@ describe('IdentityService (loopback OAuth)', () => {
     process.env.TEST_IDENTITY_LOGIN = 'oauth-tester';
 
     try {
-      const svc = createIdentityService(tmp!, { secureStore });
+      const svc = createIdentityService(tmp!, { secureStore, openUrl: vi.fn() });
       const session = await svc.startOAuthLoopback({ clientId: 'any' });
 
       expect(session.isLoggedIn).toBe(true);
@@ -643,7 +643,7 @@ describe('IdentityService (loopback OAuth)', () => {
       deletePassword: vi.fn(async (s: string, a: string) => { delete fileData[`${s}:${a}`]; return true; })
     };
 
-    const svc = createIdentityService(tmp!, { secureStore: fileStore });
+    const svc = createIdentityService(tmp!, { secureStore: fileStore, openUrl: vi.fn() });
 
     // signOut on empty store should not throw
     await svc.signOut();
@@ -657,6 +657,7 @@ describe('IdentityService (loopback OAuth)', () => {
   it('invokes onFallbackWarning callback when keytar is unavailable and fallback file store is used', async () => {
     const warnings: SecureStoreWarning[] = [];
     const svc = createIdentityService(tmp!, {
+      openUrl: vi.fn(),
       onFallbackWarning: (w) => { warnings.push(w); }
     });
 
@@ -683,7 +684,7 @@ describe('IdentityService (loopback OAuth)', () => {
       deletePassword: vi.fn(async (s: string, a: string) => { delete fileData[`${s}:${a}`]; return true; })
     };
 
-    const svc = createIdentityService(tmp!, { secureStore: fileStore });
+    const svc = createIdentityService(tmp!, { secureStore: fileStore, openUrl: vi.fn() });
 
     // Trigger token storage via test mode OAuth
     const origAuto = process.env.TEST_IDENTITY_AUTO;

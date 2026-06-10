@@ -242,6 +242,7 @@ describe('Identity IPC handlers (integration)', () => {
       const warnings: SecureStoreWarning[] = [];
 
       const svc = createIdentityService(tmpDir, {
+        openUrl: vi.fn(),
         onFallbackWarning: (w) => { warnings.push(w); }
       });
 
@@ -261,6 +262,7 @@ describe('Identity IPC handlers (integration)', () => {
       const warnings: SecureStoreWarning[] = [];
 
       const svc = createIdentityService(tmpDir, {
+        openUrl: vi.fn(),
         onFallbackWarning: (w) => { warnings.push(w); }
       });
 
@@ -277,6 +279,7 @@ describe('Identity IPC handlers (integration)', () => {
 
       const svc = createIdentityService(tmpDir, {
         secureStore,
+        openUrl: vi.fn(),
         onFallbackWarning: (w) => { warnings.push(w); }
       });
 

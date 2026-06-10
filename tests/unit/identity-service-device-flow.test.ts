@@ -490,7 +490,7 @@ describe('IdentityService — device flow', () => {
     process.env.TEST_IDENTITY_LOGIN = 'env-tester';
 
     try {
-      const svc = createIdentityService(tmp!, { secureStore });
+      const svc = createIdentityService(tmp!, { secureStore, openUrl: vi.fn() });
       const session = await svc.startDeviceFlow({ clientId: 'any' });
 
       expect(session.isLoggedIn).toBe(true);
@@ -523,7 +523,7 @@ describe('IdentityService — device flow', () => {
     delete process.env.TEST_IDENTITY_LOGIN;
 
     try {
-      const svc = createIdentityService(tmp!, { secureStore });
+      const svc = createIdentityService(tmp!, { secureStore, openUrl: vi.fn() });
       const session = await svc.startDeviceFlow({ clientId: 'any' });
 
       expect(session.isLoggedIn).toBe(true);
