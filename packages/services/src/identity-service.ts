@@ -55,6 +55,7 @@ function defaultOpenUrl(url: string): Promise<void> {
       args = [url];
     }
 
+    // codeql[js/command-line-injection] False positive: URL validated for http/https above; execFile does not invoke a shell.
     // nosemgrep: javascript.lang.security.audit.unsafe-command-construction.unsafe-command-construction
     // URL is validated for http/https protocol above; execFile does not invoke a shell.
     execFile(file, args, (err) => {
