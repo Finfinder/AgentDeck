@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { randomBytes } from 'node:crypto';
 
 import type {
   ChatMessage,
@@ -36,7 +37,8 @@ function sleep(ms: number): Promise<void> {
 function computeBackoffDelay(attempt: number, policy: RetryPolicy): number {
   const exponential = policy.baseDelayMs * Math.pow(2, attempt);
   const capped = Math.min(exponential, policy.maxDelayMs);
-  const jitter = capped * policy.jitterFactor * (Math.random() * 2 - 1);
+  const secureRandom = (randomBytes(4).readUInt32LE(0) / 0xffffffff);
+  const jitter = capped * policy.jitterFactor * (secureRandom * 2 - 1);
   return Math.max(0, Math.round(capped + jitter));
 }
 
@@ -404,12 +406,12 @@ export class ModelGateway extends EventEmitter {
 
   /** Extract normalized error code and message from a stream error event. */
   private parseStreamError(message: string): { code: 'PROVIDER_ERROR' | 'MODEL_ERROR' | 'NETWORK_ERROR' | 'UNKNOWN'; message: string } {
-    const CODE_PATTERN = /^\[(\w+)\]\s*(.*)$/;
-    const match = CODE_PATTERN.exec(message);
-    if (match) {
-      const code = match[1];
+    const bracketEnd = message.indexOf(']');
+    if (bracketEnd > 1 && message.startsWith('[')) {
+      const code = message.slice(1, bracketEnd);
+      const rest = message.slice(bracketEnd + 1).trimStart();
       if (code === 'PROVIDER_ERROR' || code === 'MODEL_ERROR' || code === 'NETWORK_ERROR' || code === 'UNKNOWN') {
-        return { code, message: match[2] ?? message };
+        return { code, message: rest || message };
       }
     }
     return { code: classifyError(new Error(message)), message };
