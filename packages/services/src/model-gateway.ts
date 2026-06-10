@@ -415,107 +415,152 @@ export class ModelGateway extends EventEmitter {
     return { code: classifyError(new Error(message)), message };
   }
 
+  private getAdapterAndProvider(tab: ChatTabInternal): { adapter: ModelProviderAdapter; provider: ModelProviderState } | null {
+    const adapter = this.adapters.get(tab.activeProvider);
+    if (!adapter) {
+      this.failTab(tab.id, tab, 'PROVIDER_ERROR', `No adapter registered for provider: ${tab.activeProvider}`);
+      return null;
+    }
+    const provider = this.providers.find(p => p.id === tab.activeProvider);
+    if (!provider) {
+      this.failTab(tab.id, tab, 'PROVIDER_ERROR', `Provider not configured: ${tab.activeProvider}`);
+      return null;
+    }
+    return { adapter, provider };
+  }
+
+  private async collectStreamEvents(
+    stream: AsyncIterable<ChatStreamEvent>,
+    tabId: string
+  ): Promise<{ assistantContent: string; toolCalls: ToolCall[]; streamError?: { code: string; message: string } }> {
+    let assistantContent = '';
+    const toolCalls: ToolCall[] = [];
+    let streamError: { code: string; message: string } | undefined;
+
+    try {
+      for await (const event of stream) {
+        if (event.type === 'chunk') {
+          assistantContent += event.content;
+        } else if (event.type === 'tool_use') {
+          toolCalls.push(event.toolCall);
+        } else if (event.type === 'error') {
+          streamError = this.parseStreamError(event.message);
+        }
+        this.emit('chat-stream', tabId, event);
+      }
+    } catch (err) {
+      streamError = { code: classifyError(err), message: err instanceof Error ? err.message : 'Unknown error' };
+    }
+
+    const result: { assistantContent: string; toolCalls: ToolCall[]; streamError?: { code: string; message: string } } = { assistantContent, toolCalls };
+    if (streamError !== undefined) {
+      result.streamError = streamError;
+    }
+    return result;
+  }
+
+  private buildAssistantMessage(assistantContent: string, toolCalls: ToolCall[]): ChatMessage {
+    const msg: ChatMessage = {
+      role: 'assistant',
+      content: assistantContent,
+      timestamp: Date.now(),
+    };
+    if (toolCalls.length > 0) {
+      (msg as { tool_calls?: readonly ToolCall[] }).tool_calls = toolCalls;
+    }
+    return msg;
+  }
+
+  private async processToolCalls(tab: ChatTabInternal, toolCalls: ToolCall[]): Promise<void> {
+    for (const tc of toolCalls) {
+      tab.messages = [...tab.messages, {
+        role: 'tool',
+        content: await this.executeToolCall(tc),
+        timestamp: Date.now(),
+        tool_call_id: tc.id
+      }];
+    }
+  }
+
+  private emitRetryNotification(tabId: string, attempt: number, policy: RetryPolicy): void {
+    const delay = computeBackoffDelay(attempt - 1, policy);
+    this.emit('chat-stream', tabId, {
+      type: 'info',
+      message: `[RETRY] Attempt ${attempt}/${policy.maxRetries} after ${delay}ms delay...`
+    });
+  }
+
+  private async runSingleAttempt(
+    tabId: string,
+    tab: ChatTabInternal,
+    adapter: ModelProviderAdapter,
+    provider: ModelProviderState,
+    tools: readonly ToolDefinition[]
+  ): Promise<{ hasToolCalls: boolean } | { error: { code: string; message: string } }> {
+    if (tab.abortController?.signal.aborted) {
+      return { error: { code: 'NETWORK_ERROR', message: 'Streaming cancelled during retry backoff.' } };
+    }
+
+    const result = await this.collectStreamEvents(
+      adapter.chat(provider.baseUrl, tab.activeModel, tab.messages, tab.abortController?.signal, tools),
+      tabId
+    );
+
+    if (result.streamError) {
+      return { error: result.streamError };
+    }
+
+    tab.messages = [...tab.messages, this.buildAssistantMessage(result.assistantContent, result.toolCalls)];
+
+    if (result.toolCalls.length > 0) {
+      await this.processToolCalls(tab, result.toolCalls);
+      return { hasToolCalls: true };
+    }
+
+    return { hasToolCalls: false };
+  }
+
   private async runChatLoop(tabId: string, tab: ChatTabInternal, depth: number = 0): Promise<SendMessageResult> {
     const MAX_TOOL_CALL_DEPTH = 10;
     if (depth >= MAX_TOOL_CALL_DEPTH) {
       return this.failTab(tabId, tab, 'PROVIDER_ERROR', 'Maximum tool call depth exceeded.');
     }
 
-    const adapter = this.adapters.get(tab.activeProvider);
-    if (!adapter) {
-      return this.failTab(tabId, tab, 'PROVIDER_ERROR', `No adapter registered for provider: ${tab.activeProvider}`);
+    const resolved = this.getAdapterAndProvider(tab);
+    if (!resolved) {
+      return { status: 'error', code: 'PROVIDER_ERROR', message: `Provider resolution failed for: ${tab.activeProvider}` };
     }
 
-    const provider = this.providers.find(p => p.id === tab.activeProvider);
-    if (!provider) {
-      return this.failTab(tabId, tab, 'PROVIDER_ERROR', `Provider not configured: ${tab.activeProvider}`);
-    }
-
+    const { adapter, provider } = resolved;
     const activeModelInfo = provider.models.find(m => m.id === tab.activeModel);
     const tools = activeModelInfo?.supportsTools ? this.getTools() : [];
-
-    // Retry loop with exponential backoff and jitter
     const policy = this.retryPolicy;
     let lastError: { code: string; message: string } | undefined;
 
     for (let attempt = 0; attempt <= policy.maxRetries; attempt++) {
       if (attempt > 0) {
-        const delay = computeBackoffDelay(attempt - 1, policy);
-        this.emit('chat-stream', tabId, {
-          type: 'info',
-          message: `[RETRY] Attempt ${attempt}/${policy.maxRetries} after ${delay}ms delay...`
-        });
-        await sleep(delay);
+        this.emitRetryNotification(tabId, attempt, policy);
+        await sleep(computeBackoffDelay(attempt - 1, policy));
       }
 
-      // Check if abort was requested during backoff
-      if (tab.abortController?.signal.aborted) {
-        return this.failTab(tabId, tab, 'NETWORK_ERROR', 'Streaming cancelled during retry backoff.');
-      }
+      const result = await this.runSingleAttempt(tabId, tab, adapter, provider, tools);
 
-      const stream = adapter.chat(
-        provider.baseUrl,
-        tab.activeModel,
-        tab.messages,
-        tab.abortController?.signal,
-        tools
-      );
-
-      let assistantContent = '';
-      const toolCalls: ToolCall[] = [];
-      let streamError: { code: string; message: string } | undefined;
-
-      try {
-        for await (const event of stream) {
-          if (event.type === 'chunk') {
-            assistantContent += event.content;
-          } else if (event.type === 'tool_use') {
-            toolCalls.push(event.toolCall);
-          } else if (event.type === 'error') {
-            streamError = this.parseStreamError(event.message);
-          }
-          this.emit('chat-stream', tabId, event);
+      if ('error' in result) {
+        lastError = result.error;
+        if (!isRetryableError(result.error.code)) {
+          break;
         }
-      } catch (err) {
-        const code = classifyError(err);
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        streamError = { code, message };
-      }
-
-      if (!streamError) {
-        // Success path
-        tab.messages = [...tab.messages, {
-          role: 'assistant',
-          content: assistantContent,
-          timestamp: Date.now(),
-          ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
-        }];
-
-        if (toolCalls.length > 0) {
-          for (const tc of toolCalls) {
-            tab.messages = [...tab.messages, {
-              role: 'tool',
-              content: await this.executeToolCall(tc),
-              timestamp: Date.now(),
-              tool_call_id: tc.id
-            }];
-          }
-          return this.runChatLoop(tabId, tab, depth + 1);
-        }
-
+      } else if (result.hasToolCalls) {
+        return this.runChatLoop(tabId, tab, depth + 1);
+      } else {
         return this.finishTab(tabId, tab);
-      }
-
-      lastError = streamError;
-
-      // Don't retry MODEL_ERROR — it's not transient
-      if (!isRetryableError(streamError.code)) {
-        break;
       }
     }
 
-    // All retries exhausted or non-retryable error
-    return this.failTab(tabId, tab, lastError!.code, lastError!.message);
+    if (!lastError) {
+      return this.failTab(tabId, tab, 'UNKNOWN', 'All retries exhausted without capturing an error.');
+    }
+    return this.failTab(tabId, tab, lastError.code, lastError.message);
   }
 
   private async executeToolCall(toolCall: ToolCall): Promise<string> {

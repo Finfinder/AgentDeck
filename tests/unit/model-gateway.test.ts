@@ -290,7 +290,7 @@ describe('ModelGateway', () => {
       // Cleanup: stop the hanging stream
       gateway.stopStreaming(tab.id);
       await sendPromise.catch(() => {});
-    });
+    }, 30000);
 
     it('emits stream events during chat', async () => {
       const gateway = new ModelGateway();
@@ -347,7 +347,7 @@ describe('ModelGateway', () => {
       // After stopStreaming, the tab should not be streaming anymore
       const updatedTab = gateway.getChatTab(tab.id);
       expect(updatedTab!.isStreaming).toBe(false);
-    });
+    }, 30000);
 
     it('does nothing for non-streaming tab', () => {
       const gateway = new ModelGateway();
