@@ -1,4 +1,4 @@
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AgentDeckPreloadApi, ChatTabState } from '@agentdeck/shared';
@@ -132,9 +132,9 @@ describe('useChatStore', () => {
 
     const { result } = renderHook(() => useChatStore(agent));
 
-    await act(async () => { await new Promise(r => setTimeout(r, 50)); });
-
-    expect(result.current.tabs).toHaveLength(1);
+    await waitFor(() => {
+      expect(result.current.tabs).toHaveLength(1);
+    });
     expect(result.current.tabs[0]!.title).toBe('Chat 1');
   });
 
@@ -145,8 +145,9 @@ describe('useChatStore', () => {
 
     renderHook(() => useChatStore(agent));
 
-    await act(async () => { await new Promise(r => setTimeout(r, 50)); });
-    expect(agent.onChatTabsChange).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(agent.onChatTabsChange).toHaveBeenCalled();
+    });
   });
 
   it('switches active tab when current tab is closed externally', async () => {

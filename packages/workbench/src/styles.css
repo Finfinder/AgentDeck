@@ -1687,6 +1687,41 @@ h2 {
   cursor: not-allowed;
 }
 
+.chat-config-url-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-config-save-btn {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.chat-config-save-btn:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.chat-config-save-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .chat-config-apikey-row {
   display: flex;
   align-items: center;
@@ -1760,19 +1795,34 @@ h2 {
   cursor: not-allowed;
 }
 
+.chat-config-test-btn.test-btn-testing {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  animation: test-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes test-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 .chat-config-test-result {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
+  font-weight: 600;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  padding: 2px 8px;
+  border-radius: var(--radius-control);
 }
 
 .chat-config-test-result.test-ok {
   color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 
 .chat-config-test-result.test-error {
   color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 30%, transparent);
 }
 
 .chat-config-models-count {

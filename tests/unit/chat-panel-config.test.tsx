@@ -415,4 +415,170 @@ describe('ChatPanel — Model Configuration', () => {
     const saveBtn = screen.getByRole('button', { name: /save api key/i });
     await waitFor(() => expect(saveBtn).toBeDisabled());
   });
+
+  // --- API URL persist tests ---
+
+  it('renders save URL button next to API URL input', async () => {
+    const user = userEvent.setup();
+    const agent = createMockAgent();
+    const tab = createTab();
+
+    render(<ChatPanel agent={agent} tab={tab} />);
+
+    await user.click(screen.getByRole('button', { name: /show model configuration/i }));
+
+    expect(screen.getByRole('button', { name: /save api url/i })).toBeInTheDocument();
+  });
+
+  it('disables save URL button when URL is unchanged from saved value', async () => {
+    const user = userEvent.setup();
+    const agent = createMockAgent({
+      getProviderConfig: vi.fn().mockResolvedValue({ baseUrl: 'http://localhost:11434', hasApiKey: false })
+    } as Partial<AgentDeckPreloadApi>);
+    const tab = createTab();
+
+    render(<ChatPanel agent={agent} tab={tab} />);
+
+    await user.click(screen.getByRole('button', { name: /show model configuration/i }));
+
+    const saveUrlBtn = screen.getByRole('button', { name: /save api url/i });
+    await waitFor(() => expect(saveUrlBtn).toBeDisabled());
+  });
+
+  it('enables save URL button when URL is changed', async () => {
+    const user = userEvent.setup();
+    const agent = createMockAgent({
+      getProviderConfig: vi.fn().mockResolvedValue({ baseUrl: 'http://localhost:11434', hasApiKey: false })
+    } as Partial<AgentDeckPreloadApi>);
+    const tab = createTab();
+
+    render(<ChatPanel agent={agent} tab={tab} />);
+
+    await user.click(screen.getByRole('button', { name: /show model configuration/i }));
+
+    const urlInput = screen.getByLabelText('API URL');
+    await user.clear(urlInput);
+    await user.type(urlInput, 'http://custom:8080');
+
+    const saveUrlBtn = screen.getByRole('button', { name: /save api url/i });
+    await waitFor(() => expect(saveUrlBtn).toBeEnabled());
+  });
+
+  it('calls setProviderConfig when save URL button is clicked', async () => {
+    const user = userEvent.setup();
+    const agent = createMockAgent({
+      getProviderConfig: vi.fn().mockResolvedValue({ baseUrl: 'http://localhost:11434', hasApiKey: false }),
+      setProviderConfig: vi.fn().mockResolvedValue(undefined)
+    } as Partial<AgentDeckPreloadApi>);
+    const tab = createTab();
+
+    render(<ChatPanel agent={agent} tab={tab} />);
+
+    await user.click(screen.getByRole('button', { name: /show model configuration/i }));
+
+    const urlInput = screen.getByLabelText('API URL');
+    await user.clear(urlInput);
+    await user.type(urlInput, 'http://custom:8080');
+
+    const saveUrlBtn = screen.getByRole('button', { name: /save api url/i });
+    await waitFor(() => expect(saveUrlBtn).toBeEnabled());
+    await user.click(saveUrlBtn);
+
+    expect(agent.setProviderConfig).toHaveBeenCalledWith('ollama', 'http://custom:8080');
+  });
+
+  it('disables save URL button after saving', async () => {
+    const user = userEvent.setup();
+    const agent = createMockAgent({
+      getProviderConfig: vi.fn().mockResolvedValue({ baseUrl: 'http://localhost:11434', hasApiKey: false }),
+      setProviderConfig: vi.fn().mockResolvedValue(undefined)
+    } as Partial<AgentDeckPreloadApi>);
+    const tab = createTab();
+
+    render(<ChatPanel agent={agent} tab={tab} />);
+
+    await user.click(screen.getByRole('button', { name: /show model configuration/i }));
+
+    // Change URL
+    const urlInput = screen.getByLabelText('API URL');
+    await user.clear(urlInput);
+    await user.type(urlInput, 'http://custom:8080');
+
+    // Save
+    const saveUrlBtn = screen.getByRole('button', { name: /save api url/i });
+    await waitFor(() => expect(saveUrlBtn).toBeEnabled());
+    await user.click(saveUrlBtn);
+
+    // Button should be disabled again after saving
+    await waitFor(() => expect(saveUrlBtn).toBeDisabled());
+  });
+
+  it('persists URL via setProviderConfig before testing connection when URL changed', async () => {
+    const user = userEvent.setup();
+    const agent = createMockAgent({
+      getProviderConfig: vi.fn().mockResolvedValue({ baseUrl: 'http://localhost:11434', hasApiKey: false }),
+      setProviderConfig: vi.fn().mockResolvedValue(undefined),
+      testConnection: vi.fn().mockResolvedValue({ status: 'ok' })
+    } as Partial<AgentDeckPreloadApi>);
+    const tab = createTab();
+
+    render(<ChatPanel agent={agent} tab={tab} />);
+
+    await user.click(screen.getByRole('button', { name: /show model configuration/i }));
+
+    // Change URL
+    const urlInput = screen.getByLabelText('API URL');
+    await user.clear(urlInput);
+    await user.type(urlInput, 'http://custom:8080');
+
+    // Click test
+    const testBtn = screen.getByRole('button', { name: /test connection/i });
+    await user.click(testBtn);
+
+    // setProviderConfig should be called before testConnection
+    expect(agent.setProviderConfig).toHaveBeenCalledWith('ollama', 'http://custom:8080');
+    expect(agent.testConnection).toHaveBeenCalledWith('ollama', 'http://custom:8080');
+
+    // Verify call order: setProviderConfig before testConnection
+    const setCallOrder = (agent.setProviderConfig as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;
+    const testCallOrder = (agent.testConnection as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;
+    expect(setCallOrder).toBeLessThan(testCallOrder);
+  });
+
+  it('does not call setProviderConfig before test when URL is unchanged', async () => {
+    const user = userEvent.setup();
+    const agent = createMockAgent({
+      getProviderConfig: vi.fn().mockResolvedValue({ baseUrl: 'http://localhost:11434', hasApiKey: false }),
+      setProviderConfig: vi.fn().mockResolvedValue(undefined),
+      testConnection: vi.fn().mockResolvedValue({ status: 'ok' })
+    } as Partial<AgentDeckPreloadApi>);
+    const tab = createTab();
+
+    render(<ChatPanel agent={agent} tab={tab} />);
+
+    await user.click(screen.getByRole('button', { name: /show model configuration/i }));
+
+    // Click test without changing URL
+    const testBtn = screen.getByRole('button', { name: /test connection/i });
+    await user.click(testBtn);
+
+    // setProviderConfig should NOT be called since URL didn't change
+    expect(agent.setProviderConfig).not.toHaveBeenCalled();
+    expect(agent.testConnection).toHaveBeenCalledWith('ollama', 'http://localhost:11434');
+  });
+
+  it('disables save URL button when URL is empty', async () => {
+    const user = userEvent.setup();
+    const agent = createMockAgent({
+      getProviderConfig: vi.fn().mockResolvedValue({ baseUrl: '', hasApiKey: false })
+    } as Partial<AgentDeckPreloadApi>);
+    const tab = createTab();
+
+    render(<ChatPanel agent={agent} tab={tab} />);
+
+    await user.click(screen.getByRole('button', { name: /show model configuration/i }));
+
+    const saveUrlBtn = screen.getByRole('button', { name: /save api url/i });
+    await waitFor(() => expect(saveUrlBtn).toBeDisabled());
+  });
 });

@@ -771,6 +771,8 @@ export function isModelProviderConfig(value: unknown): value is ModelProviderCon
 
 export function isTestConnectionResult(value: unknown): value is TestConnectionResult {
   if (!isRecord(value)) return false;
-  if (value.status === 'ok') return Array.isArray(value.models);
+  if (value.status === 'ok') {
+    return Array.isArray(value.models) && value.models.every(isModelInfo);
+  }
   return value.status === 'error' && typeof value.message === 'string';
 }

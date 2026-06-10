@@ -30,7 +30,7 @@ export {
 	isToolCall
 } from './ipc';
 export type { IdentitySession, IdentitySessionWarning } from './ipc';
-export { isIdentitySession, isIdentitySessionWarning, isModelProviderConfig } from './ipc';
+export { isIdentitySession, isIdentitySessionWarning, isModelProviderConfig, isTestConnectionResult } from './ipc';
 export { pathBasename, normalizePathStr } from './path';
 export type { DomainEntityName, DomainOwnership, ModuleName } from './domain';
 export type {

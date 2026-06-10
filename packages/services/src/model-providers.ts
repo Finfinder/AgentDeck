@@ -23,15 +23,18 @@ async function fetchWithTimeout(
   url: string,
   options: RequestInit & { timeoutMs?: number } = {}
 ): Promise<Response> {
-  const { timeoutMs = 30000, ...fetchOptions } = options;
+  const { timeoutMs = 30000, signal: callerSignal, ...fetchOptions } = options;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+  // Combine timeout signal with caller-provided signal so that
+  // both timeout and explicit abort (e.g. stopStreaming) cancel the fetch.
+  const signal = callerSignal
+    ? AbortSignal.any([controller.signal, callerSignal])
+    : controller.signal;
+
   try {
-    const response = await fetch(url, {
-      ...fetchOptions,
-      signal: controller.signal
-    });
+    const response = await fetch(url, { ...fetchOptions, signal });
     return response;
   } finally {
     clearTimeout(timer);
@@ -40,12 +43,19 @@ async function fetchWithTimeout(
 
 // ?? SSE line parsing ?????????????????????????????????????????????????????
 
+/**
+ * Ekstrahuje zawartosc linii SSE.
+ *
+ * @returns string — zawartosc linii `data:`
+ * @returns null   — koniec strumienia (`[DONE]`)
+ * @returns undefined — linia do pominiecia (pusta, `event:`, `id:`, komentarz)
+ */
 function extractSseContent(line: string): string | null | undefined {
   const trimmed = line.trim();
-  if (!trimmed) return undefined; // empty line — skip
-  if (!trimmed.startsWith('data: ')) return null; // not SSE — skip
+  if (!trimmed) return undefined; // pusta linia — pomin
+  if (!trimmed.startsWith('data: ')) return undefined; // nie-data (event/id/komentarz) — pomin
   const data = trimmed.slice(6);
-  if (data === '[DONE]') return null; // end of stream
+  if (data === '[DONE]') return null; // koniec strumienia
   return data;
 }
 
@@ -135,18 +145,29 @@ async function readWithHeartbeat(
   heartbeatTimeoutMs: number
 ): Promise<HeartbeatReadResult> {
   const readPromise = reader.read();
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    const timer = setTimeout(
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bailoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(
       () => reject(new Error(`Stream heartbeat timeout: no data for ${heartbeatTimeoutMs}ms`)),
       heartbeatTimeoutMs
     );
-    signal?.addEventListener('abort', () => clearTimeout(timer), { once: true });
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+      },
+      { once: true }
+    );
   });
 
   try {
-    const { done, value } = await Promise.race([readPromise, timeoutPromise]);
+    const { done, value } = await Promise.race([readPromise, bailoutPromise]);
+    clearTimeout(timer);
     return done ? { kind: 'done' } : { kind: 'data', value };
   } catch (err) {
+    clearTimeout(timer);
     if (err instanceof Error && err.name === 'AbortError') return { kind: 'abort' };
     if (err instanceof Error && err.message.includes('heartbeat timeout')) return { kind: 'heartbeat-timeout' };
     throw err;
@@ -267,6 +288,7 @@ abstract class OpenAICompatibleAdapter implements ModelProviderAdapter {
           ...this.buildHeaders(baseUrl)
         },
         body: JSON.stringify(body),
+        ...(signal ? { signal } : {}),
         timeoutMs: 120000
       });
 
@@ -378,7 +400,7 @@ export class OllamaAdapter extends OpenAICompatibleAdapter {
     tools?: readonly ToolDefinition[]
   ): AsyncIterable<ChatStreamEvent> {
     try {
-      const response = await this.fetchOllamaResponse(baseUrl, modelId, messages, tools);
+      const response = await this.fetchOllamaResponse(baseUrl, modelId, messages, signal, tools);
       if (!response.ok) return;
 
       yield* this.streamOllamaChunks(response, signal);
@@ -394,6 +416,7 @@ export class OllamaAdapter extends OpenAICompatibleAdapter {
     baseUrl: string,
     modelId: string,
     messages: readonly ChatMessage[],
+    signal?: AbortSignal,
     tools?: readonly ToolDefinition[]
   ): Promise<Response> {
     const body: Record<string, unknown> = {
@@ -409,6 +432,7 @@ export class OllamaAdapter extends OpenAICompatibleAdapter {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      ...(signal ? { signal } : {}),
       timeoutMs: 120000
     });
 
@@ -509,8 +533,9 @@ export class OllamaAdapter extends OpenAICompatibleAdapter {
         }
         return events.length > 0 ? events : null;
       }
-    } catch (e) {
-      console.error('Ollama line parse error:', e, trimmed);
+    } catch {
+      // Partial lines at chunk boundaries are expected during streaming — return null silently.
+      // If you need parse diagnostics, enable debug logging here.
     }
 
     return null;

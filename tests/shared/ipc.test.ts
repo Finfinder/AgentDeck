@@ -21,7 +21,8 @@ import {
   isChatTabState,
   isChatStreamEvent,
   isSendMessageResult,
-  isToolCall
+  isToolCall,
+  isTestConnectionResult
 } from '@agentdeck/shared';
 
 describe('packages/shared ipc type guards', () => {
@@ -462,6 +463,53 @@ describe('packages/shared ipc type guards', () => {
       timestamp: 1000,
       tool_call_id: 'call_1'
     })).toBe(true);
+  });
+
+  it('validates test connection result', () => {
+    // ok with valid models
+    expect(isTestConnectionResult({
+      status: 'ok',
+      models: [{
+        id: 'gpt-4',
+        name: 'GPT-4',
+        provider: 'openrouter',
+        contextWindow: 8192,
+        supportsTools: true,
+        supportsStreaming: true,
+        supportsEmbeddings: false
+      }]
+    })).toBe(true);
+
+    // ok with empty models array
+    expect(isTestConnectionResult({ status: 'ok', models: [] })).toBe(true);
+
+    // ok with invalid models (missing fields) should fail
+    expect(isTestConnectionResult({
+      status: 'ok',
+      models: [{ id: 'gpt-4' }]
+    })).toBe(false);
+
+    // ok with non-array models should fail
+    expect(isTestConnectionResult({
+      status: 'ok',
+      models: 'not-an-array'
+    })).toBe(false);
+
+    // error with message
+    expect(isTestConnectionResult({
+      status: 'error',
+      message: 'Connection failed'
+    })).toBe(true);
+
+    // error without message should fail
+    expect(isTestConnectionResult({ status: 'error' })).toBe(false);
+
+    // invalid status
+    expect(isTestConnectionResult({ status: 'unknown' })).toBe(false);
+
+    // non-record values
+    expect(isTestConnectionResult(null)).toBe(false);
+    expect(isTestConnectionResult('string')).toBe(false);
   });
 
   it('validates chat stream event with tool_use', () => {

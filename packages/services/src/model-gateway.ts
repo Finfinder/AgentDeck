@@ -484,11 +484,10 @@ export class ModelGateway extends EventEmitter {
     }
   }
 
-  private emitRetryNotification(tabId: string, attempt: number, policy: RetryPolicy): void {
-    const delay = computeBackoffDelay(attempt - 1, policy);
+  private emitRetryNotification(tabId: string, attempt: number, maxRetries: number, delay: number): void {
     this.emit('chat-stream', tabId, {
       type: 'info',
-      message: `[RETRY] Attempt ${attempt}/${policy.maxRetries} after ${delay}ms delay...`
+      message: `[RETRY] Attempt ${attempt}/${maxRetries} after ${delay}ms delay...`
     });
   }
 
@@ -541,8 +540,9 @@ export class ModelGateway extends EventEmitter {
 
     for (let attempt = 0; attempt <= policy.maxRetries; attempt++) {
       if (attempt > 0) {
-        this.emitRetryNotification(tabId, attempt, policy);
-        await sleep(computeBackoffDelay(attempt - 1, policy));
+        const delay = computeBackoffDelay(attempt - 1, policy);
+        this.emitRetryNotification(tabId, attempt, policy.maxRetries, delay);
+        await sleep(delay);
       }
 
       const result = await this.runSingleAttempt(tabId, tab, adapter, provider, tools);

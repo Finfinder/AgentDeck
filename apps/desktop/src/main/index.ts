@@ -489,14 +489,26 @@ async function start(): Promise<void> {
 
   // Set frame-ancestors CSP via HTTP header (not supported in <meta> tags)
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    const headers = { ...details.responseHeaders };
+
+    // Case-insensitive lookup — Electron/Chromium returns lowercase keys
+    const existingKey = Object.keys(headers).find(
+      k => k.toLowerCase() === 'content-security-policy'
+    );
+    const existingValue = existingKey ? (headers[existingKey]?.[0] ?? '') : '';
+
+    // Remove old key to avoid duplicate CSP headers
+    if (existingKey) delete headers[existingKey];
+
+    const newCSP = existingValue
+      ? `${existingValue}; frame-ancestors 'none'`
+      : "frame-ancestors 'none'";
+
     callback({
       responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': [
-          (details.responseHeaders?.['Content-Security-Policy']?.[0] ?? '') +
-          "; frame-ancestors 'none'"
-        ]
-      }
+        ...headers,
+        'Content-Security-Policy': [newCSP],
+      },
     });
   });
 

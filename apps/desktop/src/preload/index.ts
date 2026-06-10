@@ -16,6 +16,7 @@ import {
   isModelGatewayConfig,
   isModelProviderConfig,
   isSendMessageResult,
+  isTestConnectionResult,
   isStartupState,
   isThemeSettings,
   isWorkspaceEditResult,
@@ -213,7 +214,10 @@ const api: AgentDeckPreloadApi = {
   },
   testConnection: async (providerId: string, baseUrl: string) => {
     const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.modelGatewayTestConnection, providerId, baseUrl);
-    return value as { status: 'ok' | 'error'; message?: string };
+    if (isTestConnectionResult(value)) {
+      return value;
+    }
+    return { status: 'error' as const, message: 'Unexpected response from main process.' };
   },
   setProviderConfig: async (providerId: string, baseUrl: string) => {
     await ipcRenderer.invoke(IPC_CHANNELS.modelGatewaySetProviderConfig, providerId, baseUrl);

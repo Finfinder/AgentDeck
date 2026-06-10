@@ -355,6 +355,12 @@ describe('ModelGateway', () => {
 
       // Should not throw
       gateway.stopStreaming(tab.id);
+
+      // Tab should still exist and not be streaming
+      const updatedTab = gateway.getChatTab(tab.id);
+      expect(updatedTab).toBeDefined();
+      expect(updatedTab!.isStreaming).toBe(false);
+      expect(updatedTab!.id).toBe(tab.id);
     });
   });
 

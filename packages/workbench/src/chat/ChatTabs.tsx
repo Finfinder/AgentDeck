@@ -20,32 +20,37 @@ export function ChatTabs({ tabs, activeTabId, onSelect, onClose, onCreate }: Cha
 
   return (
     <div className="chat-tabs" role="tablist" aria-label="Chat tabs">
-      {tabs.map(tab => (
-        <div
-          key={tab.id}
-          className={`chat-tab ${tab.id === activeTabId ? 'chat-tab-active' : ''}`}
-          role="tab"
-          aria-selected={tab.id === activeTabId}
-        >
-          <button
-            className="chat-tab-button"
-            type="button"
-            onClick={() => onSelect(tab.id)}
-            title={tab.title}
+      {tabs.map(tab => {
+        const isActive = tab.id === activeTabId;
+        return (
+          <div
+            key={tab.id}
+            className={`chat-tab ${isActive ? 'chat-tab-active' : ''}`}
           >
-            {tab.isStreaming && <span className="chat-tab-streaming-indicator" aria-label="Streaming">●</span>}
-            <span className="chat-tab-title">{tab.title}</span>
-          </button>
-          <button
-            className="chat-tab-close"
-            type="button"
-            onClick={(e) => { e.stopPropagation(); handleClose(tab.id, tab.title); }}
-            aria-label={`Close ${tab.title}`}
-          >
-            ×
-          </button>
-        </div>
-      ))}
+            <button
+              className="chat-tab-button"
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              aria-controls={`chat-panel-${tab.id}`}
+              tabIndex={isActive ? 0 : -1}
+              onClick={() => onSelect(tab.id)}
+              title={tab.title}
+            >
+              {tab.isStreaming && <span className="chat-tab-streaming-indicator" aria-label="Streaming">●</span>}
+              <span className="chat-tab-title">{tab.title}</span>
+            </button>
+            <button
+              className="chat-tab-close"
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleClose(tab.id, tab.title); }}
+              aria-label={`Close ${tab.title}`}
+            >
+              ×
+            </button>
+          </div>
+        );
+      })}
       <button
         className="chat-tab-new"
         type="button"

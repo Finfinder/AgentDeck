@@ -31,6 +31,9 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
   const [config, setConfig] = useState<ModelGatewayConfig | null>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [providerConfigs, setProviderConfigs] = useState<Record<string, ProviderConfigState>>({});
+  // Track the last persisted URL per provider to detect unsaved changes
+  const savedUrlsRef = useRef<Record<string, string>>({});
+  const [savingProviders, setSavingProviders] = useState<Record<string, boolean>>({});
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -61,6 +64,15 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
         }
       }
       setProviderConfigs(configs);
+      // Initialize saved URLs from fetched configs
+      const initial: Record<string, string> = {};
+      for (const provider of config.providers) {
+        const pc = await agent.getProviderConfig?.(provider.id);
+        if (pc) {
+          initial[provider.id] = pc.baseUrl;
+        }
+      }
+      savedUrlsRef.current = initial;
     };
     fetchConfigs().catch(() => {});
   }, [agent, config]);
@@ -164,6 +176,28 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
     [tab.activeProvider]
   );
 
+  const handleSaveBaseUrl = useCallback(async () => {
+    const cfg = providerConfigs[tab.activeProvider];
+    if (!cfg?.baseUrl) return;
+
+    setSavingProviders(prev => ({ ...prev, [tab.activeProvider]: true }));
+    try {
+      await agent.setProviderConfig?.(tab.activeProvider, cfg.baseUrl);
+      savedUrlsRef.current = { ...savedUrlsRef.current, [tab.activeProvider]: cfg.baseUrl };
+    } finally {
+      setSavingProviders(prev => ({ ...prev, [tab.activeProvider]: false }));
+    }
+  }, [agent, tab.activeProvider, providerConfigs]);
+
+  const isBaseUrlUnchanged = useCallback(
+    () => {
+      const current = providerConfigs[tab.activeProvider]?.baseUrl ?? '';
+      const saved = savedUrlsRef.current[tab.activeProvider] ?? '';
+      return current === saved;
+    },
+    [tab.activeProvider, providerConfigs]
+  );
+
   const handleApiKeyChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const apiKey = e.target.value;
@@ -206,12 +240,28 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
     const cfg = providerConfigs[tab.activeProvider];
     if (!cfg?.baseUrl) return;
 
+    // Persist the URL before testing so the main process uses the same URL
+    // for the test as it will for subsequent requests.
+    const currentSaved = savedUrlsRef.current[tab.activeProvider] ?? '';
+    if (cfg.baseUrl !== currentSaved) {
+      await agent.setProviderConfig?.(tab.activeProvider, cfg.baseUrl);
+      savedUrlsRef.current = { ...savedUrlsRef.current, [tab.activeProvider]: cfg.baseUrl };
+    }
+
     setProviderConfigs(prev => ({
       ...prev,
       [tab.activeProvider]: { ...(prev[tab.activeProvider] ?? { baseUrl: '', apiKey: '', showApiKey: false, testing: false, testResult: null }), testing: true, testResult: null }
     }));
 
+    const startTime = Date.now();
     const result = await agent.testConnection?.(tab.activeProvider, cfg.baseUrl ?? '') ?? { status: 'error' as const, message: 'Not available' };
+
+    // Ensure the "Testing..." state is visible for at least 1.5s so the user
+    // sees feedback even on instant responses.
+    const elapsed = Date.now() - startTime;
+    if (elapsed < 1500) {
+      await new Promise(resolve => setTimeout(resolve, 1500 - elapsed));
+    }
 
     // Refresh gateway config to get updated models list
     if (result.status === 'ok') {
@@ -325,16 +375,28 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
             <label className="chat-config-label" htmlFor={`baseurl-${tab.id}`}>
               API URL
             </label>
-            <input
-              id={`baseurl-${tab.id}`}
-              className="chat-config-input"
-              type="text"
-              value={currentConfig.baseUrl}
-              onChange={handleBaseUrlChange}
-              placeholder="e.g. https://openrouter.ai/api/v1"
-              disabled={tab.isStreaming}
-              spellCheck={false}
-            />
+            <div className="chat-config-url-row">
+              <input
+                id={`baseurl-${tab.id}`}
+                className="chat-config-input"
+                type="text"
+                value={currentConfig.baseUrl}
+                onChange={handleBaseUrlChange}
+                placeholder="e.g. https://openrouter.ai/api/v1"
+                disabled={tab.isStreaming}
+                spellCheck={false}
+              />
+              <button
+                className="chat-config-save-btn"
+                type="button"
+                onClick={() => { void handleSaveBaseUrl(); }}
+                disabled={tab.isStreaming || savingProviders[tab.activeProvider] || isBaseUrlUnchanged() || !currentConfig.baseUrl}
+                aria-label="Save API URL"
+                title="Save API URL"
+              >
+                {savingProviders[tab.activeProvider] ? '⏳' : '💾'}
+              </button>
+            </div>
           </div>
 
           {/* API Key (secure) */}
@@ -393,16 +455,17 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
             </label>
             <div className="chat-config-test-row">
               <button
-                className="chat-config-test-btn"
+                className={`chat-config-test-btn ${currentConfig.testing ? 'test-btn-testing' : ''}`}
                 type="button"
                 onClick={handleTestConnection}
                 disabled={tab.isStreaming || currentConfig.testing || !currentConfig.baseUrl}
                 aria-label="Test connection"
+                aria-busy={currentConfig.testing}
               >
-                {currentConfig.testing ? 'Testing...' : 'Test Connection'}
+                {currentConfig.testing ? '⏳ Testing...' : 'Test Connection'}
               </button>
-              {currentConfig.testResult && (
-                <span className={`chat-config-test-result ${currentConfig.testResult.status === 'ok' ? 'test-ok' : 'test-error'}`}>
+              {currentConfig.testResult && !currentConfig.testing && (
+                <span className={`chat-config-test-result ${currentConfig.testResult.status === 'ok' ? 'test-ok' : 'test-error'}`} role="status">
                   {currentConfig.testResult.status === 'ok' ? '✓ Connected' : `✗ ${currentConfig.testResult.message ?? 'Failed'}`}
                 </span>
               )}
