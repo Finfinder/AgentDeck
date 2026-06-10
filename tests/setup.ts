@@ -4,3 +4,8 @@ import '@testing-library/jest-dom/vitest';
 if (typeof (document as unknown as Record<string, unknown>).queryCommandSupported !== 'function') {
   (document as unknown as Record<string, unknown>).queryCommandSupported = () => false;
 }
+
+// Polyfill for jsdom missing scrollIntoView.
+if (typeof Element.prototype.scrollIntoView !== 'function') {
+  Element.prototype.scrollIntoView = () => {};
+}

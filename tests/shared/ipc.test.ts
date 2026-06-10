@@ -12,7 +12,16 @@ import {
   isWorkspaceEditInput,
   isWorkspaceEditResult,
   isDiffInput,
-  isDiffResult
+  isDiffResult,
+  isModelProviderId,
+  isModelInfo,
+  isModelProviderState,
+  isModelGatewayConfig,
+  isChatMessage,
+  isChatTabState,
+  isChatStreamEvent,
+  isSendMessageResult,
+  isToolCall
 } from '@agentdeck/shared';
 
 describe('packages/shared ipc type guards', () => {
@@ -293,5 +302,179 @@ describe('packages/shared ipc type guards', () => {
       code: 'FILE_NOT_FOUND',
       message: 'wrong code'
     })).toBe(false);
+  });
+
+  // Model Gateway guards
+  it('validates model provider id', () => {
+    expect(isModelProviderId('openrouter')).toBe(true);
+    expect(isModelProviderId('ollama')).toBe(true);
+    expect(isModelProviderId('lmstudio')).toBe(true);
+    expect(isModelProviderId('openai-compatible')).toBe(true);
+    expect(isModelProviderId('invalid')).toBe(false);
+    expect(isModelProviderId(123)).toBe(false);
+  });
+
+  it('validates model info', () => {
+    expect(isModelInfo({
+      id: 'gpt-4',
+      name: 'GPT-4',
+      provider: 'openrouter',
+      contextWindow: 8192,
+      supportsTools: true,
+      supportsStreaming: true,
+      supportsEmbeddings: false
+    })).toBe(true);
+
+    expect(isModelInfo({ id: 'gpt-4', name: 'GPT-4', provider: 'openrouter', contextWindow: 8192, supportsTools: true, supportsStreaming: true })).toBe(false);
+    expect(isModelInfo({ id: 'gpt-4', name: 'GPT-4', provider: 'invalid', contextWindow: 8192, supportsTools: true, supportsStreaming: true, supportsEmbeddings: false })).toBe(false);
+  });
+
+  it('validates model provider state', () => {
+    expect(isModelProviderState({
+      id: 'ollama',
+      label: 'Ollama',
+      status: 'ready',
+      baseUrl: 'http://localhost:11434',
+      models: []
+    })).toBe(true);
+
+    expect(isModelProviderState({
+      id: 'ollama',
+      label: 'Ollama',
+      status: 'invalid',
+      baseUrl: 'http://localhost:11434',
+      models: []
+    })).toBe(false);
+  });
+
+  it('validates model gateway config', () => {
+    expect(isModelGatewayConfig({
+      providers: [],
+      activeProvider: 'ollama',
+      activeModel: 'llama2'
+    })).toBe(true);
+
+    expect(isModelGatewayConfig({
+      providers: [],
+      activeProvider: 'invalid',
+      activeModel: 'llama2'
+    })).toBe(false);
+  });
+
+  // Chat guards
+  it('validates chat message', () => {
+    expect(isChatMessage({ role: 'user', content: 'hello', timestamp: 1000 })).toBe(true);
+    expect(isChatMessage({ role: 'assistant', content: 'hi', timestamp: 2000 })).toBe(true);
+    expect(isChatMessage({ role: 'system', content: 'context', timestamp: 0 })).toBe(true);
+    expect(isChatMessage({ role: 'invalid', content: 'hello', timestamp: 1000 })).toBe(false);
+    expect(isChatMessage({ role: 'user', content: 'hello' })).toBe(false);
+  });
+
+  it('validates chat tab state', () => {
+    expect(isChatTabState({
+      id: 'tab-1',
+      title: 'Chat',
+      messages: [],
+      activeModel: 'default',
+      activeProvider: 'ollama',
+      isStreaming: false
+    })).toBe(true);
+
+    expect(isChatTabState({
+      id: 'tab-1',
+      title: 'Chat',
+      messages: [{ role: 'user', content: 'hi', timestamp: 1000 }],
+      activeModel: 'default',
+      activeProvider: 'ollama',
+      isStreaming: false
+    })).toBe(true);
+
+    expect(isChatTabState({ id: 'tab-1', title: 'Chat', messages: [], activeModel: 'default', activeProvider: 'invalid', isStreaming: false })).toBe(false);
+  });
+
+  it('validates chat stream event', () => {
+    expect(isChatStreamEvent({ type: 'chunk', content: 'hello' })).toBe(true);
+    expect(isChatStreamEvent({ type: 'done' })).toBe(true);
+    expect(isChatStreamEvent({ type: 'error', message: 'failed' })).toBe(true);
+    expect(isChatStreamEvent({ type: 'unknown' })).toBe(false);
+    expect(isChatStreamEvent({ type: 'chunk' })).toBe(false);
+    expect(isChatStreamEvent({ type: 'error' })).toBe(false);
+  });
+
+  it('validates send message result', () => {
+    expect(isSendMessageResult({ status: 'ok' })).toBe(true);
+    expect(isSendMessageResult({ status: 'error', code: 'PROVIDER_ERROR', message: 'fail' })).toBe(true);
+    expect(isSendMessageResult({ status: 'error', code: 'MODEL_ERROR', message: 'fail' })).toBe(true);
+    expect(isSendMessageResult({ status: 'error', code: 'NETWORK_ERROR', message: 'fail' })).toBe(true);
+    expect(isSendMessageResult({ status: 'error', code: 'UNKNOWN', message: 'fail' })).toBe(true);
+    expect(isSendMessageResult({ status: 'error', code: 'INVALID', message: 'fail' })).toBe(false);
+    expect(isSendMessageResult({ status: 'error', code: 'PROVIDER_ERROR' })).toBe(false);
+  });
+
+  // Tool calling guards
+  it('validates tool call', () => {
+    expect(isToolCall({
+      id: 'call_1',
+      type: 'function',
+      function: { name: 'get_weather', arguments: '{"city":"Warsaw"}' }
+    })).toBe(true);
+
+    expect(isToolCall({
+      id: 'call_1',
+      type: 'invalid',
+      function: { name: 'get_weather', arguments: '{}' }
+    })).toBe(false);
+
+    expect(isToolCall({
+      id: 'call_1',
+      type: 'function',
+      function: { name: 'get_weather' }
+    })).toBe(false);
+
+    expect(isToolCall(null)).toBe(false);
+    expect(isToolCall({})).toBe(false);
+  });
+
+  it('validates chat message with tool_calls', () => {
+    expect(isChatMessage({
+      role: 'assistant',
+      content: '',
+      timestamp: 1000,
+      tool_calls: [{
+        id: 'call_1',
+        type: 'function',
+        function: { name: 'get_weather', arguments: '{}' }
+      }]
+    })).toBe(true);
+
+    expect(isChatMessage({
+      role: 'assistant',
+      content: '',
+      timestamp: 1000,
+      tool_calls: [{ id: 'bad', type: 'invalid' }]
+    })).toBe(false);
+  });
+
+  it('validates chat message with tool role and tool_call_id', () => {
+    expect(isChatMessage({
+      role: 'tool',
+      content: 'result',
+      timestamp: 1000,
+      tool_call_id: 'call_1'
+    })).toBe(true);
+  });
+
+  it('validates chat stream event with tool_use', () => {
+    expect(isChatStreamEvent({
+      type: 'tool_use',
+      toolCall: {
+        id: 'call_1',
+        type: 'function',
+        function: { name: 'get_weather', arguments: '{}' }
+      }
+    })).toBe(true);
+
+    expect(isChatStreamEvent({ type: 'tool_use', toolCall: null })).toBe(false);
+    expect(isChatStreamEvent({ type: 'tool_use' })).toBe(false);
   });
 });

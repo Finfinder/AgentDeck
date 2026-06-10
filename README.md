@@ -181,6 +181,44 @@ Example local VS Code MCP configuration:
 
 Alternatively, provide `SONAR_TOKEN` through your local environment. The MCP server configuration is optional and should stay local unless it contains only secret-free placeholders.
 
+## Supported Model Adapters
+
+AgentDeck ships with four built-in model provider adapters. Each adapter connects to a different LLM backend and requires specific environment variables or configuration.
+
+| Adapter | Provider ID | Base URL (default) | Auth | Required Env Var | Notes |
+|---------|-------------|-------------------|------|-------------------|-------|
+| **OpenRouter** | `openrouter` | `https://openrouter.ai/api/v1` | API Key | `OPENROUTER_API_KEY` | Supports tool calling on models with `tools` in `supported_parameters`. |
+| **Ollama** | `ollama` | `http://localhost:11434` | None | — | Native Ollama format. Supports tool calling on compatible models. |
+| **LM Studio** | `lmstudio` | `http://localhost:1234/v1` | None | — | OpenAI-compatible endpoint. |
+| **OpenAI Compatible** | `openai-compatible` | _(user-configured)_ | API Key | `OPENAI_API_KEY` | Generic adapter for any OpenAI-compatible API (e.g., vLLM, LiteLLM). |
+
+### Configuring Adapters
+
+All adapters can be configured at runtime via the **Model Configuration** panel in the chat tab:
+
+- **API URL**: Override the default base URL for each provider.
+- **API Key**: Stored securely in the OS keychain (via `keytar`). Never persisted in workspace files or logs.
+- **Test Connection**: Validates the endpoint and fetches the available model list.
+
+### Retry Policy
+
+The Model Gateway includes built-in **exponential backoff with jitter** for transient errors (`NETWORK_ERROR`, `PROVIDER_ERROR`). The default retry policy is:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `maxRetries` | `3` | Maximum number of retry attempts |
+| `baseDelayMs` | `1000` | Initial delay before first retry |
+| `maxDelayMs` | `30000` | Maximum delay cap |
+| `jitterFactor` | `0.25` | Random jitter as fraction of computed delay |
+
+`MODEL_ERROR` responses (e.g., model not found, context length exceeded) are **not retried** since they are not transient.
+
+The retry policy can be customized programmatically:
+
+```typescript
+modelGateway.setRetryPolicy({ maxRetries: 5, baseDelayMs: 2000 });
+```
+
 ## What this MVP contains (scope)
 
 The AgentDeck MVP targets a vertical slice that validates the agent-first developer experience:

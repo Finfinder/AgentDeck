@@ -1,17 +1,20 @@
 import { config } from 'dotenv';
-import { app, BrowserWindow, dialog, ipcMain, Menu, globalShortcut } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, globalShortcut, session } from 'electron';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 
-import { applyWorkspaceEdit, bootstrapDesktopServices, createSettingsService, createStartupErrorState, createWorkspaceService, getDiagnostics, markBufferDirty, readEditorFile, showDiff, createIdentityService, type IdentityService, type SettingsService, type WorkspaceService, writeEditorFile } from '@agentdeck/services';
+import { applyWorkspaceEdit, bootstrapDesktopServices, createSettingsService, createStartupErrorState, createWorkspaceService, getDiagnostics, markBufferDirty, readEditorFile, showDiff, createIdentityService, type IdentityService, type SettingsService, type WorkspaceService, writeEditorFile, createModelGateway, createDefaultAdapters, type ModelGateway } from '@agentdeck/services';
 import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
+  isChatStreamEvent,
+  isChatTabState,
   isDiffInput,
   isThemeSettings,
   isWorkspaceEditInput,
   isWorkspaceOpenRequest,
+  type ModelProviderId,
   type SearchQuery,
   type StartupState,
   type WorkspaceSelection
@@ -39,7 +42,7 @@ let startupState: StartupState = {
   message: 'Application services have not been initialized yet.'
 };
 
-function registerIpcHandlers(settingsService: SettingsService, workspaceService: WorkspaceService, mainWindow: BrowserWindow, identityService?: IdentityService): void {
+function registerIpcHandlers(settingsService: SettingsService, workspaceService: WorkspaceService, mainWindow: BrowserWindow, identityService?: IdentityService, modelGateway?: ModelGateway): void {
   ipcMain.handle(IPC_CHANNELS.getStartupState, () => startupState);
   ipcMain.handle(IPC_CHANNELS.getThemeSettings, () => settingsService.readThemeSettings());
   ipcMain.handle(IPC_CHANNELS.setThemeSettings, (_event, value: unknown) => {
@@ -251,6 +254,116 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
       }
     });
   }
+
+  // Model Gateway IPC handlers
+  if (modelGateway) {
+    ipcMain.handle(IPC_CHANNELS.getModelGatewayConfig, () => modelGateway.getConfig());
+    ipcMain.handle(IPC_CHANNELS.listChatTabs, () => modelGateway.listChatTabs());
+    ipcMain.handle(IPC_CHANNELS.createChatTab, (_event, title: unknown) => {
+      return modelGateway.createChatTab(typeof title === 'string' ? title : undefined);
+    });
+    ipcMain.handle(IPC_CHANNELS.closeChatTab, (_event, tabId: unknown) => {
+      if (typeof tabId === 'string') modelGateway.closeChatTab(tabId);
+    });
+    ipcMain.handle(IPC_CHANNELS.sendMessage, async (_event, tabId: unknown, message: unknown) => {
+      if (typeof tabId !== 'string' || typeof message !== 'string') {
+        return { status: 'error', code: 'UNKNOWN', message: 'Invalid arguments.' };
+      }
+      return modelGateway.sendMessage(tabId, message);
+    });
+    ipcMain.handle(IPC_CHANNELS.stopStreaming, (_event, tabId: unknown) => {
+      if (typeof tabId === 'string') modelGateway.stopStreaming(tabId);
+    });
+    ipcMain.handle(IPC_CHANNELS.chatSetActiveModel, (_event, tabId: unknown, modelId: unknown) => {
+      if (typeof tabId === 'string' && typeof modelId === 'string') modelGateway.setTabActiveModel(tabId, modelId);
+    });
+    ipcMain.handle(IPC_CHANNELS.chatSetActiveProvider, (_event, tabId: unknown, providerId: unknown) => {
+      if (typeof tabId === 'string' && typeof providerId === 'string') modelGateway.setTabActiveProvider(tabId, providerId as ModelProviderId);
+    });
+
+    // Forward Model Gateway events to renderer (validate before sending)
+    modelGateway.on('chat-stream', (tabId: string, event: unknown) => {
+      if (!mainWindow.isDestroyed() && isChatStreamEvent(event)) {
+        mainWindow.webContents.send(IPC_CHANNELS.chatStreamEvent, tabId, event);
+      }
+    });
+    modelGateway.on('chat-tabs-changed', (tabs: unknown) => {
+      if (!mainWindow.isDestroyed() && Array.isArray(tabs) && tabs.every(isChatTabState)) {
+        mainWindow.webContents.send(IPC_CHANNELS.chatTabsChanged, tabs);
+      }
+    });
+
+    // Model Gateway secure config handlers
+    ipcMain.handle(IPC_CHANNELS.modelGatewayGetApiKey, async (_event, providerId: unknown) => {
+      if (typeof providerId !== 'string') return null;
+      try {
+        const keytar = await import('keytar');
+        return await keytar.getPassword('agentdeck', `api-key-${providerId}`);
+      } catch {
+        return null;
+      }
+    });
+
+    ipcMain.handle(IPC_CHANNELS.modelGatewaySetApiKey, async (_event, providerId: unknown, apiKey: unknown) => {
+      if (typeof providerId !== 'string' || typeof apiKey !== 'string') return;
+      try {
+        const keytar = await import('keytar');
+        await keytar.setPassword('agentdeck', `api-key-${providerId}`, apiKey);
+      } catch {
+        // keytar unavailable — silently fail
+      }
+    });
+
+    ipcMain.handle(IPC_CHANNELS.modelGatewayDeleteApiKey, async (_event, providerId: unknown) => {
+      if (typeof providerId !== 'string') return;
+      try {
+        const keytar = await import('keytar');
+        await keytar.deletePassword('agentdeck', `api-key-${providerId}`);
+      } catch {
+        // keytar unavailable — silently fail
+      }
+    });
+
+    ipcMain.handle(IPC_CHANNELS.modelGatewayTestConnection, async (_event, providerId: unknown, baseUrl: unknown) => {
+      if (typeof providerId !== 'string' || typeof baseUrl !== 'string') {
+        return { status: 'error', message: 'Invalid provider ID or base URL.' };
+      }
+      try {
+        const adapter = modelGateway.getAdapter(providerId as Parameters<typeof modelGateway.getAdapter>[0]);
+        if (!adapter) {
+          return { status: 'error', message: `No adapter registered for provider: ${providerId}` };
+        }
+        const healthy = await adapter.healthCheck(baseUrl);
+        if (!healthy) {
+          return { status: 'error', message: 'Connection failed. Check the base URL.' };
+        }
+        const models = await adapter.listModels(baseUrl);
+        modelGateway.updateProviderStatus(providerId as Parameters<typeof modelGateway.updateProviderStatus>[0], 'ready', models);
+        return { status: 'ok', models };
+      } catch (err) {
+        return { status: 'error', message: err instanceof Error ? err.message : 'Unknown error' };
+      }
+    });
+
+    ipcMain.handle(IPC_CHANNELS.modelGatewaySetProviderConfig, (_event, providerId: unknown, baseUrl: unknown) => {
+      if (typeof providerId !== 'string' || typeof baseUrl !== 'string') return;
+      modelGateway.setProviderBaseUrl(providerId as Parameters<typeof modelGateway.setProviderBaseUrl>[0], baseUrl);
+    });
+
+    ipcMain.handle(IPC_CHANNELS.modelGatewayGetProviderConfig, async (_event, providerId: unknown) => {
+      if (typeof providerId !== 'string') return { baseUrl: '', hasApiKey: false };
+      const config = modelGateway.getProviderConfig(providerId as Parameters<typeof modelGateway.getProviderConfig>[0]);
+      let hasApiKey = false;
+      try {
+        const keytar = await import('keytar');
+        const key = await keytar.getPassword('agentdeck', `api-key-${providerId}`);
+        hasApiKey = typeof key === 'string' && key.length > 0;
+      } catch {
+        // keytar unavailable — hasApiKey stays false
+      }
+      return { baseUrl: config.baseUrl, hasApiKey };
+    });
+  }
 }
 
 function isSearchQuery(value: unknown): value is SearchQuery {
@@ -299,18 +412,6 @@ function createMainWindow(): BrowserWindow {
 async function selectWorkspaceEntry(value: unknown, mainWindow: BrowserWindow): Promise<WorkspaceSelection> {
   if (!isWorkspaceOpenRequest(value)) {
     return { status: 'cancelled' };
-  }
-
-  // In test mode, return a mock path instead of showing dialog
-  if (process.env.NODE_ENV === 'test') {
-    // Use path.join to avoid manual escaping of backslashes in Windows paths.
-    const testWorkspacePath = process.env.TEST_WORKSPACE_PATH ?? join('C:', 'test');
-    return {
-      status: 'selected',
-      kind: value.kind,
-      path: value.kind === 'workspace-file' ? join(testWorkspacePath, 'test.code-workspace') : testWorkspacePath,
-      name: value.kind === 'workspace-file' ? 'test.code-workspace' : 'test-folder',
-    };
   }
 
   // Ensure the window is visible before showing the dialog
@@ -378,10 +479,29 @@ async function start(): Promise<void> {
       }
     }
   });
+  const modelGateway = createModelGateway();
+  // Register default provider adapters
+  for (const adapter of createDefaultAdapters()) {
+    modelGateway.registerAdapter(adapter);
+  }
 
   startupState = await resolveStartupState();
+
+  // Set frame-ancestors CSP via HTTP header (not supported in <meta> tags)
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          (details.responseHeaders?.['Content-Security-Policy']?.[0] ?? '') +
+          "; frame-ancestors 'none'"
+        ]
+      }
+    });
+  });
+
   const mainWindow = createMainWindow();
-  registerIpcHandlers(settingsService, workspaceService, mainWindow, identityService);
+  registerIpcHandlers(settingsService, workspaceService, mainWindow, identityService, modelGateway);
   registerDevToolsShortcut(mainWindow);
 }
 

@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
+  isChatStreamEvent,
+  isChatTabState,
   isDirectoryListing,
   isDiffResult,
   isFileOperationResult,
@@ -11,19 +13,26 @@ import {
   isFsChangeEvent,
   isIdentitySession,
   isIdentitySessionWarning,
+  isModelGatewayConfig,
+  isModelProviderConfig,
+  isSendMessageResult,
   isStartupState,
   isThemeSettings,
   isWorkspaceEditResult,
-  type IdentitySession,
-  type IdentitySessionWarning,
   isWorkspaceModel,
   isWorkspaceSelection,
   type AgentDeckPreloadApi,
+  type ChatStreamEvent,
+  type ChatTabState,
   type DiffInput,
   type EditorDiagnostic,
   type FsChangeEvent,
+  type IdentitySession,
+  type IdentitySessionWarning,
+
   type StartupState,
-  type WorkspaceEditInput
+  type WorkspaceEditInput,
+
 } from '@agentdeck/shared';
 
 const invalidStartupState: StartupState = {
@@ -149,6 +158,75 @@ const api: AgentDeckPreloadApi = {
   },
   toggleDevTools: async () => {
     await ipcRenderer.invoke(IPC_CHANNELS.toggleDevTools);
+  },
+  // Model Gateway
+  getModelGatewayConfig: async () => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.getModelGatewayConfig);
+    return isModelGatewayConfig(value) ? value : { providers: [], activeProvider: 'ollama', activeModel: 'default' };
+  },
+  listChatTabs: async () => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.listChatTabs);
+    return Array.isArray(value) ? value.filter(isChatTabState) : [];
+  },
+  createChatTab: async (title?: string) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.createChatTab, title);
+    return isChatTabState(value) ? value : { id: 'error', title: 'Error', messages: [], activeModel: 'default', activeProvider: 'ollama', isStreaming: false, error: 'Failed to create chat tab.' };
+  },
+  closeChatTab: async (tabId: string) => {
+    await ipcRenderer.invoke(IPC_CHANNELS.closeChatTab, tabId);
+  },
+  sendMessage: async (tabId: string, message: string) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.sendMessage, tabId, message);
+    return isSendMessageResult(value) ? value : { status: 'error', code: 'UNKNOWN', message: 'Unexpected response from main process.' };
+  },
+  stopStreaming: async (tabId: string) => {
+    await ipcRenderer.invoke(IPC_CHANNELS.stopStreaming, tabId);
+  },
+  onChatStream: (handler: (tabId: string, event: ChatStreamEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, tabId: unknown, streamEvent: unknown) => {
+      if (typeof tabId === 'string' && isChatStreamEvent(streamEvent)) {
+        handler(tabId, streamEvent);
+      }
+    };
+    ipcRenderer.on(IPC_CHANNELS.chatStreamEvent, listener);
+    return () => { ipcRenderer.off(IPC_CHANNELS.chatStreamEvent, listener); };
+  },
+  onChatTabsChange: (handler: (tabs: readonly ChatTabState[]) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (Array.isArray(value)) {
+        handler(value.filter(isChatTabState));
+      }
+    };
+    ipcRenderer.on(IPC_CHANNELS.chatTabsChanged, listener);
+    return () => { ipcRenderer.off(IPC_CHANNELS.chatTabsChanged, listener); };
+  },
+  // Model Gateway secure config
+  getApiKey: async (providerId: string) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.modelGatewayGetApiKey, providerId);
+    return typeof value === 'string' ? value : null;
+  },
+  setApiKey: async (providerId: string, apiKey: string) => {
+    await ipcRenderer.invoke(IPC_CHANNELS.modelGatewaySetApiKey, providerId, apiKey);
+  },
+  deleteApiKey: async (providerId: string) => {
+    await ipcRenderer.invoke(IPC_CHANNELS.modelGatewayDeleteApiKey, providerId);
+  },
+  testConnection: async (providerId: string, baseUrl: string) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.modelGatewayTestConnection, providerId, baseUrl);
+    return value as { status: 'ok' | 'error'; message?: string };
+  },
+  setProviderConfig: async (providerId: string, baseUrl: string) => {
+    await ipcRenderer.invoke(IPC_CHANNELS.modelGatewaySetProviderConfig, providerId, baseUrl);
+  },
+  getProviderConfig: async (providerId: string) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.modelGatewayGetProviderConfig, providerId);
+    return isModelProviderConfig(value) ? value : { baseUrl: '', hasApiKey: false };
+  },
+  setActiveModel: async (tabId: string, modelId: string) => {
+    await ipcRenderer.invoke(IPC_CHANNELS.chatSetActiveModel, tabId, modelId);
+  },
+  setActiveProvider: async (tabId: string, providerId: string) => {
+    await ipcRenderer.invoke(IPC_CHANNELS.chatSetActiveProvider, tabId, providerId);
   },
   versions: {
     chrome: process.versions.chrome ?? 'unknown',

@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { DEFAULT_THEME_SETTINGS, isIdentitySession, type IdentitySession, type AgentDeckPreloadApi, type EditorDiagnostic, type FsChangeEvent, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
 
+import { ChatPanel, ChatTabs, useChatStore } from './chat';
 import { EditorSurface } from './editor';
 import { useEditorStore } from './editor/useEditorStore';
-import { Explorer } from './Explorer';
 import { MenuBar } from './MenuBar';
 import { ProblemsPanel } from './ProblemsPanel';
-import { SearchPanel } from './SearchPanel';
+import { SidebarContent } from './SidebarContent';
 
 const STARTUP_STATE_READ_ERROR_MESSAGE = 'Unable to read startup state.';
 const THEME_SETTINGS_READ_ERROR_MESSAGE = 'Unable to read theme settings.';
@@ -41,11 +41,41 @@ const DEV_PRELOAD_API: AgentDeckPreloadApi = {
   startOAuth: async () => ({ isLoggedIn: false }),
   signOut: async () => ({ isLoggedIn: false }),
   onIdentityChange: () => () => undefined,
-  onDeviceCode: () => () => undefined
+  onDeviceCode: () => () => undefined,
+  onIdentityWarning: () => () => undefined,
+  // Model Gateway dev stubs
+  getModelGatewayConfig: async () => ({ providers: [], activeProvider: 'ollama', activeModel: 'default' }),
+  listChatTabs: async () => [],
+  createChatTab: async (title?: string) => ({
+    id: `chat-tab-${Date.now()}`,
+    title: title ?? 'New Chat',
+    messages: [],
+    activeModel: 'default',
+    activeProvider: 'ollama' as const,
+    isStreaming: false
+  }),
+  closeChatTab: async () => undefined,
+  sendMessage: async () => ({ status: 'ok' as const }),
+  stopStreaming: async () => undefined,
+  onChatStream: () => () => undefined,
+  onChatTabsChange: () => () => undefined,
+  // Model Gateway secure config dev stubs
+  getApiKey: async () => null,
+  setApiKey: async () => undefined,
+  deleteApiKey: async () => undefined,
+  testConnection: async () => ({ status: 'error' as const, message: 'Dev mode - no real connection.' }),
+  setProviderConfig: async () => undefined,
+  getProviderConfig: async () => ({ baseUrl: '', hasApiKey: false })
 };
 
 function getPreloadApi(): AgentDeckPreloadApi {
   return (globalThis as unknown as { agentDeck?: AgentDeckPreloadApi }).agentDeck ?? DEV_PRELOAD_API;
+}
+
+function getSidebarLabel(activePanel: 'explorer' | 'search' | 'chat'): string {
+  if (activePanel === 'chat') return 'Chat';
+  if (activePanel === 'search') return 'Search';
+  return 'Explorer';
 }
 
 interface IdentityMenuProps {
@@ -207,7 +237,8 @@ export function App() {
   const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelection | null>(null);
   const [workspaceModel, setWorkspaceModel] = useState<WorkspaceModel | null>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState('No workspace opened.');
-  const [activePanel, setActivePanel] = useState<'explorer' | 'search'>('explorer');
+  const [activePanel, setActivePanel] = useState<'explorer' | 'search' | 'chat'>('explorer');
+  const chatStore = useChatStore(agent);
   const [activeBottomPanel, setActiveBottomPanel] = useState<'problems' | 'services' | 'output'>('problems');
   const [externalChanges, setExternalChanges] = useState<ReadonlySet<string>>(new Set());
   const editorStore = useEditorStore();
@@ -509,6 +540,9 @@ export function App() {
         <button className="activity-button" type="button" aria-label="Source control" title="Source control" disabled>
           SC
         </button>
+        <button className="activity-button" type="button" aria-label="Chat" title="Chat" aria-pressed={activePanel === 'chat'} onClick={() => { setActivePanel('chat'); }}>
+          CH
+        </button>
         <div className="activity-bar-spacer" />
         <IdentityMenu
           identity={identity}
@@ -522,37 +556,42 @@ export function App() {
         />
       </nav>
 
-      <aside className="side-bar" aria-label={activePanel === 'search' ? 'Search' : 'Explorer'}>
-
-        <div className="workspace-actions" aria-label="Workspace actions">
-          <button className="primary-action" type="button" onClick={() => { openWorkspace('workspace-file'); }}>
-            Open workspace
-          </button>
-          <button className="secondary-action" type="button" onClick={() => { openWorkspace('folder'); }}>
-            Open folder
-          </button>
-        </div>
-
-        {workspaceModel?.status === 'ok' && activePanel === 'explorer' && (
-          <Explorer agent={agent} workspaceModel={workspaceModel} onFileOpen={(filePath) => { editorStore.openTab({ filePath }); }} />
-        )}
-        {workspaceModel?.status === 'ok' && activePanel === 'search' && (
-          <SearchPanel agent={agent} workspaceModel={workspaceModel} onFileOpen={(filePath, line, col, pattern, revealNonce) => { editorStore.openTab({ filePath, line, col, ...(pattern == null ? {} : { pattern }), ...(revealNonce == null ? {} : { revealNonce }) }); }} />
-        )}
-        {workspaceModel?.status !== 'ok' && (
-          <section className="workspace-card" aria-labelledby="explorer-title">
-            <p className="section-label">Explorer</p>
-            <h2 id="explorer-title">Explorer</h2>
-            {workspaceSelection?.status === 'selected' && workspaceModel?.status === 'error' ? (
-              <p className="workspace-path" role="alert">{workspaceModel.message}</p>
-            ) : (
-              <p className="workspace-path">No workspace opened.</p>
-            )}
-          </section>
-        )}
+      <aside className="side-bar" aria-label={getSidebarLabel(activePanel)}>
+        <SidebarContent
+          activePanel={activePanel}
+          agent={agent}
+          workspaceModel={workspaceModel}
+          workspaceSelection={workspaceSelection}
+          editorStore={editorStore}
+          chatStore={chatStore}
+          onOpenWorkspace={openWorkspace}
+        />
       </aside>
 
-      <EditorSurface agent={agent} store={editorStore} externalChanges={externalChanges} onExternalChangeAck={(path) => { setExternalChanges(prev => { const next = new Set(prev); next.delete(path); return next; }); }} onDiagnosticsChange={handleDiagnosticsChange} theme={themeSettings.theme} />
+      {activePanel === 'chat' ? (
+        <div className="chat-container">
+          <ChatTabs
+            tabs={chatStore.tabs}
+            activeTabId={chatStore.activeTabId}
+            onSelect={chatStore.setActiveTabId}
+            onClose={(tabId) => { chatStore.closeTab(tabId); }}
+            onCreate={() => { chatStore.createTab(); }}
+          />
+          {chatStore.activeTabId && chatStore.tabs.some(t => t.id === chatStore.activeTabId) ? (
+            <ChatPanel
+              agent={agent}
+              tab={chatStore.tabs.find(t => t.id === chatStore.activeTabId)!}
+            />
+          ) : (
+            <div className="editor-welcome">
+              <h2>Chat</h2>
+              <p>Create a new chat tab to start a conversation with an AI model.</p>
+            </div>
+          )}
+        </div>
+      ) : (
+        <EditorSurface agent={agent} store={editorStore} externalChanges={externalChanges} onExternalChangeAck={(path) => { setExternalChanges(prev => { const next = new Set(prev); next.delete(path); return next; }); }} onDiagnosticsChange={handleDiagnosticsChange} theme={themeSettings.theme} />
+      )}
 
       <section className="bottom-panel" aria-label="Panel">
         <div className="panel-tabs" role="tablist" aria-label="Panel views">
