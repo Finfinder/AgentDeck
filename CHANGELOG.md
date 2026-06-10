@@ -8,6 +8,7 @@ Format zgodny z [Keep a Changelog](https://keepachangelog.com/pl/1.0.0/).
 
 ### Fixed
 
+- Walidacja znaków URL w `defaultOpenUrl` — dodano allowlist regex `SAFE_URL_RE` oraz jawny `{ shell: false }` w `execFile` aby zapobiec CodeQL alert `js/command-line-injection` (CWE-78).
 - Naprawiono 12 ESLint errors: usunięto unused imports (isDiffInput, isWorkspaceEditInput, DiffResult, WorkspaceEditResult) z preload, unused filePath parameter z editorShowDiff, unused sampleDiagnostics z integration tests, dodano eslint-disable dla deprecated monaco.languages API. Wszystkie quality gates przechodzą (lint, typecheck, 439/439 testy).
 - Zaktualizowano dompurify z 3.2.7 do 3.4.8 poprzez npm overrides — naprawiono podatności XSS (CWE-79), URI validation bypass (CWE-183), Prototype Pollution (CWE-1321) w monaco-editor.
 
