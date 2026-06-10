@@ -488,7 +488,6 @@ export class OllamaAdapter extends OpenAICompatibleAdapter {
   }
 
   private parseOllamaLine(trimmed: string): ChatStreamEvent[] | 'done' | null {
-    console.log('Ollama line:', trimmed);
     if (!trimmed) return null;
 
     try {

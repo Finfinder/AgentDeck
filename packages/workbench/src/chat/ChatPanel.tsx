@@ -89,6 +89,8 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
         setStreamingContent('');
         setStreamingToolCalls([]);
         setStreamError(event.message);
+      } else if (event.type === 'info') {
+        // Info events (e.g. retry notifications) don't affect streaming state
       } else if (event.type === 'done') {
         setStreamingContent('');
         setStreamingToolCalls([]);
@@ -231,19 +233,13 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
   }, [tab.activeProvider]);
 
   const handleSend = useCallback(async () => {
-    console.log('handleSend called, input:', input, 'tabId:', tab.id);
     const trimmed = input.trim();
-    if (!trimmed || tab.isStreaming) {
-      console.log('handleSend blocked: trimmed empty or streaming', { trimmed, isStreaming: tab.isStreaming });
-      return;
-    }
+    if (!trimmed || tab.isStreaming) return;
 
     setInput('');
     setStreamingContent('');
     setStreamError(null);
-    console.log('Calling agent.sendMessage...');
     await agent.sendMessage(tab.id, trimmed);
-    console.log('agent.sendMessage called.');
   }, [agent, tab.id, tab.isStreaming, input]);
 
   const handleKeyDown = useCallback(

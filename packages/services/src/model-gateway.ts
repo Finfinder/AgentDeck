@@ -442,7 +442,7 @@ export class ModelGateway extends EventEmitter {
       if (attempt > 0) {
         const delay = computeBackoffDelay(attempt - 1, policy);
         this.emit('chat-stream', tabId, {
-          type: 'error',
+          type: 'info',
           message: `[RETRY] Attempt ${attempt}/${policy.maxRetries} after ${delay}ms delay...`
         });
         await sleep(delay);

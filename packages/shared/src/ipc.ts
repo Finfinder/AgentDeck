@@ -328,7 +328,7 @@ export type AgentDeckPreloadApi = Readonly<{
   getApiKey?: (providerId: string) => Promise<string | null>;
   setApiKey?: (providerId: string, apiKey: string) => Promise<void>;
   deleteApiKey?: (providerId: string) => Promise<void>;
-  testConnection?: (providerId: string, baseUrl: string) => Promise<{ status: 'ok' | 'error'; message?: string }>;
+  testConnection?: (providerId: string, baseUrl: string) => Promise<{ status: 'ok' | 'error'; message?: string; models?: readonly ModelInfo[] }>;
   setProviderConfig?: (providerId: string, baseUrl: string) => Promise<void>;
   getProviderConfig?: (providerId: string) => Promise<ModelProviderConfig>;
   setActiveModel?: (tabId: string, modelId: string) => Promise<void>;
@@ -644,7 +644,8 @@ export type ChatStreamEvent =
   | Readonly<{ type: 'chunk'; content: string }>
   | Readonly<{ type: 'tool_use'; toolCall: ToolCall }>
   | Readonly<{ type: 'done' }>
-  | Readonly<{ type: 'error'; message: string }>;
+  | Readonly<{ type: 'error'; message: string }>
+  | Readonly<{ type: 'info'; message: string }>;
 
 export type SendMessageResult =
   | Readonly<{ status: 'ok' }>
@@ -747,6 +748,7 @@ export function isChatStreamEvent(value: unknown): value is ChatStreamEvent {
   if (value.type === 'tool_use') return isToolCall(value.toolCall);
   if (value.type === 'done') return true;
   if (value.type === 'error') return typeof value.message === 'string';
+  if (value.type === 'info') return typeof value.message === 'string';
   return false;
 }
 
