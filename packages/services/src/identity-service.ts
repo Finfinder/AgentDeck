@@ -31,10 +31,19 @@ export type SecureStore = Readonly<{
   deletePassword(service: string, account: string): Promise<boolean>;
 }>;
 
+// Allowlist of safe characters for URLs passed to OS open commands.
+// Excludes shell metacharacters (& | ; $ ` < > \ " ' ! { } ( ) * ? # ~ [ ] % space)
+// to prevent command injection even if a shell is inadvertently invoked.
+const SAFE_URL_RE = /^https?:\/\/[a-zA-Z0-9._~:/?#[\]@!$&'()*+,;=-]+$/;
+
 function defaultOpenUrl(url: string): Promise<void> {
   // Validate URL protocol to prevent opening unsafe protocols (e.g. file://, javascript:)
   if (!url.startsWith('https://') && !url.startsWith('http://')) {
     return Promise.reject(new Error(`Unsafe URL protocol: only http/https allowed, got "${url.slice(0, 20)}..."`));
+  }
+  // Validate URL characters to prevent shell metacharacter injection
+  if (!SAFE_URL_RE.test(url)) {
+    return Promise.reject(new Error(`URL contains unsafe characters: "${url.slice(0, 50)}..."`));
   }
 
   return new Promise((resolve, reject) => {
@@ -55,10 +64,9 @@ function defaultOpenUrl(url: string): Promise<void> {
       args = [url];
     }
 
-    // codeql[js/command-line-injection] False positive: URL validated for http/https above; execFile does not invoke a shell.
-    // nosemgrep: javascript.lang.security.audit.unsafe-command-construction.unsafe-command-construction
-    // URL is validated for http/https protocol above; execFile does not invoke a shell.
-    execFile(file, args, (err) => {
+    // execFile does not invoke a shell (shell: false by default).
+    // URL is validated above for http/https protocol and safe characters.
+    execFile(file, args, { shell: false }, (err) => {
       if (err) return reject(err instanceof Error ? err : new Error(String(err)));
       resolve();
     });
