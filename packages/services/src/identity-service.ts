@@ -1,6 +1,5 @@
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { execFile } from 'node:child_process';
 import { writeFile, readFile, mkdir, chmod } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
@@ -31,52 +30,16 @@ export type SecureStore = Readonly<{
   deletePassword(service: string, account: string): Promise<boolean>;
 }>;
 
-// Allowlist of safe characters for URLs passed to OS open commands.
-// Excludes shell metacharacters (& | ; $ ` < > \ " ' ! { } ( ) * ? # ~ [ ] % space)
-// to prevent command injection even if a shell is inadvertently invoked.
-const SAFE_URL_RE = /^https?:\/\/[a-zA-Z0-9._~:/?#[\]@!$&'()*+,;=-]+$/;
-
-function defaultOpenUrl(url: string): Promise<void> {
-  // Validate URL protocol to prevent opening unsafe protocols (e.g. file://, javascript:)
-  if (!url.startsWith('https://') && !url.startsWith('http://')) {
-    return Promise.reject(new Error(`Unsafe URL protocol: only http/https allowed, got "${url.slice(0, 20)}..."`));
-  }
-  // Validate URL characters to prevent shell metacharacter injection
-  if (!SAFE_URL_RE.test(url)) {
-    return Promise.reject(new Error(`URL contains unsafe characters: "${url.slice(0, 50)}..."`));
-  }
-
-  return new Promise((resolve, reject) => {
-    const platform = process.platform;
-    let file: string;
-    let args: string[];
-
-    if (platform === 'win32') {
-      // 'start' is a cmd.exe built-in, so we must invoke via cmd.exe /c
-      // The empty first arg after /c is the window title for 'start'
-      file = 'cmd.exe';
-      args = ['/c', 'start', '', url];
-    } else if (platform === 'darwin') {
-      file = 'open';
-      args = [url];
-    } else {
-      file = 'xdg-open';
-      args = [url];
-    }
-
-    // execFile does not invoke a shell (shell: false by default).
-    // URL is validated above for http/https protocol and safe characters.
-    execFile(file, args, { shell: false }, (err) => {
-      if (err) return reject(err instanceof Error ? err : new Error(String(err)));
-      resolve();
-    });
-  });
-}
-
 export type SecureStoreWarning = Readonly<{
   type: 'FALLBACK_FILE_STORE';
   reason: string;
   path: string;
+}>;
+
+export type IdentityServiceOptions = Readonly<{
+  secureStore?: SecureStore;
+  openUrl: (url: string) => Promise<void>;
+  onFallbackWarning?: (warning: SecureStoreWarning) => void;
 }>;
 
 async function createDefaultSecureStore(
@@ -154,30 +117,23 @@ async function createFallbackFileStore(userDataPath: string): Promise<SecureStor
   };
 }
 
-export type IdentityServiceOptions = Readonly<{
-  openUrl?: (url: string) => Promise<void>;
-  secureStore?: SecureStore;
-  onFallbackWarning?: (warning: SecureStoreWarning) => void;
-}>;
-
 export class IdentityService {
   private secureStorePromise?: Promise<SecureStore>;
 
-  constructor(private readonly userDataPath: string, private readonly options?: IdentityServiceOptions) {}
+  constructor(private readonly userDataPath: string, private readonly options: IdentityServiceOptions) {}
 
   private async getSecureStore(): Promise<SecureStore> {
     if (!this.secureStorePromise) {
-      const store = this.options?.secureStore;
+      const store = this.options.secureStore;
       this.secureStorePromise = store
         ? Promise.resolve(store)
-        : createDefaultSecureStore(this.userDataPath, this.options?.onFallbackWarning);
+        : createDefaultSecureStore(this.userDataPath, this.options.onFallbackWarning);
     }
     return this.secureStorePromise;
   }
 
   private async openUrl(url: string) {
-    if (this.options?.openUrl) return this.options.openUrl(url);
-    return defaultOpenUrl(url);
+    return this.options.openUrl(url);
   }
 
   async getSession(): Promise<IdentitySession> {
@@ -462,7 +418,7 @@ export class IdentityService {
   }
 }
 
-export function createIdentityService(userDataPath: string, opts?: IdentityServiceOptions): IdentityService {
+export function createIdentityService(userDataPath: string, opts: IdentityServiceOptions): IdentityService {
   return new IdentityService(userDataPath, opts);
 }
 

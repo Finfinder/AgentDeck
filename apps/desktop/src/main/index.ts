@@ -1,5 +1,5 @@
 import { config } from 'dotenv';
-import { app, BrowserWindow, dialog, ipcMain, Menu, globalShortcut, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, globalShortcut, session, shell } from 'electron';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
@@ -471,6 +471,7 @@ async function start(): Promise<void> {
   const settingsService = createSettingsService(app.getPath('userData'));
   const workspaceService = createWorkspaceService(app.getPath('userData'));
   const identityService = createIdentityService(app.getPath('userData'), {
+    openUrl: (url) => shell.openExternal(url),
     onFallbackWarning: (warning) => {
       // Send warning to renderer so UI can display it to the user
       const win = BrowserWindow.getAllWindows()[0];
