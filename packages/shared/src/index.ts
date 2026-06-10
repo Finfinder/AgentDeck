@@ -18,10 +18,19 @@ export {
 	isWorkspaceEditInput,
 	isWorkspaceEditResult,
 	isDiffInput,
-	isDiffResult
+	isDiffResult,
+	isModelProviderId,
+	isModelInfo,
+	isModelProviderState,
+	isModelGatewayConfig,
+	isChatMessage,
+	isChatTabState,
+	isChatStreamEvent,
+	isSendMessageResult,
+	isToolCall
 } from './ipc';
 export type { IdentitySession, IdentitySessionWarning } from './ipc';
-export { isIdentitySession, isIdentitySessionWarning } from './ipc';
+export { isIdentitySession, isIdentitySessionWarning, isModelProviderConfig, isTestConnectionResult } from './ipc';
 export { pathBasename, normalizePathStr } from './path';
 export type { DomainEntityName, DomainOwnership, ModuleName } from './domain';
 export type {
@@ -57,5 +66,18 @@ export type {
 	WorkspaceEditOperation,
 	WorkspaceEditResult,
 	DiffInput,
-	DiffResult
+	DiffResult,
+	ModelProviderId,
+	ModelInfo,
+	ModelProviderStatus,
+	ModelProviderState,
+	ModelGatewayConfig,
+	ChatRole,
+	ChatMessage,
+	ToolCall,
+	ChatTabState,
+	ChatStreamEvent,
+	SendMessageResult,
+	ModelProviderConfig,
+	TestConnectionResult
 } from './ipc';

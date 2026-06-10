@@ -14,6 +14,9 @@ export default [
       parserOptions: {
         project: './tsconfig.typecheck.json',
         tsconfigRootDir: import.meta.dirname
+      },
+      globals: {
+        vi: 'readonly'
       }
     },
     plugins: {

@@ -76,8 +76,7 @@ test.describe('Open Folder', () => {
     });
 
     await page.getByRole('button', { name: /open folder/i }).click();
-
-    await expect(page.locator('.workspace-path')).toContainText('opened', { timeout: 15000 });
+    await expect(page.locator('output[aria-label="Workspace status"]')).toContainText('opened', { timeout: 15000 });
     await expect(page.locator('.file-tree')).toBeVisible();
     await expect(page.locator('.file-tree-item', { hasText: 'src' })).toBeVisible();
   });
@@ -119,7 +118,7 @@ test.describe('Explorer', () => {
       canceled: false,
     });
     await page.getByRole('button', { name: /open folder/i }).click();
-    await expect(page.locator('.workspace-path')).toContainText('opened', { timeout: 15000 });
+    await expect(page.locator('output[aria-label="Workspace status"]')).toContainText('opened', { timeout: 15000 });
   });
 
   test('should display file tree with workspace contents', async () => {
@@ -199,7 +198,7 @@ test.describe('Activity Bar', () => {
       canceled: false,
     });
     await page.getByRole('button', { name: /open folder/i }).click();
-    await expect(page.locator('.workspace-path')).toContainText('opened', { timeout: 15000 });
+    await expect(page.locator('output[aria-label="Workspace status"]')).toContainText('opened', { timeout: 15000 });
   });
 
   test('should switch to Search panel when Search button is clicked', async () => {
@@ -229,7 +228,7 @@ test.describe('Search Panel', () => {
       canceled: false,
     });
     await page.getByRole('button', { name: /open folder/i }).click();
-    await expect(page.locator('.workspace-path')).toContainText('opened', { timeout: 15000 });
+    await expect(page.locator('output[aria-label="Workspace status"]')).toContainText('opened', { timeout: 15000 });
     await page.getByRole('button', { name: /search/i }).click();
     await expect(page.locator('.search-panel')).toBeVisible();
   });
@@ -284,7 +283,7 @@ test.describe('Editor Tabs', () => {
       canceled: false,
     });
     await page.getByRole('button', { name: /open folder/i }).click();
-    await expect(page.locator('.workspace-path')).toContainText('opened', { timeout: 15000 });
+    await expect(page.locator('output[aria-label="Workspace status"]')).toContainText('opened', { timeout: 15000 });
   });
 
   test('should show No open editors when no tabs are open', async () => {
@@ -462,7 +461,7 @@ test.describe('Close Workspace', () => {
       canceled: false,
     });
     await page.getByRole('button', { name: /open folder/i }).click();
-    await expect(page.locator('.workspace-path')).toContainText('opened', { timeout: 15000 });
+    await expect(page.locator('output[aria-label="Workspace status"]')).toContainText('opened', { timeout: 15000 });
   });
 
   test('should close workspace via File menu', async () => {
@@ -486,7 +485,7 @@ test.describe('Editor Content and Dirty State', () => {
       canceled: false,
     });
     await page.getByRole('button', { name: /open folder/i }).click();
-    await expect(page.locator('.workspace-path')).toContainText('opened', { timeout: 15000 });
+    await expect(page.locator('output[aria-label="Workspace status"]')).toContainText('opened', { timeout: 15000 });
 
     // Open index.ts
     await page.locator('.file-tree-item', { hasText: 'src' }).click();
@@ -578,7 +577,7 @@ test.describe('Save Changes Dialog', () => {
       canceled: false,
     });
     await page.getByRole('button', { name: /open folder/i }).click();
-    await expect(page.locator('.workspace-path')).toContainText('opened', { timeout: 15000 });
+    await expect(page.locator('output[aria-label="Workspace status"]')).toContainText('opened', { timeout: 15000 });
 
     // Open index.ts
     await page.locator('.file-tree-item', { hasText: 'src' }).click();
@@ -635,7 +634,7 @@ test.describe('Explorer Context Menu', () => {
       canceled: false,
     });
     await page.getByRole('button', { name: /open folder/i }).click();
-    await expect(page.locator('.workspace-path')).toContainText('opened', { timeout: 15000 });
+    await expect(page.locator('output[aria-label="Workspace status"]')).toContainText('opened', { timeout: 15000 });
   });
 
   test('should show context menu on right-click on file', async () => {
@@ -672,7 +671,7 @@ test.describe('Rename Dialog', () => {
       canceled: false,
     });
     await page.getByRole('button', { name: /open folder/i }).click();
-    await expect(page.locator('.workspace-path')).toContainText('opened', { timeout: 15000 });
+    await expect(page.locator('output[aria-label="Workspace status"]')).toContainText('opened', { timeout: 15000 });
   });
 
   test('should show rename dialog when Rename is clicked in context menu', async () => {
@@ -718,7 +717,7 @@ test.describe('Delete File', () => {
       canceled: false,
     });
     await page.getByRole('button', { name: /open folder/i }).click();
-    await expect(page.locator('.workspace-path')).toContainText('opened', { timeout: 15000 });
+    await expect(page.locator('output[aria-label="Workspace status"]')).toContainText('opened', { timeout: 15000 });
   });
 
   test('should show confirmation dialog when Delete is clicked', async () => {
@@ -759,7 +758,7 @@ test.describe('View Menu Panel Switching', () => {
       canceled: false,
     });
     await page.getByRole('button', { name: /open folder/i }).click();
-    await expect(page.locator('.workspace-path')).toContainText('opened', { timeout: 15000 });
+    await expect(page.locator('output[aria-label="Workspace status"]')).toContainText('opened', { timeout: 15000 });
   });
 
   test('should switch to Explorer via View menu', async () => {
