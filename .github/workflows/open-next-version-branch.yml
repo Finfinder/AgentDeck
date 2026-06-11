@@ -26,6 +26,16 @@ jobs:
         run: |
           RELEASE_VERSION=$(jq -r '.release_version' .github/release/next-version.json)
           NEXT_VERSION=$(jq -r '.next_version' .github/release/next-version.json)
+          # Validate semver pattern to prevent code injection
+          SEMVER_RE='^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'
+          if ! echo "$RELEASE_VERSION" | grep -qE "$SEMVER_RE"; then
+            echo "::error::Invalid release_version format: $RELEASE_VERSION"
+            exit 1
+          fi
+          if ! echo "$NEXT_VERSION" | grep -qE "$SEMVER_RE"; then
+            echo "::error::Invalid next_version format: $NEXT_VERSION"
+            exit 1
+          fi
           echo "release_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
           echo "next_version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
 
