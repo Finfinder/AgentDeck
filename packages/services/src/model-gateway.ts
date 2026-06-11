@@ -595,9 +595,7 @@ export class ModelGateway extends EventEmitter {
 let gatewayInstance: ModelGateway | null = null;
 
 export function createModelGateway(): ModelGateway {
-  if (!gatewayInstance) {
-    gatewayInstance = new ModelGateway();
-  }
+  gatewayInstance ??= new ModelGateway();
   return gatewayInstance;
 }
 

@@ -201,6 +201,62 @@ export function parseCodeWorkspace(text: string, filePath: string): WorkspaceMod
   return { status: 'ok', filePath, kind: 'workspace-file', folders };
 }
 
+// ?? Shared file operation helpers ???????????????????????????????????????
+
+async function performFileDelete(filePath: string): Promise<FileOperationResult> {
+  try {
+    await unlink(filePath);
+    return { status: 'ok' };
+  } catch (err) {
+    const code = isRecord(err) && err.code === 'ENOENT' ? 'FILE_NOT_FOUND' : 'UNKNOWN';
+    return { status: 'error', code, message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function performFileRename(oldPath: string, newPath: string): Promise<FileOperationResult> {
+  try {
+    await rename(oldPath, newPath);
+    return { status: 'ok' };
+  } catch (err) {
+    const code = isRecord(err) && err.code === 'ENOENT' ? 'FILE_NOT_FOUND' : 'UNKNOWN';
+    return { status: 'error', code, message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function performListDirectory(dirPath: string): Promise<DirectoryListing> {
+  try {
+    const dirents = await readdir(dirPath, { withFileTypes: true });
+    const entries: FileEntry[] = dirents.map(d => ({
+      name: d.name,
+      path: join(dirPath, d.name),
+      kind: d.isDirectory() ? 'directory' : 'file',
+      isSensitive: isSensitivePath(join(dirPath, d.name))
+    } satisfies FileEntry));
+    entries.sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    return { path: dirPath, entries };
+  } catch {
+    return { path: dirPath, entries: [] };
+  }
+}
+
+async function performSearchFiles(query: SearchQuery): Promise<readonly SearchResult[]> {
+  const results: SearchResult[] = [];
+  const pattern = query.pattern.toLowerCase();
+  const limits = { maxResults: 50, maxFileSize: 512 * 1024 };
+  const includeRegs = compileGlobPatterns(query.include);
+  const excludeRegs = compileGlobPatterns(query.exclude);
+
+  for (const root of query.workspaceRoots) {
+    if (results.length >= limits.maxResults) break;
+    await searchInDirRecursive(root, pattern, results, limits, { includeRegs, excludeRegs }, root);
+  }
+
+  return results;
+}
+
 export class WorkspaceService extends EventEmitter {
   private readonly recentFilePath: string;
   private activeWatchers: FSWatcher[] = [];
@@ -251,61 +307,19 @@ export class WorkspaceService extends EventEmitter {
   }
 
   async deleteFile(filePath: string): Promise<FileOperationResult> {
-    try {
-      await unlink(filePath);
-      return { status: 'ok' };
-    } catch (err) {
-      const code = isRecord(err) && err.code === 'ENOENT' ? 'FILE_NOT_FOUND' : 'UNKNOWN';
-      return { status: 'error', code, message: err instanceof Error ? err.message : String(err) };
-    }
+    return performFileDelete(filePath);
   }
 
   async renameFile(oldPath: string, newPath: string): Promise<FileOperationResult> {
-    try {
-      await rename(oldPath, newPath);
-      return { status: 'ok' };
-    } catch (err) {
-      const code = isRecord(err) && err.code === 'ENOENT' ? 'FILE_NOT_FOUND' : 'UNKNOWN';
-      return { status: 'error', code, message: err instanceof Error ? err.message : String(err) };
-    }
+    return performFileRename(oldPath, newPath);
   }
 
   async listDirectory(dirPath: string): Promise<DirectoryListing> {
-    try {
-      const dirents = await readdir(dirPath, { withFileTypes: true });
-
-      const entries: FileEntry[] = dirents.map(d => ({
-        name: d.name,
-        path: join(dirPath, d.name),
-        kind: d.isDirectory() ? 'directory' : 'file',
-        isSensitive: isSensitivePath(join(dirPath, d.name))
-      } satisfies FileEntry));
-
-      entries.sort((a, b) => {
-        if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
-
-      return { path: dirPath, entries };
-    } catch {
-      return { path: dirPath, entries: [] };
-    }
+    return performListDirectory(dirPath);
   }
 
   async searchFiles(query: SearchQuery): Promise<readonly SearchResult[]> {
-    const results: SearchResult[] = [];
-    const pattern = query.pattern.toLowerCase();
-
-    const limits = { maxResults: 50, maxFileSize: 512 * 1024 };
-    const includeRegs = compileGlobPatterns(query.include);
-    const excludeRegs = compileGlobPatterns(query.exclude);
-
-    for (const root of query.workspaceRoots) {
-      if (results.length >= limits.maxResults) break;
-      await this.searchInDir(root, pattern, results, limits, includeRegs, excludeRegs, root);
-    }
-
-    return results;
+    return performSearchFiles(query);
   }
 
   async getRecentWorkspaces(): Promise<readonly RecentWorkspace[]> {
@@ -480,59 +494,93 @@ export function createWorkspaceService(userDataPath: string): WorkspaceService {
 }
 
 // ?? Standalone file operations for Tool Router ???????????????????????????
+// These delegate to private helpers shared with WorkspaceService class methods.
 
 export async function deleteFileStandalone(filePath: string): Promise<FileOperationResult> {
-  try {
-    await unlink(filePath);
-    return { status: 'ok' };
-  } catch (err) {
-    const code = isRecord(err) && err.code === 'ENOENT' ? 'FILE_NOT_FOUND' : 'UNKNOWN';
-    return { status: 'error', code, message: err instanceof Error ? err.message : String(err) };
-  }
+  return performFileDelete(filePath);
 }
 
 export async function renameFileStandalone(oldPath: string, newPath: string): Promise<FileOperationResult> {
-  try {
-    await rename(oldPath, newPath);
-    return { status: 'ok' };
-  } catch (err) {
-    const code = isRecord(err) && err.code === 'ENOENT' ? 'FILE_NOT_FOUND' : 'UNKNOWN';
-    return { status: 'error', code, message: err instanceof Error ? err.message : String(err) };
-  }
+  return performFileRename(oldPath, newPath);
 }
 
 export async function listDirectoryStandalone(dirPath: string): Promise<DirectoryListing> {
-  try {
-    const dirents = await readdir(dirPath, { withFileTypes: true });
-    const entries: FileEntry[] = dirents.map(d => ({
-      name: d.name,
-      path: join(dirPath, d.name),
-      kind: d.isDirectory() ? 'directory' : 'file',
-      isSensitive: isSensitivePath(join(dirPath, d.name))
-    } satisfies FileEntry));
-    entries.sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
-    return { path: dirPath, entries };
-  } catch {
-    return { path: dirPath, entries: [] };
-  }
+  return performListDirectory(dirPath);
 }
 
 export async function searchFilesStandalone(query: SearchQuery): Promise<readonly SearchResult[]> {
-  const results: SearchResult[] = [];
-  const pattern = query.pattern.toLowerCase();
-  const limits = { maxResults: 50, maxFileSize: 512 * 1024 };
-  const includeRegs = compileGlobPatterns(query.include);
-  const excludeRegs = compileGlobPatterns(query.exclude);
+  return performSearchFiles(query);
+}
 
-  for (const root of query.workspaceRoots) {
-    if (results.length >= limits.maxResults) break;
-    await searchInDirRecursive(root, pattern, results, limits, includeRegs, excludeRegs, root);
+function shouldSkipFile(relPath: string, ext: string, includeRegs: RegExp[], excludeRegs: RegExp[]): boolean {
+  if (BINARY_EXTS.has(ext)) return true;
+  if (includeRegs.length > 0 && !includeRegs.some(r => r.test(relPath))) return true;
+  return excludeRegs.some(r => r.test(relPath));
+}
+
+function shouldSkipDir(name: string, relPath: string, excludeRegs: RegExp[]): boolean {
+  return SKIP_DIRS.has(name) || excludeRegs.some(r => r.test(relPath));
+}
+
+async function searchInFile(
+  filePath: string,
+  pattern: string,
+  results: SearchResult[],
+  maxResults: number,
+  maxFileSize: number
+): Promise<void> {
+  const fileStat = await stat(filePath);
+  if (fileStat.size > maxFileSize) return;
+
+  const content = await readFile(filePath, 'utf8');
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length && results.length < maxResults; i++) {
+    const line = lines[i]!;
+    const col = line.toLowerCase().indexOf(pattern);
+    if (col === -1) continue;
+
+    results.push({
+      id: `${filePath}:${i + 1}:${col + 1}`,
+      file: filePath,
+      line: i + 1,
+      col: col + 1,
+      snippet: line.trim().slice(0, 120),
+      isSensitive: isSensitivePath(filePath)
+    });
+  }
+}
+
+interface SearchFilters {
+  includeRegs: RegExp[];
+  excludeRegs: RegExp[];
+}
+
+async function processSearchDirent(
+  dirent: { name: string; isDirectory(): boolean; isFile(): boolean },
+  dir: string,
+  pattern: string,
+  results: SearchResult[],
+  limits: { maxResults: number; maxFileSize: number },
+  filters: SearchFilters,
+  workspaceRoot: string
+): Promise<void> {
+  if (results.length >= limits.maxResults) return;
+
+  const fullPath = join(dir, dirent.name);
+  const relPath = relative(workspaceRoot, fullPath).replaceAll('\\', '/');
+
+  if (dirent.isDirectory() && !shouldSkipDir(dirent.name, relPath, filters.excludeRegs)) {
+    await searchInDirRecursive(fullPath, pattern, results, limits, filters, workspaceRoot);
+    return;
   }
 
-  return results;
+  if (dirent.isFile() && !shouldSkipFile(relPath, extname(dirent.name).toLowerCase(), filters.includeRegs, filters.excludeRegs)) {
+    try {
+      await searchInFile(fullPath, pattern, results, limits.maxResults, limits.maxFileSize);
+    } catch {
+      // Unreadable files are silently skipped
+    }
+  }
 }
 
 async function searchInDirRecursive(
@@ -540,8 +588,7 @@ async function searchInDirRecursive(
   pattern: string,
   results: SearchResult[],
   limits: { maxResults: number; maxFileSize: number },
-  includeRegs: RegExp[],
-  excludeRegs: RegExp[],
+  filters: SearchFilters,
   workspaceRoot: string
 ): Promise<void> {
   if (results.length >= limits.maxResults) return;
@@ -550,48 +597,8 @@ async function searchInDirRecursive(
   if (!dirents) return;
 
   for (const dirent of dirents) {
-    if (results.length >= limits.maxResults) return;
-
-    const fullPath = join(dir, dirent.name);
-    const relPath = relative(workspaceRoot, fullPath).replaceAll('\\', '/');
-
-    if (dirent.isDirectory()) {
-      if (SKIP_DIRS.has(dirent.name)) continue;
-      if (excludeRegs.some(r => r.test(relPath))) continue;
-      await searchInDirRecursive(fullPath, pattern, results, limits, includeRegs, excludeRegs, workspaceRoot);
-      continue;
-    }
-
-    if (dirent.isFile()) {
-      const ext = extname(dirent.name).toLowerCase();
-      if (BINARY_EXTS.has(ext)) continue;
-      if (includeRegs.length > 0 && !includeRegs.some(r => r.test(relPath))) continue;
-      if (excludeRegs.some(r => r.test(relPath))) continue;
-
-      try {
-        const fileStat = await stat(fullPath);
-        if (fileStat.size > limits.maxFileSize) continue;
-
-        const content = await readFile(fullPath, 'utf8');
-        const lines = content.split('\n');
-        for (let i = 0; i < lines.length && results.length < limits.maxResults; i++) {
-          const line = lines[i]!;
-          const col = line.toLowerCase().indexOf(pattern);
-          if (col !== -1) {
-            results.push({
-              id: `${fullPath}:${i + 1}:${col + 1}`,
-              file: fullPath,
-              line: i + 1,
-              col: col + 1,
-              snippet: line.trim().slice(0, 120),
-              isSensitive: isSensitivePath(fullPath)
-            });
-          }
-        }
-      } catch {
-        // Unreadable files are silently skipped
-      }
-    }
+    if (results.length >= limits.maxResults) break;
+    await processSearchDirent(dirent, dir, pattern, results, limits, filters, workspaceRoot);
   }
 }
 

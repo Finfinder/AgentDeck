@@ -213,7 +213,7 @@ describe('checkSensitivePath', () => {
   });
 
   it('should handle Windows paths', () => {
-    const result = checkSensitivePath('C:\\project\\.env');
+    const result = checkSensitivePath(String.raw`C:\project\.env`);
     expect(result.isSensitive).toBe(true);
   });
 

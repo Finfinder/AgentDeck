@@ -79,21 +79,21 @@ export class ToolRouter {
     try {
       switch (request.toolName) {
         case 'readFile':
-          return this.toolReadFile(request);
+          return await this.toolReadFile(request);
         case 'searchFiles':
-          return this.toolSearchFiles(request);
+          return await this.toolSearchFiles(request);
         case 'listDirectory':
-          return this.toolListDirectory(request);
+          return await this.toolListDirectory(request);
         case 'proposePatch':
-          return this.toolProposePatch(request);
+          return await this.toolProposePatch(request);
         case 'applyPatch':
-          return this.toolApplyPatch(request, sensitiveCheck);
+          return await this.toolApplyPatch(request, sensitiveCheck);
         case 'writeFile':
-          return this.toolWriteFile(request, sensitiveCheck);
+          return await this.toolWriteFile(request, sensitiveCheck);
         case 'deleteFile':
-          return this.toolDeleteFile(request, sensitiveCheck);
+          return await this.toolDeleteFile(request, sensitiveCheck);
         case 'renameFile':
-          return this.toolRenameFile(request, sensitiveCheck);
+          return await this.toolRenameFile(request, sensitiveCheck);
         default:
           return {
             status: 'error',
