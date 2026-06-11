@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Read next-version manifest
         id: manifest
