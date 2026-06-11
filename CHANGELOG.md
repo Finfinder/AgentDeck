@@ -4,6 +4,12 @@ Wszystkie istotne zmiany w projekcie są dokumentowane w tym pliku.
 
 Format zgodny z [Keep a Changelog](https://keepachangelog.com/pl/1.0.0/).
 
+## [0.2.0] - 2026-06-11
+
+### Changed
+
+- Otwarcie cyklu rozwojowego 0.2.0.
+
 ## [Unreleased]
 
 ### Fixed
