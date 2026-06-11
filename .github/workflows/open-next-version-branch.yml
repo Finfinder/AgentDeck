@@ -1,0 +1,78 @@
+name: Open Next Version Branch
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+jobs:
+  open-next-version:
+    name: Open next version branch
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Read next-version manifest
+        id: manifest
+        run: |
+          RELEASE_VERSION=$(jq -r '.release_version' .github/release/next-version.json)
+          NEXT_VERSION=$(jq -r '.next_version' .github/release/next-version.json)
+          echo "release_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "next_version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if next branch already exists
+        id: check_branch
+        run: |
+          NEXT="${{ steps.manifest.outputs.next_version }}"
+          if git ls-remote --heads origin "refs/heads/$NEXT" | grep -q "$NEXT"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Branch $NEXT already exists on remote."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create next version branch
+        if: ${{ steps.check_branch.outputs.exists == 'false' }}
+        run: |
+          NEXT="${{ steps.manifest.outputs.next_version }}"
+          git checkout -b "$NEXT"
+          git push origin "$NEXT"
+
+      - name: Update version in package.json
+        if: ${{ steps.check_branch.outputs.exists == 'false' }}
+        run: |
+          NEXT="${{ steps.manifest.outputs.next_version }}"
+          npm version "$NEXT" --no-git-tag-version
+
+      - name: Update CHANGELOG with new unreleased section
+        if: ${{ steps.check_branch.outputs.exists == 'false' }}
+        run: |
+          NEXT="${{ steps.manifest.outputs.next_version }}"
+          RELEASE="${{ steps.manifest.outputs.release_version }}"
+          DATE=$(date +%Y-%m-%d)
+          # Add new version section after the first "## [Unreleased]" line
+          sed -i "0,/^## \\[Unreleased\\]/{s/^## \\[Unreleased\\]/## [$NEXT] - $DATE\\n\\n### Changed\\n\\n- Otwarcie cyklu rozwojowego $NEXT.\\n\\n## [Unreleased]/}" CHANGELOG.md
+
+      - name: Commit and push version bump
+        if: ${{ steps.check_branch.outputs.exists == 'false' }}
+        run: |
+          NEXT="${{ steps.manifest.outputs.next_version }}"
+          git add package.json CHANGELOG.md
+          git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" commit -m "chore: otwarcie cyklu $NEXT — aktualizacja wersji i CHANGELOG"
+          git push origin "$NEXT"
+
+      - name: Clean up next-version manifest
+        if: ${{ steps.check_branch.outputs.exists == 'false' }}
+        run: |
+          git rm .github/release/next-version.json
+          git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" commit -m "chore: usuñ manifest next-version po otwarciu brancha"
+          git push origin "$NEXT"
