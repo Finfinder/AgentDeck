@@ -42,7 +42,19 @@ export const IPC_CHANNELS = {
   modelGatewayGetProviderConfig: 'agentdeck:v1:model-gateway:get-provider-config',
   // Tab model/provider selection
   chatSetActiveModel: 'agentdeck:v1:chat:set-active-model',
-  chatSetActiveProvider: 'agentdeck:v1:chat:set-active-provider'
+  chatSetActiveProvider: 'agentdeck:v1:chat:set-active-provider',
+  // Phase 7: Tool Router / Permission Broker / Conflict Broker
+  toolCall: 'agentdeck:v1:tool:call',
+  toolCallResult: 'agentdeck:v1:tool:call-result',
+  toolApprovalRequest: 'agentdeck:v1:tool:approval-request',
+  toolApprovalResponse: 'agentdeck:v1:tool:approval-response',
+  proposePatch: 'agentdeck:v1:patch:propose',
+  applyPatch: 'agentdeck:v1:patch:apply',
+  patchResult: 'agentdeck:v1:patch:result',
+  conflictDetected: 'agentdeck:v1:conflict:detected',
+  conflictResolve: 'agentdeck:v1:conflict:resolve',
+  checkSensitivePath: 'agentdeck:v1:permission:check-sensitive',
+  getFileHash: 'agentdeck:v1:editor:get-file-hash'
 } as const satisfies Record<string, string>;
 
 export type ThemePreference = 'dark' | 'light';
@@ -271,6 +283,120 @@ export type DiffResult =
   | Readonly<{ status: 'ok'; diff: string }>
   | Readonly<{ status: 'error'; code: 'UNKNOWN'; message: string }>;
 
+// ?? Phase 7: Permission Broker types ???????????????????????????????????????
+
+export type ToolRiskLevel = 'read-only' | 'low' | 'medium' | 'high' | 'critical';
+
+export type ToolName =
+  | 'readFile'
+  | 'searchFiles'
+  | 'listDirectory'
+  | 'proposePatch'
+  | 'applyPatch'
+  | 'deleteFile'
+  | 'renameFile'
+  | 'writeFile';
+
+export type ToolClassification = Readonly<{
+  name: ToolName;
+  riskLevel: ToolRiskLevel;
+  requiresApproval: boolean;
+  description: string;
+}>;
+
+export type ToolCallRequest = Readonly<{
+  callId: string;
+  toolName: ToolName;
+  args: Record<string, unknown>;
+  session?: string;
+}>;
+
+export type ToolCallResponse =
+  | Readonly<{
+      status: 'ok';
+      callId: string;
+      result: unknown;
+    }>
+  | Readonly<{
+      status: 'pending-approval';
+      callId: string;
+      classification: ToolClassification;
+      expiresAt: number;
+    }>
+  | Readonly<{
+      status: 'error';
+      callId: string;
+      code: 'TOOL_NOT_FOUND' | 'ACCESS_DENIED' | 'TIMEOUT' | 'UNKNOWN';
+      message: string;
+    }>
+  | Readonly<{
+      status: 'denied';
+      callId: string;
+      reason: string;
+    }>;
+
+export type ApprovalDecision = Readonly<{
+  callId: string;
+  approved: boolean;
+  remember?: boolean;
+}>;
+
+// ?? Phase 7: Patch model types ??????????????????????????????????????????????
+
+export type PatchOperation = Readonly<{
+  filePath: string;
+  range?: Readonly<{
+    startLine: number;
+    startCol: number;
+    endLine: number;
+    endCol: number;
+  }>;
+  text: string;
+}>;
+
+export type PatchSet = Readonly<{
+  id: string;
+  filePath: string;
+  baseHash: string;
+  operations: readonly PatchOperation[];
+  author: string;
+  riskLevel: ToolRiskLevel;
+  createdAt: number;
+}>;
+
+export type PatchResult =
+  | Readonly<{ status: 'ok'; patchId: string; appliedHash: string }>
+  | Readonly<{ status: 'error'; code: 'CONFLICT' | 'FILE_NOT_FOUND' | 'ACCESS_DENIED' | 'UNKNOWN'; message: string }>;
+
+// ?? Phase 7: Conflict Broker types ?????????????????????????????????????????
+
+export type ConflictKind = 'patch-conflict' | 'delete' | 'rename' | 'binary' | 'multi-file' | 'high-risk';
+
+export type Conflict = Readonly<{
+  id: string;
+  kind: ConflictKind;
+  patchId: string;
+  filePath: string;
+  description: string;
+  riskLevel: ToolRiskLevel;
+  createdAt: number;
+}>;
+
+export type ConflictResolution =
+  | Readonly<{ conflictId: string; action: 'apply' }>
+  | Readonly<{ conflictId: string; action: 'skip' }>
+  | Readonly<{ conflictId: string; action: 'edit'; operations: readonly PatchOperation[] }>;
+
+export type FileHashResult =
+  | Readonly<{ status: 'ok'; hash: string }>
+  | Readonly<{ status: 'error'; code: 'FILE_NOT_FOUND' | 'ACCESS_DENIED' | 'UNKNOWN'; message: string }>;
+
+export type SensitivePathCheckResult = Readonly<{
+  filePath: string;
+  isSensitive: boolean;
+  matchedPattern?: string;
+}>;
+
 export type IdentitySession = Readonly<{
   isLoggedIn: boolean;
   provider?: 'github';
@@ -333,6 +459,16 @@ export type AgentDeckPreloadApi = Readonly<{
   getProviderConfig?: (providerId: string) => Promise<ModelProviderConfig>;
   setActiveModel?: (tabId: string, modelId: string) => Promise<void>;
   setActiveProvider?: (tabId: string, providerId: string) => Promise<void>;
+  // Phase 7: Tool Router / Permission Broker / Conflict Broker
+  toolCall?: (request: ToolCallRequest) => Promise<ToolCallResponse>;
+  onToolApprovalRequest?: (handler: (response: ToolCallResponse & { status: 'pending-approval' }) => void) => () => void;
+  submitApproval?: (decision: ApprovalDecision) => Promise<void>;
+  proposePatch?: (patch: Omit<PatchSet, 'id' | 'createdAt'>) => Promise<PatchResult>;
+  applyPatch?: (patchId: string) => Promise<PatchResult>;
+  onConflictDetected?: (handler: (conflict: Conflict) => void) => () => void;
+  resolveConflict?: (resolution: ConflictResolution) => Promise<void>;
+  checkSensitivePath?: (filePath: string) => Promise<SensitivePathCheckResult>;
+  getFileHash?: (filePath: string) => Promise<FileHashResult>;
   versions: Readonly<{
     chrome: string;
     electron: string;
@@ -775,4 +911,146 @@ export function isTestConnectionResult(value: unknown): value is TestConnectionR
     return Array.isArray(value.models) && value.models.every(isModelInfo);
   }
   return value.status === 'error' && typeof value.message === 'string';
+}
+
+// ?? Phase 7: Tool Router / Permission Broker guards ????????????????????????
+
+const TOOL_RISK_LEVELS = new Set<string>(['read-only', 'low', 'medium', 'high', 'critical']);
+const TOOL_NAMES = new Set<string>(['readFile', 'searchFiles', 'listDirectory', 'proposePatch', 'applyPatch', 'deleteFile', 'renameFile', 'writeFile']);
+
+export function isToolRiskLevel(value: unknown): value is ToolRiskLevel {
+  return typeof value === 'string' && TOOL_RISK_LEVELS.has(value);
+}
+
+export function isToolName(value: unknown): value is ToolName {
+  return typeof value === 'string' && TOOL_NAMES.has(value);
+}
+
+export function isToolClassification(value: unknown): value is ToolClassification {
+  if (!isRecord(value)) return false;
+  return (
+    isToolName(value.name) &&
+    isToolRiskLevel(value.riskLevel) &&
+    typeof value.requiresApproval === 'boolean' &&
+    typeof value.description === 'string'
+  );
+}
+
+export function isToolCallRequest(value: unknown): value is ToolCallRequest {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.callId === 'string' &&
+    isToolName(value.toolName) &&
+    isRecord(value.args)
+  );
+}
+
+export function isToolCallResponse(value: unknown): value is ToolCallResponse {
+  if (!isRecord(value) || typeof value.status !== 'string') return false;
+  if (value.status === 'ok') {
+    return typeof value.callId === 'string';
+  }
+  if (value.status === 'pending-approval') {
+    return typeof value.callId === 'string' && isToolClassification(value.classification) && typeof value.expiresAt === 'number';
+  }
+  if (value.status === 'error') {
+    return typeof value.callId === 'string' && typeof value.code === 'string' && typeof value.message === 'string';
+  }
+  if (value.status === 'denied') {
+    return typeof value.callId === 'string' && typeof value.reason === 'string';
+  }
+  return false;
+}
+
+export function isApprovalDecision(value: unknown): value is ApprovalDecision {
+  if (!isRecord(value)) return false;
+  return typeof value.callId === 'string' && typeof value.approved === 'boolean';
+}
+
+// ?? Phase 7: Patch model guards ????????????????????????????????????????????
+
+function isPatchOperation(value: unknown): value is PatchOperation {
+  if (!isRecord(value)) return false;
+  if (typeof value.filePath !== 'string' || typeof value.text !== 'string') return false;
+  if (value.range !== undefined) {
+    if (!isRecord(value.range)) return false;
+    return (
+      typeof value.range.startLine === 'number' &&
+      typeof value.range.startCol === 'number' &&
+      typeof value.range.endLine === 'number' &&
+      typeof value.range.endCol === 'number'
+    );
+  }
+  return true;
+}
+
+export function isPatchSet(value: unknown): value is PatchSet {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === 'string' &&
+    typeof value.filePath === 'string' &&
+    typeof value.baseHash === 'string' &&
+    Array.isArray(value.operations) &&
+    value.operations.every(isPatchOperation) &&
+    typeof value.author === 'string' &&
+    isToolRiskLevel(value.riskLevel) &&
+    typeof value.createdAt === 'number'
+  );
+}
+
+export function isPatchResult(value: unknown): value is PatchResult {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') {
+    return typeof value.patchId === 'string' && typeof value.appliedHash === 'string';
+  }
+  return (
+    value.status === 'error' &&
+    typeof value.code === 'string' &&
+    typeof value.message === 'string'
+  );
+}
+
+// ?? Phase 7: Conflict Broker guards ???????????????????????????????????????
+
+const CONFLICT_KINDS = new Set<string>(['patch-conflict', 'delete', 'rename', 'binary', 'multi-file', 'high-risk']);
+
+export function isConflict(value: unknown): value is Conflict {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === 'string' &&
+    typeof value.kind === 'string' && CONFLICT_KINDS.has(value.kind) &&
+    typeof value.patchId === 'string' &&
+    typeof value.filePath === 'string' &&
+    typeof value.description === 'string' &&
+    isToolRiskLevel(value.riskLevel) &&
+    typeof value.createdAt === 'number'
+  );
+}
+
+export function isConflictResolution(value: unknown): value is ConflictResolution {
+  if (!isRecord(value)) return false;
+  if (typeof value.conflictId !== 'string') return false;
+  if (value.action === 'apply' || value.action === 'skip') return true;
+  if (value.action === 'edit') {
+    return Array.isArray(value.operations) && value.operations.every(isPatchOperation);
+  }
+  return false;
+}
+
+export function isFileHashResult(value: unknown): value is FileHashResult {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') return typeof value.hash === 'string';
+  return (
+    value.status === 'error' &&
+    typeof value.code === 'string' &&
+    typeof value.message === 'string'
+  );
+}
+
+export function isSensitivePathCheckResult(value: unknown): value is SensitivePathCheckResult {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.filePath === 'string' &&
+    typeof value.isSensitive === 'boolean'
+  );
 }

@@ -27,7 +27,20 @@ export {
 	isChatTabState,
 	isChatStreamEvent,
 	isSendMessageResult,
-	isToolCall
+	isToolCall,
+	// Phase 7
+	isToolRiskLevel,
+	isToolName,
+	isToolClassification,
+	isToolCallRequest,
+	isToolCallResponse,
+	isApprovalDecision,
+	isPatchSet,
+	isPatchResult,
+	isConflict,
+	isConflictResolution,
+	isFileHashResult,
+	isSensitivePathCheckResult
 } from './ipc';
 export type { IdentitySession, IdentitySessionWarning } from './ipc';
 export { isIdentitySession, isIdentitySessionWarning, isModelProviderConfig, isTestConnectionResult } from './ipc';
@@ -79,5 +92,20 @@ export type {
 	ChatStreamEvent,
 	SendMessageResult,
 	ModelProviderConfig,
-	TestConnectionResult
+	TestConnectionResult,
+	// Phase 7
+	ToolRiskLevel,
+	ToolName,
+	ToolClassification,
+	ToolCallRequest,
+	ToolCallResponse,
+	ApprovalDecision,
+	PatchOperation,
+	PatchSet,
+	PatchResult,
+	ConflictKind,
+	Conflict,
+	ConflictResolution,
+	FileHashResult,
+	SensitivePathCheckResult
 } from './ipc';

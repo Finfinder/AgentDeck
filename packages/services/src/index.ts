@@ -90,7 +90,7 @@ export function createStartupErrorState(appVersion: string): StartupState {
 
 export { readThemeSettings, writeThemeSettings, DEFAULT_THEME_SETTINGS } from './settings';
 export type { ThemeSettings } from './settings';
-export { createWorkspaceService, isSensitivePath, parseCodeWorkspace, stripJsoncComments, WorkspaceService } from './workspace-service';
+export { createWorkspaceService, isSensitivePath, parseCodeWorkspace, stripJsoncComments, WorkspaceService, deleteFileStandalone, renameFileStandalone, listDirectoryStandalone, searchFilesStandalone } from './workspace-service';
 export {
   applyWorkspaceEdit,
   clearBuffers,
@@ -113,3 +113,10 @@ export { ModelGateway, createModelGateway, getModelGateway } from './model-gatew
 export type { ModelProviderAdapter, ToolDefinition, RetryPolicy } from './model-gateway';
 export { OpenRouterAdapter, OllamaAdapter, LmStudioAdapter, OpenAiCompatibleAdapter, createDefaultAdapters, STREAM_HEARTBEAT_TIMEOUT_MS } from './model-providers';
 export { classifyError } from './model-errors';
+// Phase 7: Tool Router / Permission Broker / Conflict Broker
+export { PermissionBroker, checkSensitivePath, escalateRisk, isHighRisk } from './permission-broker';
+export type { PermissionBrokerOptions } from './permission-broker';
+export { ConflictBroker, computeFileHash, checkPatchConflict, applyPatchWithConflictCheck, classifyPatchRisk, generatePatchId } from './conflict-broker';
+export type { ConflictCheckResult, PatchApplicationResult } from './conflict-broker';
+export { ToolRouter } from './tool-router';
+export type { ToolRouterOptions } from './tool-router';

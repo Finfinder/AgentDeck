@@ -19,6 +19,11 @@ import {
   isTestConnectionResult,
   isStartupState,
   isThemeSettings,
+  isToolCallResponse,
+  isPatchResult,
+  isConflict,
+  isFileHashResult,
+  isSensitivePathCheckResult,
   isWorkspaceEditResult,
   isWorkspaceModel,
   isWorkspaceSelection,
@@ -30,10 +35,15 @@ import {
   type FsChangeEvent,
   type IdentitySession,
   type IdentitySessionWarning,
-
   type StartupState,
-  type WorkspaceEditInput,
+  type ToolCallRequest,
+  type ToolCallResponse,
+  type ApprovalDecision,
+  type PatchSet,
+  type Conflict,
+  type ConflictResolution,
 
+  type WorkspaceEditInput,
 } from '@agentdeck/shared';
 
 const invalidStartupState: StartupState = {
@@ -231,6 +241,49 @@ const api: AgentDeckPreloadApi = {
   },
   setActiveProvider: async (tabId: string, providerId: string) => {
     await ipcRenderer.invoke(IPC_CHANNELS.chatSetActiveProvider, tabId, providerId);
+  },
+  // Phase 7: Tool Router / Permission Broker / Conflict Broker
+  toolCall: async (request: ToolCallRequest) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.toolCall, request);
+    return isToolCallResponse(value) ? value : { status: 'error', callId: request.callId, code: 'UNKNOWN' as const, message: 'Unexpected response from main process.' };
+  },
+  onToolApprovalRequest: (handler: (response: ToolCallResponse & { status: 'pending-approval' }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (isToolCallResponse(value) && value.status === 'pending-approval') {
+        handler(value as ToolCallResponse & { status: 'pending-approval' });
+      }
+    };
+    ipcRenderer.on(IPC_CHANNELS.toolApprovalRequest, listener);
+    return () => { ipcRenderer.off(IPC_CHANNELS.toolApprovalRequest, listener); };
+  },
+  submitApproval: async (decision: ApprovalDecision) => {
+    await ipcRenderer.invoke(IPC_CHANNELS.toolApprovalResponse, decision);
+  },
+  proposePatch: async (patch: Omit<PatchSet, 'id' | 'createdAt'>) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.proposePatch, patch);
+    return isPatchResult(value) ? value : { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Unexpected response from main process.' };
+  },
+  applyPatch: async (patchId: string) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.applyPatch, patchId);
+    return isPatchResult(value) ? value : { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Unexpected response from main process.' };
+  },
+  onConflictDetected: (handler: (conflict: Conflict) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (isConflict(value)) handler(value);
+    };
+    ipcRenderer.on(IPC_CHANNELS.conflictDetected, listener);
+    return () => { ipcRenderer.off(IPC_CHANNELS.conflictDetected, listener); };
+  },
+  resolveConflict: async (resolution: ConflictResolution) => {
+    await ipcRenderer.invoke(IPC_CHANNELS.conflictResolve, resolution);
+  },
+  checkSensitivePath: async (filePath: string) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.checkSensitivePath, filePath);
+    return isSensitivePathCheckResult(value) ? value : { filePath, isSensitive: false };
+  },
+  getFileHash: async (filePath: string) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.getFileHash, filePath);
+    return isFileHashResult(value) ? value : { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Unexpected response from main process.' };
   },
   versions: {
     chrome: process.versions.chrome ?? 'unknown',

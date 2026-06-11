@@ -204,10 +204,15 @@ export function parseCodeWorkspace(text: string, filePath: string): WorkspaceMod
 export class WorkspaceService extends EventEmitter {
   private readonly recentFilePath: string;
   private activeWatchers: FSWatcher[] = [];
+  private currentFolders: readonly WorkspaceFolder[] = [];
 
   constructor(userDataPath: string) {
     super();
     this.recentFilePath = join(userDataPath, 'recent-workspaces.json');
+  }
+
+  getWorkspaceRoots(): readonly string[] {
+    return this.currentFolders.map(f => f.path);
   }
 
   async openWorkspace(path: string, kind: WorkspaceOpenKind): Promise<WorkspaceModel> {
@@ -225,6 +230,7 @@ export class WorkspaceService extends EventEmitter {
       const model = parseCodeWorkspace(text, path);
 
       if (model.status === 'ok') {
+        this.currentFolders = model.folders;
         this.startWatchers(model.folders.map(f => f.path));
         await this.saveRecentWorkspace({ path, name: basename(path), kind, lastOpened: Date.now() });
       }
@@ -233,6 +239,7 @@ export class WorkspaceService extends EventEmitter {
     }
 
     // Folder workspace
+    this.currentFolders = [{ path }];
     this.startWatchers([path]);
     await this.saveRecentWorkspace({ path, name: basename(path), kind: 'folder', lastOpened: Date.now() });
     return { status: 'ok', filePath: path, kind: 'folder', folders: [{ path }] };
@@ -240,6 +247,7 @@ export class WorkspaceService extends EventEmitter {
 
   closeWorkspace(): void {
     this.stopWatchers();
+    this.currentFolders = [];
   }
 
   async deleteFile(filePath: string): Promise<FileOperationResult> {
@@ -469,4 +477,128 @@ export class WorkspaceService extends EventEmitter {
 
 export function createWorkspaceService(userDataPath: string): WorkspaceService {
   return new WorkspaceService(userDataPath);
+}
+
+// ?? Standalone file operations for Tool Router ???????????????????????????
+
+export async function deleteFileStandalone(filePath: string): Promise<FileOperationResult> {
+  try {
+    await unlink(filePath);
+    return { status: 'ok' };
+  } catch (err) {
+    const code = isRecord(err) && err.code === 'ENOENT' ? 'FILE_NOT_FOUND' : 'UNKNOWN';
+    return { status: 'error', code, message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function renameFileStandalone(oldPath: string, newPath: string): Promise<FileOperationResult> {
+  try {
+    await rename(oldPath, newPath);
+    return { status: 'ok' };
+  } catch (err) {
+    const code = isRecord(err) && err.code === 'ENOENT' ? 'FILE_NOT_FOUND' : 'UNKNOWN';
+    return { status: 'error', code, message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function listDirectoryStandalone(dirPath: string): Promise<DirectoryListing> {
+  try {
+    const dirents = await readdir(dirPath, { withFileTypes: true });
+    const entries: FileEntry[] = dirents.map(d => ({
+      name: d.name,
+      path: join(dirPath, d.name),
+      kind: d.isDirectory() ? 'directory' : 'file',
+      isSensitive: isSensitivePath(join(dirPath, d.name))
+    } satisfies FileEntry));
+    entries.sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    return { path: dirPath, entries };
+  } catch {
+    return { path: dirPath, entries: [] };
+  }
+}
+
+export async function searchFilesStandalone(query: SearchQuery): Promise<readonly SearchResult[]> {
+  const results: SearchResult[] = [];
+  const pattern = query.pattern.toLowerCase();
+  const limits = { maxResults: 50, maxFileSize: 512 * 1024 };
+  const includeRegs = compileGlobPatterns(query.include);
+  const excludeRegs = compileGlobPatterns(query.exclude);
+
+  for (const root of query.workspaceRoots) {
+    if (results.length >= limits.maxResults) break;
+    await searchInDirRecursive(root, pattern, results, limits, includeRegs, excludeRegs, root);
+  }
+
+  return results;
+}
+
+async function searchInDirRecursive(
+  dir: string,
+  pattern: string,
+  results: SearchResult[],
+  limits: { maxResults: number; maxFileSize: number },
+  includeRegs: RegExp[],
+  excludeRegs: RegExp[],
+  workspaceRoot: string
+): Promise<void> {
+  if (results.length >= limits.maxResults) return;
+
+  const dirents = await readdir(dir, { withFileTypes: true }).catch(() => null);
+  if (!dirents) return;
+
+  for (const dirent of dirents) {
+    if (results.length >= limits.maxResults) return;
+
+    const fullPath = join(dir, dirent.name);
+    const relPath = relative(workspaceRoot, fullPath).replaceAll('\\', '/');
+
+    if (dirent.isDirectory()) {
+      if (SKIP_DIRS.has(dirent.name)) continue;
+      if (isPathExcluded(relPath, excludeRegs)) continue;
+      await searchInDirRecursive(fullPath, pattern, results, limits, includeRegs, excludeRegs, workspaceRoot);
+      continue;
+    }
+
+    if (dirent.isFile()) {
+      const ext = extname(dirent.name).toLowerCase();
+      if (BINARY_EXTS.has(ext)) continue;
+      if (!matchesIncludeFile(relPath, includeRegs)) continue;
+      if (isPathExcluded(relPath, excludeRegs)) continue;
+
+      try {
+        const fileStat = await stat(fullPath);
+        if (fileStat.size > limits.maxFileSize) continue;
+
+        const content = await readFile(fullPath, 'utf8');
+        const lines = content.split('\n');
+        for (let i = 0; i < lines.length && results.length < limits.maxResults; i++) {
+          const line = lines[i]!;
+          const col = line.toLowerCase().indexOf(pattern);
+          if (col !== -1) {
+            results.push({
+              id: `${fullPath}:${i + 1}:${col + 1}`,
+              file: fullPath,
+              line: i + 1,
+              col: col + 1,
+              snippet: line.trim().slice(0, 120),
+              isSensitive: isSensitivePath(fullPath)
+            });
+          }
+        }
+      } catch {
+        // Unreadable files are silently skipped
+      }
+    }
+  }
+}
+
+function isPathExcluded(relPath: string, excludeRegs: RegExp[]): boolean {
+  return excludeRegs.some(r => r.test(relPath));
+}
+
+function matchesIncludeFile(relFile: string, includeRegs: RegExp[]): boolean {
+  return includeRegs.length === 0 || includeRegs.some(r => r.test(relFile));
 }
