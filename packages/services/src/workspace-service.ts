@@ -557,7 +557,7 @@ async function searchInDirRecursive(
 
     if (dirent.isDirectory()) {
       if (SKIP_DIRS.has(dirent.name)) continue;
-      if (isPathExcluded(relPath, excludeRegs)) continue;
+      if (excludeRegs.some(r => r.test(relPath))) continue;
       await searchInDirRecursive(fullPath, pattern, results, limits, includeRegs, excludeRegs, workspaceRoot);
       continue;
     }
@@ -565,8 +565,8 @@ async function searchInDirRecursive(
     if (dirent.isFile()) {
       const ext = extname(dirent.name).toLowerCase();
       if (BINARY_EXTS.has(ext)) continue;
-      if (!matchesIncludeFile(relPath, includeRegs)) continue;
-      if (isPathExcluded(relPath, excludeRegs)) continue;
+      if (includeRegs.length > 0 && !includeRegs.some(r => r.test(relPath))) continue;
+      if (excludeRegs.some(r => r.test(relPath))) continue;
 
       try {
         const fileStat = await stat(fullPath);
@@ -595,10 +595,4 @@ async function searchInDirRecursive(
   }
 }
 
-function isPathExcluded(relPath: string, excludeRegs: RegExp[]): boolean {
-  return excludeRegs.some(r => r.test(relPath));
-}
 
-function matchesIncludeFile(relFile: string, includeRegs: RegExp[]): boolean {
-  return includeRegs.length === 0 || includeRegs.some(r => r.test(relFile));
-}

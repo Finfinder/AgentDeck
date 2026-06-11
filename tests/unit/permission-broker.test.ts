@@ -9,8 +9,10 @@ import {
 
 import type { ToolCallRequest, ToolName } from '@agentdeck/shared';
 
+let _reqCounter = 0;
 function makeReq(toolName: ToolName, args: Record<string, unknown> = {}): ToolCallRequest {
-  return { callId: `test-${Date.now()}-${Math.random().toString(36).slice(2)}`, toolName, args };
+  _reqCounter++;
+  return { callId: `test-${_reqCounter}`, toolName, args };
 }
 
 describe('PermissionBroker', () => {
