@@ -14,6 +14,9 @@ jobs:
     name: Open next version branch
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
+    env:
+      NEXT_VERSION: ${{ steps.manifest.outputs.next_version }}
+      RELEASE_VERSION: ${{ steps.manifest.outputs.release_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -42,7 +45,7 @@ jobs:
       - name: Check if next branch already exists
         id: check_branch
         run: |
-          NEXT="${{ steps.manifest.outputs.next_version }}"
+          NEXT="$NEXT_VERSION"
           if git ls-remote --heads origin "refs/heads/$NEXT" | grep -q "$NEXT"; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "Branch $NEXT already exists on remote."
@@ -53,36 +56,31 @@ jobs:
       - name: Create next version branch
         if: ${{ steps.check_branch.outputs.exists == 'false' }}
         run: |
-          NEXT="${{ steps.manifest.outputs.next_version }}"
-          git checkout -b "$NEXT"
-          git push origin "$NEXT"
+          git checkout -b "$NEXT_VERSION"
+          git push origin "$NEXT_VERSION"
 
       - name: Update version in package.json
         if: ${{ steps.check_branch.outputs.exists == 'false' }}
         run: |
-          NEXT="${{ steps.manifest.outputs.next_version }}"
-          npm version "$NEXT" --no-git-tag-version
+          npm version "$NEXT_VERSION" --no-git-tag-version
 
       - name: Update CHANGELOG with new unreleased section
         if: ${{ steps.check_branch.outputs.exists == 'false' }}
         run: |
-          NEXT="${{ steps.manifest.outputs.next_version }}"
-          RELEASE="${{ steps.manifest.outputs.release_version }}"
           DATE=$(date +%Y-%m-%d)
           # Add new version section after the first "## [Unreleased]" line
-          sed -i "0,/^## \\[Unreleased\\]/{s/^## \\[Unreleased\\]/## [$NEXT] - $DATE\\n\\n### Changed\\n\\n- Otwarcie cyklu rozwojowego $NEXT.\\n\\n## [Unreleased]/}" CHANGELOG.md
+          sed -i "0,/^## \\[Unreleased\\]/{s/^## \\[Unreleased\\]/## [$NEXT_VERSION] - $DATE\\n\\n### Changed\\n\\n- Otwarcie cyklu rozwojowego $NEXT_VERSION.\\n\\n## [Unreleased]/}" CHANGELOG.md
 
       - name: Commit and push version bump
         if: ${{ steps.check_branch.outputs.exists == 'false' }}
         run: |
-          NEXT="${{ steps.manifest.outputs.next_version }}"
           git add package.json CHANGELOG.md
-          git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" commit -m "chore: otwarcie cyklu $NEXT — aktualizacja wersji i CHANGELOG"
-          git push origin "$NEXT"
+          git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" commit -m "chore: otwarcie cyklu $NEXT_VERSION — aktualizacja wersji i CHANGELOG"
+          git push origin "$NEXT_VERSION"
 
       - name: Clean up next-version manifest
         if: ${{ steps.check_branch.outputs.exists == 'false' }}
         run: |
           git rm .github/release/next-version.json
           git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" commit -m "chore: usuñ manifest next-version po otwarciu brancha"
-          git push origin "$NEXT"
+          git push origin "$NEXT_VERSION"
