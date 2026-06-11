@@ -9,6 +9,8 @@ Format zgodny z [Keep a Changelog](https://keepachangelog.com/pl/1.0.0/).
 ### Changed
 
 - Otwarcie cyklu rozwojowego 0.2.0.
+- Zaktualizowano typescript-eslint z 8.60.0 do 8.61.0 — version bump bez zmian kodu.
+- Zaktualizowano @monaco-editor/loader z 1.5.0 do 1.7.0 — backward compatibility dla monaco-editor 0.53/0.54, update do 0.55.1.
 
 ## [Unreleased]
 
