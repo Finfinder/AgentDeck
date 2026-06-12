@@ -124,7 +124,7 @@ export class EventLogService extends EventEmitter {
     for (const entry of this.entries) {
       sources.add(entry.source);
     }
-    return Array.from(sources).sort();
+    return Array.from(sources).sort((a, b) => a.localeCompare(b));
   }
 
   /**
