@@ -325,8 +325,8 @@ describe('EventLogPanel — coverage', () => {
   describe('getEventLog not available', () => {
     it('handles missing getEventLog gracefully', async () => {
       const agent = createMockAgent({
-        getEventLog: undefined as unknown as AgentDeckPreloadApi['getEventLog']
-      });
+        getEventLog: undefined,
+      } as any);
       render(<EventLogPanel agent={agent} />);
 
       // Should not crash
@@ -339,8 +339,8 @@ describe('EventLogPanel — coverage', () => {
   describe('onEventLogUpdate not available', () => {
     it('handles missing onEventLogUpdate gracefully', async () => {
       const agent = createMockAgent({
-        onEventLogUpdate: undefined as unknown as AgentDeckPreloadApi['onEventLogUpdate']
-      });
+        onEventLogUpdate: undefined,
+      } as any);
       render(<EventLogPanel agent={agent} />);
 
       await waitFor(() => {
@@ -352,8 +352,8 @@ describe('EventLogPanel — coverage', () => {
   describe('clearEventLog not available', () => {
     it('handles missing clearEventLog gracefully', async () => {
       const agent = createMockAgent({
-        clearEventLog: undefined as unknown as AgentDeckPreloadApi['clearEventLog']
-      });
+        clearEventLog: undefined,
+      } as any);
       render(<EventLogPanel agent={agent} />);
 
       await waitFor(() => {

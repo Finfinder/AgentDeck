@@ -15,6 +15,15 @@ import type { PermissionBroker } from '@agentdeck/services';
 import type { ConflictBroker } from '@agentdeck/services';
 import type { EventLogService } from '@agentdeck/services';
 
+// Mock conflict-broker module to control applyPatchWithConflictCheck
+vi.mock('../../packages/services/src/conflict-broker', () => ({
+  ConflictBroker: vi.fn(),
+  applyPatchWithConflictCheck: vi.fn().mockResolvedValue({ success: true, appliedHash: 'hash123' }),
+  classifyOperationKind: vi.fn().mockReturnValue('patch-conflict'),
+  generatePatchId: vi.fn().mockReturnValue('patch-test'),
+  classifyPatchRisk: vi.fn().mockReturnValue('low')
+}));
+
 let _reqCounter = 0;
 function makeReq(toolName: ToolName, args: Record<string, unknown> = {}): ToolCallRequest {
   _reqCounter++;
@@ -45,12 +54,13 @@ function createMockPermissionBroker(): PermissionBroker {
 
 function createMockConflictBroker(): ConflictBroker {
   return {
-    checkPatchConflict: vi.fn().mockResolvedValue({ hasConflict: false }),
-    applyPatchWithConflictCheck: vi.fn().mockResolvedValue({ success: true, appliedHash: 'hash123' }),
-    classifyOperationKind: vi.fn().mockReturnValue('text'),
-    static: {
-      classifyOperationKind: vi.fn().mockReturnValue('text')
-    }
+    registerConflict: vi.fn(),
+    getConflict: vi.fn().mockReturnValue(undefined),
+    listConflicts: vi.fn().mockReturnValue([]),
+    resolveConflict: vi.fn().mockReturnValue(true),
+    clearConflicts: vi.fn(),
+    requiresConflictReview: vi.fn().mockReturnValue(false),
+    classifyOperationKind: vi.fn().mockReturnValue('patch-conflict'),
   } as unknown as ConflictBroker;
 }
 
@@ -316,23 +326,18 @@ describe('ToolRouter — coverage', () => {
     });
 
     it('returns error when conflict detected', async () => {
-      const cb = createMockConflictBroker();
-      cb.applyPatchWithConflictCheck = vi.fn().mockResolvedValue({
+      const { applyPatchWithConflictCheck } = await import('../../packages/services/src/conflict-broker');
+      vi.mocked(applyPatchWithConflictCheck).mockResolvedValueOnce({
         success: false,
         conflict: {
           id: 'conf-1',
-          kind: 'hash-mismatch',
+          kind: 'patch-conflict',
           filePath: '/test.ts',
           description: 'Hash mismatch',
           riskLevel: 'medium' as const,
-          patchId: 'patch-1'
+          patchId: 'patch-1',
+          createdAt: Date.now()
         }
-      });
-
-      const r = new ToolRouter({
-        workspaceRoots: ['/workspace'],
-        permissionBroker,
-        conflictBroker: cb
       });
 
       const req = makeReq('applyPatch', {
@@ -343,25 +348,18 @@ describe('ToolRouter — coverage', () => {
           baseHash: 'abc'
         }
       });
-      const result = await r.execute(req);
+      const result = await router.execute(req);
       expect(result.status).toBe('error');
       if (result.status === 'error') {
-        // The conflict code depends on the conflict broker implementation
         expect(['WRITE_CONFLICT', 'UNKNOWN']).toContain(result.code);
       }
     });
 
     it('returns error when patch application fails without conflict', async () => {
-      const cb = createMockConflictBroker();
-      cb.applyPatchWithConflictCheck = vi.fn().mockResolvedValue({
+      const { applyPatchWithConflictCheck } = await import('../../packages/services/src/conflict-broker');
+      vi.mocked(applyPatchWithConflictCheck).mockResolvedValueOnce({
         success: false,
         error: 'Disk full'
-      });
-
-      const r = new ToolRouter({
-        workspaceRoots: ['/workspace'],
-        permissionBroker,
-        conflictBroker: cb
       });
 
       const req = makeReq('applyPatch', {
@@ -372,7 +370,7 @@ describe('ToolRouter — coverage', () => {
           baseHash: 'abc'
         }
       });
-      const result = await r.execute(req);
+      const result = await router.execute(req);
       expect(result.status).toBe('error');
     });
   });

@@ -5,7 +5,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { Explorer } from '@agentdeck/workbench';
 import type { AgentDeckPreloadApi, FsChangeEvent, WorkspaceModel } from '@agentdeck/shared';
 
-function mockAgent(overrides: Partial<AgentDeckPreloadApi> = {}): AgentDeckPreloadApi {
+function mockAgent(overrides: any = {}): AgentDeckPreloadApi {
   return {
     getStartupState: vi.fn().mockResolvedValue({ status: 'ready', appVersion: '0.1.0', services: [] }),
     selectWorkspaceEntry: vi.fn().mockResolvedValue({ status: 'cancelled' }),
@@ -40,7 +40,7 @@ function mockAgent(overrides: Partial<AgentDeckPreloadApi> = {}): AgentDeckPrelo
     signOut: vi.fn().mockResolvedValue({ isLoggedIn: false }),
     onIdentityChange: vi.fn().mockReturnValue(() => undefined),
     ...overrides
-  };
+  } as AgentDeckPreloadApi;
 }
 
 // Mock clipboard API
