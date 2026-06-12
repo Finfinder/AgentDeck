@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '@agentdeck/workbench';
 import { DEFAULT_THEME_SETTINGS, type AgentDeckPreloadApi } from '@agentdeck/shared';
@@ -729,7 +729,6 @@ describe('App — deep coverage', () => {
     });
 
     it('shows search panel on agentdeck:show-panel event', async () => {
-      const user = userEvent.setup();
       await act(async () => { render(<App />); });
 
       await act(async () => {
@@ -754,6 +753,9 @@ describe('App — deep coverage', () => {
       expect(dispatchSpy).toHaveBeenCalled();
       dispatchSpy.mockRestore();
     });
+
+    // Suppress unused variable warning — userEvent.setup() is called in other tests
+    void userEvent;
   });
 
   // ?? Diagnostics polling ??????????????????????????????????????????????

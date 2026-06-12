@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import type {
-  Conflict,
-  PatchSet,
   ToolCallRequest,
   ToolCallResponse,
   ToolName

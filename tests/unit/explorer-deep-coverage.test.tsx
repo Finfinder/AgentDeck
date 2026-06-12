@@ -1,11 +1,11 @@
-import { fireEvent, render, screen, waitFor, act } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { Explorer } from '@agentdeck/workbench';
 import type { AgentDeckPreloadApi, FsChangeEvent, WorkspaceModel } from '@agentdeck/shared';
 
-function mockAgent(overrides: any = {}): AgentDeckPreloadApi {
+function mockAgent(overrides: Record<string, unknown> = {}): AgentDeckPreloadApi {
   return {
     getStartupState: vi.fn().mockResolvedValue({ status: 'ready', appVersion: '0.1.0', services: [] }),
     selectWorkspaceEntry: vi.fn().mockResolvedValue({ status: 'cancelled' }),

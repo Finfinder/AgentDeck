@@ -3,8 +3,6 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   PermissionBroker,
   checkSensitivePath,
-  escalateRisk,
-  isHighRisk,
   isBinaryFile
 } from '@agentdeck/services';
 

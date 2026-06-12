@@ -324,10 +324,10 @@ describe('EventLogPanel — coverage', () => {
 
   describe('getEventLog not available', () => {
     it('handles missing getEventLog gracefully', async () => {
-      const agent = createMockAgent({
-        getEventLog: undefined,
-      } as any);
-      render(<EventLogPanel agent={agent} />);
+      const base = createMockAgent();
+      // @ts-expect-error — testing missing optional API surface
+      base.getEventLog = undefined;
+      render(<EventLogPanel agent={base} />);
 
       // Should not crash
       await waitFor(() => {
@@ -338,10 +338,10 @@ describe('EventLogPanel — coverage', () => {
 
   describe('onEventLogUpdate not available', () => {
     it('handles missing onEventLogUpdate gracefully', async () => {
-      const agent = createMockAgent({
-        onEventLogUpdate: undefined,
-      } as any);
-      render(<EventLogPanel agent={agent} />);
+      const base = createMockAgent();
+      // @ts-expect-error — testing missing optional API surface
+      base.onEventLogUpdate = undefined;
+      render(<EventLogPanel agent={base} />);
 
       await waitFor(() => {
         expect(screen.getByText('Event Log')).toBeDefined();
@@ -351,10 +351,10 @@ describe('EventLogPanel — coverage', () => {
 
   describe('clearEventLog not available', () => {
     it('handles missing clearEventLog gracefully', async () => {
-      const agent = createMockAgent({
-        clearEventLog: undefined,
-      } as any);
-      render(<EventLogPanel agent={agent} />);
+      const base = createMockAgent();
+      // @ts-expect-error — testing missing optional API surface
+      base.clearEventLog = undefined;
+      render(<EventLogPanel agent={base} />);
 
       await waitFor(() => {
         expect(screen.getByText('Event Log')).toBeDefined();

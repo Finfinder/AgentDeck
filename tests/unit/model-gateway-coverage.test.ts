@@ -1,11 +1,8 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type {
-  ChatMessage,
-  ChatStreamEvent,
   ModelInfo,
-  ModelProviderId,
-  ToolCall
+  ModelProviderId
 } from '@agentdeck/shared';
 import {
   ModelGateway,
@@ -162,14 +159,12 @@ describe('ModelGateway — coverage', () => {
     it('returns NETWORK_ERROR when aborted during retry backoff', async () => {
       const gateway = new ModelGateway();
       gateway.setRetryPolicy({ maxRetries: 3, baseDelayMs: 100, maxDelayMs: 200, jitterFactor: 0 });
-      let callCount = 0;
       const adapter: ModelProviderAdapter = {
         providerId: 'ollama',
         label: 'Mock',
         healthCheck: vi.fn().mockResolvedValue(true),
         listModels: vi.fn().mockResolvedValue([]),
         chat: vi.fn().mockImplementation(async function* () {
-          callCount++;
           yield { type: 'error', message: '[NETWORK_ERROR] Connection refused' };
         })
       };
