@@ -176,17 +176,25 @@ export interface LineRange {
  * if the column ranges intersect.
  */
 export function rangesOverlap(a: LineRange, b: LineRange): boolean {
+  // No overlap if one range ends before the other starts
   if (a.endLine < b.startLine || b.endLine < a.startLine) return false;
+
+  // One range fully contains the other's start
   if (a.startLine < b.startLine && a.endLine > b.startLine) return true;
   if (b.startLine < a.startLine && b.endLine > a.startLine) return true;
+
+  // Ranges share at least one line
   if (a.startLine === b.startLine) {
-    if (a.startLine === a.endLine && b.startLine === b.endLine) {
-      return a.endCol >= b.startCol && b.endCol >= a.startCol;
-    }
-    return true;
+    const isSingleLine = a.startLine === a.endLine && b.startLine === b.endLine;
+    return isSingleLine
+      ? a.endCol >= b.startCol && b.endCol >= a.startCol
+      : true;
   }
+
+  // Adjacent lines — check column overlap
   if (a.endLine === b.startLine) return a.endCol >= b.startCol;
   if (b.endLine === a.startLine) return b.endCol >= a.startCol;
+
   return true;
 }
 
@@ -419,11 +427,25 @@ export async function applyPatchWithConflictCheck(
  * Full-content replacements (no range) are applied last.
  * Returns the modified content, or null if application fails.
  */
+function applyRangedOperation(content: string, op: PatchOperation): string | null {
+  if (!op.range) return content;
+  const lines = content.split('\n');
+  if (op.range.startLine < 1 || op.range.endLine > lines.length) return null;
+
+  const firstLine = lines[op.range.startLine - 1] ?? '';
+  const lastLine = lines[op.range.endLine - 1] ?? '';
+  const beforePart = firstLine.slice(0, op.range.startCol - 1);
+  const afterPart = lastLine.slice(op.range.endCol - 1);
+  const beforeLines = lines.slice(0, op.range.startLine - 1);
+  const afterLines = lines.slice(op.range.endLine);
+
+  return [...beforeLines, beforePart + op.text + afterPart, ...afterLines].join('\n');
+}
+
 function applyPatchToContent(
   content: string,
   operations: readonly PatchOperation[]
 ): string | null {
-  // Sort ranged operations by startLine descending to preserve line positions
   const rangedOps = operations
     .filter(op => op.range)
     .sort((a, b) => b.range!.startLine - a.range!.startLine);
@@ -431,27 +453,12 @@ function applyPatchToContent(
 
   let result = content;
   for (const op of rangedOps) {
-    if (!op.range) continue;
-    const lines = result.split('\n');
-    if (op.range.startLine < 1 || op.range.endLine > lines.length) return null;
-
-    const firstLine = lines[op.range.startLine - 1] ?? '';
-    const lastLine = lines[op.range.endLine - 1] ?? '';
-    const beforePart = firstLine.slice(0, op.range.startCol - 1);
-    const afterPart = lastLine.slice(op.range.endCol - 1);
-
-    const beforeLines = lines.slice(0, op.range.startLine - 1);
-    const afterLines = lines.slice(op.range.endLine);
-
-    result = [...beforeLines, beforePart + op.text + afterPart, ...afterLines].join('\n');
+    const applied = applyRangedOperation(result, op);
+    if (applied === null) return null;
+    result = applied;
   }
 
-  // Apply full-content replacements last
-  for (const op of fullReplacements) {
-    result = op.text;
-  }
-
-  return result;
+  return fullReplacements.length > 0 ? fullReplacements[fullReplacements.length - 1]!.text : result;
 }
 
 // ?? Risk classification helpers ??????????????????????????????????????????

@@ -3,64 +3,12 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '@agentdeck/workbench';
-import { DEFAULT_THEME_SETTINGS, type AgentDeckPreloadApi } from '@agentdeck/shared';
+import type { AgentDeckPreloadApi } from '@agentdeck/shared';
 
-function mockPreloadApi(overrides: Partial<AgentDeckPreloadApi> = {}): AgentDeckPreloadApi {
-  return {
-    getStartupState: vi.fn().mockResolvedValue({ status: 'ready', appVersion: '0.1.0', services: [] }),
-    selectWorkspaceEntry: vi.fn().mockResolvedValue({ status: 'cancelled' }),
-    getModelGatewayConfig: vi.fn().mockResolvedValue({ providers: [], activeProvider: 'ollama', activeModel: 'default' }),
-    listChatTabs: vi.fn().mockResolvedValue([]),
-    createChatTab: vi.fn().mockImplementation(async (title) => ({ id: `chat-tab-${Date.now()}`, title: title ?? 'New Chat', messages: [], activeModel: 'default', activeProvider: 'ollama', isStreaming: false })),
-    closeChatTab: vi.fn().mockResolvedValue(undefined),
-    sendMessage: vi.fn().mockResolvedValue({ status: 'ok' }),
-    stopStreaming: vi.fn().mockResolvedValue(undefined),
-    onChatStream: vi.fn().mockReturnValue(() => undefined),
-    onChatTabsChange: vi.fn().mockReturnValue(() => undefined),
-    versions: { chrome: '130.0.0', electron: '42.3.0', node: '25.0.0' },
-    getThemeSettings: vi.fn().mockResolvedValue(DEFAULT_THEME_SETTINGS),
-    setThemeSettings: vi.fn().mockImplementation(async (s: unknown) => s),
-    openWorkspace: vi.fn().mockResolvedValue({ status: 'error', code: 'FILE_NOT_FOUND', message: 'Test' }),
-    listDirectory: vi.fn().mockResolvedValue({ path: '/', entries: [] }),
-    searchFiles: vi.fn().mockResolvedValue([]),
-    getRecentWorkspaces: vi.fn().mockResolvedValue([]),
-    onFsEvent: vi.fn().mockReturnValue(() => undefined),
-    readFile: vi.fn().mockResolvedValue({ status: 'error', code: 'FILE_NOT_FOUND', message: 'Test' }),
-    writeFile: vi.fn().mockResolvedValue({ status: 'ok' }),
-    markBufferDirty: vi.fn().mockResolvedValue(undefined),
-    deleteFile: vi.fn().mockResolvedValue({ status: 'ok' }),
-    renameFile: vi.fn().mockResolvedValue({ status: 'ok' }),
-    getEditorDiagnostics: vi.fn().mockResolvedValue([]),
-    applyWorkspaceEdit: vi.fn().mockResolvedValue({ status: 'ok' }),
-    showDiff: vi.fn().mockResolvedValue({ status: 'ok', diff: '' }),
-    showSaveDialog: vi.fn().mockResolvedValue(null),
-    toggleDevTools: vi.fn().mockResolvedValue(undefined),
-    getIdentitySession: vi.fn().mockResolvedValue({ isLoggedIn: false }),
-    startOAuth: vi.fn().mockResolvedValue({ isLoggedIn: false }),
-    signOut: vi.fn().mockResolvedValue({ isLoggedIn: false }),
-    onIdentityChange: vi.fn().mockReturnValue(() => undefined),
-    onDeviceCode: vi.fn().mockReturnValue(() => undefined),
-    onIdentityWarning: vi.fn().mockReturnValue(() => undefined),
-    getApiKey: vi.fn().mockResolvedValue(null),
-    setApiKey: vi.fn().mockResolvedValue(undefined),
-    deleteApiKey: vi.fn().mockResolvedValue(undefined),
-    testConnection: vi.fn().mockResolvedValue({ status: 'error', message: 'test' }),
-    setProviderConfig: vi.fn().mockResolvedValue(undefined),
-    getProviderConfig: vi.fn().mockResolvedValue({ baseUrl: '', hasApiKey: false }),
-    toolCall: vi.fn().mockResolvedValue({ status: 'ok', callId: 'dev', result: null }),
-    onToolApprovalRequest: vi.fn().mockReturnValue(() => undefined),
-    submitApproval: vi.fn().mockResolvedValue({ status: 'ok', callId: 'dev', result: null }),
-    proposePatch: vi.fn().mockResolvedValue({ status: 'ok', patchId: 'dev-patch', appliedHash: 'dev-hash' }),
-    applyPatch: vi.fn().mockResolvedValue({ status: 'ok', patchId: 'dev-patch', appliedHash: 'dev-hash' }),
-    onConflictDetected: vi.fn().mockReturnValue(() => undefined),
-    resolveConflict: vi.fn().mockResolvedValue(undefined),
-    checkSensitivePath: vi.fn().mockResolvedValue({ filePath: '', isSensitive: false }),
-    getFileHash: vi.fn().mockResolvedValue({ status: 'ok', hash: 'dev-hash' }),
-    getEventLog: vi.fn().mockResolvedValue({ status: 'ok', entries: [], total: 0 }),
-    onEventLogUpdate: vi.fn().mockReturnValue(() => undefined),
-    clearEventLog: vi.fn().mockResolvedValue(undefined),
-    ...overrides
-  };
+import { createMockAgent } from './mock-agent';
+
+function mockPreloadApi(overrides: Parameters<typeof createMockAgent>[0] = {}): ReturnType<typeof createMockAgent> {
+  return createMockAgent(overrides);
 }
 
 function setAgentDeck(api: AgentDeckPreloadApi) {
