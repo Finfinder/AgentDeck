@@ -3,8 +3,11 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, globalShortcut, session, she
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 
-import { applyWorkspaceEdit, bootstrapDesktopServices, createSettingsService, createStartupErrorState, createWorkspaceService, getDiagnostics, markBufferDirty, readEditorFile, showDiff, createIdentityService, type IdentityService, type SettingsService, type WorkspaceService, writeEditorFile, createModelGateway, createDefaultAdapters, type ModelGateway, PermissionBroker, ConflictBroker, computeFileHash, ToolRouter, checkSensitivePath } from '@agentdeck/services';
+import { applyWorkspaceEdit, bootstrapDesktopServices, createSettingsService, createStartupErrorState, createWorkspaceService, getDiagnostics, markBufferDirty, readEditorFile, showDiff, createIdentityService, type IdentityService, type SettingsService, type WorkspaceService, writeEditorFile, createModelGateway, createDefaultAdapters, type ModelGateway, PermissionBroker, ConflictBroker, computeFileHash, ToolRouter, checkSensitivePath, getEventLogService, isBinaryFile } from '@agentdeck/services';
+// Use the static method directly
+const classifyOperationKind = ConflictBroker.classifyOperationKind;
 import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
@@ -16,9 +19,13 @@ import {
   isToolCallRequest,
   isWorkspaceEditInput,
   isWorkspaceOpenRequest,
+  type EventLogFilter,
+  type EventLogEntry,
   type ModelProviderId,
   type SearchQuery,
   type StartupState,
+  type ToolCallRequest,
+  type ToolRiskLevel,
   type WorkspaceSelection
 } from '@agentdeck/shared';
 
@@ -43,6 +50,54 @@ let startupState: StartupState = {
   code: 'DESKTOP_SERVICES_UNAVAILABLE',
   message: 'Application services have not been initialized yet.'
 };
+
+// Module-level reference to the ToolRouter, set by registerToolRouterIpc.
+// Used by applyWorkspaceEdit IPC handler to route multi-file edits through PermissionBroker.
+let toolRouterRef: ToolRouter | null = null;
+
+/** Check operations for sensitive paths. Returns ACCESS_DENIED result or null. */
+function checkSensitivePaths(edit: { operations: readonly { filePath: string }[] }): { status: 'error'; code: 'ACCESS_DENIED'; message: string } | null {
+  for (const op of edit.operations) {
+    if (checkSensitivePath(op.filePath).isSensitive) {
+      return { status: 'error', code: 'ACCESS_DENIED', message: `Edycja wrażliwego pliku zabroniona: ${op.filePath}` };
+    }
+  }
+  return null;
+}
+
+/** Route a multi-file workspace edit through the ToolRouter approval flow. */
+async function routeMultiFileEdit(
+  edit: { operations: readonly { filePath: string }[] },
+  uniqueFiles: Set<string>,
+  win: BrowserWindow,
+): Promise<{ status: 'ok' } | { status: 'error'; code: string; message: string }> {
+  const router = toolRouterRef;
+  if (!router) {
+    return { status: 'error', code: 'UNKNOWN', message: 'Tool Router nie został zainicjalizowany.' };
+  }
+  const toolRequest: ToolCallRequest = {
+    callId: `workspace-edit-${Date.now()}-${randomBytes(4).toString('hex')}`,
+    toolName: 'applyPatch',
+    args: { workspaceEdit: edit, fileCount: uniqueFiles.size, filePaths: Array.from(uniqueFiles) },
+  };
+  const response = await router.execute(toolRequest);
+
+  if (response.status === 'pending-approval') {
+    if (!win.isDestroyed()) {
+      win.webContents.send(IPC_CHANNELS.toolApprovalRequest, response);
+    }
+    const kind = classifyOperationKind('multi-file');
+    console.warn(`[main] Multi-file edit (${uniqueFiles.size} files) pending approval, kind: ${kind}`);
+    return { status: 'error', code: 'UNKNOWN', message: 'Oczekuje na zatwierdzenie — edycja wielu plików (multi-file).' };
+  }
+
+  if (response.status === 'error') {
+    return { status: 'error', code: (response as { code: string }).code ?? 'UNKNOWN', message: response.message };
+  }
+
+  console.info(`[main] Multi-file edit (${uniqueFiles.size} files) applied after approval.`);
+  return { status: 'ok' };
+}
 
 function registerIpcHandlers(settingsService: SettingsService, workspaceService: WorkspaceService, mainWindow: BrowserWindow, identityService?: IdentityService, modelGateway?: ModelGateway): void {
   ipcMain.handle(IPC_CHANNELS.getStartupState, () => startupState);
@@ -88,6 +143,9 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
     if (typeof filePath !== 'string' || typeof content !== 'string') {
       return { status: 'error', code: 'UNKNOWN', message: 'Invalid arguments.' };
     }
+    if (checkSensitivePath(filePath).isSensitive) {
+      return { status: 'error', code: 'ACCESS_DENIED', message: `Zapis na wrażliwej ścieżce zabroniony: ${filePath}` };
+    }
     return writeEditorFile(filePath, content);
   });
 
@@ -101,12 +159,18 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
     if (typeof filePath !== 'string') {
       return { status: 'error', code: 'UNKNOWN', message: 'Invalid file path.' };
     }
+    if (checkSensitivePath(filePath).isSensitive) {
+      return { status: 'error', code: 'ACCESS_DENIED', message: `Usuwanie wrażliwego pliku zabronione: ${filePath}` };
+    }
     return workspaceService.deleteFile(filePath);
   });
 
   ipcMain.handle(IPC_CHANNELS.renameFile, async (_event, oldPath: unknown, newPath: unknown) => {
     if (typeof oldPath !== 'string' || typeof newPath !== 'string') {
       return { status: 'error', code: 'UNKNOWN', message: 'Invalid file paths.' };
+    }
+    if (checkSensitivePath(oldPath).isSensitive || checkSensitivePath(newPath).isSensitive) {
+      return { status: 'error', code: 'ACCESS_DENIED', message: `Zmiana nazwy wrażliwego pliku zabroniona: ${oldPath}` };
     }
     return workspaceService.renameFile(oldPath, newPath);
   });
@@ -128,6 +192,21 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
     if (!isWorkspaceEditInput(edit)) {
       return { status: 'error', code: 'UNKNOWN', message: 'Invalid workspace edit payload.' } as const;
     }
+
+    const sensitiveResult = checkSensitivePaths(edit);
+    if (sensitiveResult) return sensitiveResult;
+
+    const uniqueFiles = new Set(edit.operations.map(op => op.filePath));
+    if (uniqueFiles.size > 1) {
+      return routeMultiFileEdit(edit, uniqueFiles, mainWindow);
+    }
+
+    // Single-file: log binary classification
+    const firstOp = edit.operations[0];
+    if (firstOp && isBinaryFile(firstOp.filePath)) {
+      console.warn(`[main] Binary file edit detected, kind: ${classifyOperationKind('binary')}, file: ${firstOp.filePath}`);
+    }
+
     try {
       return await applyWorkspaceEdit(edit);
     } catch (err) {
@@ -141,6 +220,24 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
       return { status: 'error', code: 'UNKNOWN', message: 'showDiff: invalid input - expected { original: string, modified: string }' } as const;
     }
     return showDiff(input.original, input.modified);
+  });
+
+  // Event Log IPC handlers
+  const eventLogService = getEventLogService();
+
+  ipcMain.handle(IPC_CHANNELS.getEventLog, (_event, filter: EventLogFilter | undefined) => {
+    return eventLogService.query(filter);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.clearEventLog, () => {
+    eventLogService.clear();
+  });
+
+  // Forward event log updates to renderer
+  eventLogService.on('update', (entry: EventLogEntry) => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.eventLogUpdate, entry);
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.toggleDevTools, () => {
@@ -368,12 +465,12 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
   }
 
   // Phase 7: Tool Router / Permission Broker / Conflict Broker IPC handlers
-  registerToolRouterIpc(mainWindow, workspaceService);
+  registerToolRouterIpc(mainWindow, workspaceService, modelGateway);
 }
 
 // ?? Phase 7: Tool Router IPC handlers ??????????????????????????????????????
 
-function registerToolRouterIpc(mainWindow: BrowserWindow, workspaceService: WorkspaceService): void {
+function registerToolRouterIpc(mainWindow: BrowserWindow, workspaceService: WorkspaceService, modelGateway?: ModelGateway): void {
   const permissionBroker = new PermissionBroker();
   const conflictBroker = new ConflictBroker();
 
@@ -388,6 +485,12 @@ function registerToolRouterIpc(mainWindow: BrowserWindow, workspaceService: Work
         permissionBroker,
         conflictBroker
       });
+      // Wire ToolRouter into ModelGateway so agent tool calls go through approval flow
+      if (modelGateway) {
+        modelGateway.setToolRouter(toolRouter);
+      }
+      // Expose at module level so applyWorkspaceEdit handler can route multi-file edits
+      toolRouterRef = toolRouter;
     }
     return toolRouter;
   }
@@ -410,10 +513,29 @@ function registerToolRouterIpc(mainWindow: BrowserWindow, workspaceService: Work
     return response;
   });
 
-  ipcMain.handle(IPC_CHANNELS.toolApprovalResponse, (_event, decision: unknown) => {
-    if (isApprovalDecision(decision)) {
-      permissionBroker.submitApproval(decision);
+  ipcMain.handle(IPC_CHANNELS.toolApprovalResponse, async (_event, decision: unknown) => {
+    if (!isApprovalDecision(decision)) {
+      return { status: 'error', code: 'UNKNOWN', message: 'Invalid approval decision.' };
     }
+
+    const originalRequest = permissionBroker.submitApproval(decision);
+    if (!originalRequest) {
+      return { status: 'error', code: 'UNKNOWN', message: 'Approval expired or unknown callId.' };
+    }
+
+    // If approved, execute the tool; if denied, return denied response
+    if (decision.approved) {
+      const router = getToolRouter();
+      const response = await router.executeApproved(originalRequest);
+      return response;
+    }
+
+    return {
+      status: 'error' as const,
+      callId: decision.callId,
+      code: 'ACCESS_DENIED' as const,
+      message: 'Narzędzie odrzucone przez użytkownika.'
+    };
   });
 
   ipcMain.handle(IPC_CHANNELS.proposePatch, async (_event, patchData: unknown) => {
@@ -432,16 +554,100 @@ function registerToolRouterIpc(mainWindow: BrowserWindow, workspaceService: Work
     return { status: 'ok', patchId, riskLevel, operations: operations.length };
   });
 
-  ipcMain.handle(IPC_CHANNELS.applyPatch, async (_event, patchId: unknown) => {
-    if (typeof patchId !== 'string') {
+  ipcMain.handle(IPC_CHANNELS.applyPatch, async (_event, request: unknown) => {
+    // Validate request shape: { patchId: string, patch: PatchSet data }
+    if (typeof request !== 'object' || request === null) {
+      return { status: 'error', code: 'UNKNOWN', message: 'Invalid applyPatch request.' };
+    }
+    const req = request as Record<string, unknown>;
+    if (typeof req.patchId !== 'string') {
       return { status: 'error', code: 'UNKNOWN', message: 'Invalid patch ID.' };
     }
-    // Patch application is handled through tool router with conflict checking
-    return { status: 'ok', patchId, appliedHash: 'pending' };
+    if (typeof req.patch !== 'object' || req.patch === null) {
+      return { status: 'error', code: 'UNKNOWN', message: 'Invalid patch data.' };
+    }
+    const patchData = req.patch as Record<string, unknown>;
+
+    // Build a ToolCallRequest so applyPatch goes through PermissionBroker + ConflictBroker
+    const toolRequest: ToolCallRequest = {
+      callId: `apply-patch-${Date.now()}-${randomBytes(4).toString('hex')}`,
+      toolName: 'applyPatch',
+      args: {
+        patchId: req.patchId,
+        patch: {
+          filePath: String(patchData.filePath ?? ''),
+          baseHash: String(patchData.baseHash ?? ''),
+          operations: Array.isArray(patchData.operations) ? patchData.operations : [],
+          author: String(patchData.author ?? 'agent'),
+          riskLevel: patchData.riskLevel as ToolRiskLevel ?? 'medium',
+        }
+      }
+    };
+
+    const router = getToolRouter();
+    const response = await router.execute(toolRequest);
+
+    // If pending approval, forward to renderer
+    if (response.status === 'pending-approval') {
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(IPC_CHANNELS.toolApprovalRequest, response);
+      }
+      // Return a patch-compatible result indicating pending approval
+      return { status: 'error', code: 'UNKNOWN', message: 'Oczekuje na zatwierdzenie (pending-approval).' };
+    }
+
+    if (response.status === 'error') {
+      // If conflict detected, push conflict event to renderer for UI handling
+      const conflictData = (response as Record<string, unknown>).conflict;
+      if (response.code === 'WRITE_CONFLICT' && conflictData) {
+        if (!mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(IPC_CHANNELS.conflictDetected, conflictData);
+        }
+        return { status: 'error', code: 'WRITE_CONFLICT', message: response.message };
+      }
+      return { status: 'error', code: response.code, message: response.message };
+    }
+
+    if (response.status === 'ok') {
+      const result = (response.result as Record<string, unknown> | undefined);
+      return { status: 'ok', patchId: req.patchId, appliedHash: String(result?.appliedHash ?? '') };
+    }
+
+    // Fallback for unexpected statuses
+    return { status: 'error', code: 'UNKNOWN', message: `Unexpected response status: ${response.status}` };
   });
 
-  ipcMain.handle(IPC_CHANNELS.conflictResolve, () => {
-    // Conflict resolution handled by conflict broker
+  ipcMain.handle(IPC_CHANNELS.conflictResolve, (_event, resolution: unknown) => {
+    if (typeof resolution !== 'object' || resolution === null) {
+      return { status: 'error', code: 'UNKNOWN', message: 'Invalid conflict resolution.' };
+    }
+    const res = resolution as Record<string, unknown>;
+    if (typeof res.conflictId !== 'string' || typeof res.action !== 'string') {
+      return { status: 'error', code: 'UNKNOWN', message: 'Invalid conflict resolution fields.' };
+    }
+
+    const { action } = res;
+    if (action === 'apply' || action === 'skip') {
+      const ok = conflictBroker.resolveConflict({ conflictId: res.conflictId, action });
+      return ok
+        ? { status: 'ok' }
+        : { status: 'error', code: 'UNKNOWN', message: `Conflict not found: ${res.conflictId}` };
+    }
+
+    if (action === 'edit') {
+      // For 'edit', the client provides new operations to re-apply
+      const operations = Array.isArray(res.operations) ? res.operations : [];
+      if (operations.length === 0) {
+        return { status: 'error', code: 'UNKNOWN', message: 'Edit action requires operations.' };
+      }
+      // Remove the old conflict and let client re-propose with new operations
+      const ok = conflictBroker.resolveConflict({ conflictId: res.conflictId, action: 'skip' });
+      return ok
+        ? { status: 'ok', message: 'Conflict cleared. Re-propose patch with edited operations.' }
+        : { status: 'error', code: 'UNKNOWN', message: `Conflict not found: ${res.conflictId}` };
+    }
+
+    return { status: 'error', code: 'UNKNOWN', message: `Unknown conflict action: ${action}` };
   });
 
   ipcMain.handle(IPC_CHANNELS.checkSensitivePath, (_event, filePath: unknown) => {

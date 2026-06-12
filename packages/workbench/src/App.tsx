@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { DEFAULT_THEME_SETTINGS, isIdentitySession, type IdentitySession, type AgentDeckPreloadApi, type EditorDiagnostic, type FsChangeEvent, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
+import { DEFAULT_THEME_SETTINGS, isIdentitySession, type AgentDeckPreloadApi, type ApprovalDecision, type Conflict, type EditorDiagnostic, type EventLogEntry, type FsChangeEvent, type IdentitySession, type StartupState, type ThemePreference, type ThemeSettings, type ToolCallResponse, type ToolClassification, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
 
 import { ChatPanel, ChatTabs, useChatStore } from './chat';
 import { EditorSurface } from './editor';
 import { useEditorStore } from './editor/useEditorStore';
+import { EventLogPanel } from './EventLogPanel';
 import { MenuBar } from './MenuBar';
 import { ProblemsPanel } from './ProblemsPanel';
 import { SidebarContent } from './SidebarContent';
@@ -32,7 +33,24 @@ const DEV_PRELOAD_API: AgentDeckPreloadApi = {
   renameFile: async () => ({ status: 'error', code: 'ACCESS_DENIED', message: 'Dev mode - no file rename.' }),
   getEditorDiagnostics: async () => [],
   applyWorkspaceEdit: async () => ({ status: 'error', code: 'UNKNOWN', message: 'Dev mode - no workspace edit.' }),
-  showDiff: async () => ({ status: 'error', code: 'UNKNOWN', message: 'Dev mode - no diff.' }),
+  showDiff: async (input: { original: string; modified: string; filePath?: string }) => {
+    // Dev mode — generate simple line-based diff inline
+    const origLines = input.original.split('\n');
+    const modLines = input.modified.split('\n');
+    const diffLines = ['--- original', '+++ modified'];
+    const maxLen = Math.max(origLines.length, modLines.length);
+    for (let i = 0; i < maxLen; i++) {
+      const o = origLines[i];
+      const m = modLines[i];
+      if (o === m) {
+        if (o !== undefined) diffLines.push(` ${o}`);
+      } else {
+        if (o !== undefined) diffLines.push(`-${o}`);
+        if (m !== undefined) diffLines.push(`+${m}`);
+      }
+    }
+    return { status: 'ok' as const, diff: diffLines.join('\n') };
+  },
   showSaveDialog: async () => null,
   toggleDevTools: async () => undefined
   ,
@@ -65,7 +83,21 @@ const DEV_PRELOAD_API: AgentDeckPreloadApi = {
   deleteApiKey: async () => undefined,
   testConnection: async () => ({ status: 'error' as const, message: 'Dev mode - no real connection.' }),
   setProviderConfig: async () => undefined,
-  getProviderConfig: async () => ({ baseUrl: '', hasApiKey: false })
+  getProviderConfig: async () => ({ baseUrl: '', hasApiKey: false }),
+  // Phase 7: Tool Router / Permission Broker dev stubs
+  toolCall: async () => ({ status: 'ok' as const, callId: 'dev', result: null }),
+  onToolApprovalRequest: () => () => undefined,
+  submitApproval: async () => ({ status: 'ok' as const, callId: 'dev', result: null }),
+  proposePatch: async () => ({ status: 'ok' as const, patchId: 'dev-patch', appliedHash: 'dev-hash' }),
+  applyPatch: async () => ({ status: 'ok' as const, patchId: 'dev-patch', appliedHash: 'dev-hash' }),
+  onConflictDetected: () => () => undefined,
+  resolveConflict: async () => undefined,
+  checkSensitivePath: async () => ({ filePath: '', isSensitive: false }),
+  getFileHash: async () => ({ status: 'ok' as const, hash: 'dev-hash' }),
+  // Event Log dev stubs
+  getEventLog: async () => ({ status: 'ok' as const, entries: [] as readonly EventLogEntry[], total: 0 }),
+  onEventLogUpdate: () => () => undefined,
+  clearEventLog: async () => undefined
 };
 
 function getPreloadApi(): AgentDeckPreloadApi {
@@ -225,6 +257,155 @@ function IdentityMenu({ identity, agent, menuRef, isOpen, onToggle, onClose, dev
   );
 }
 
+// ?? Approval Dialog ???????????????????????????????????????????????????????
+
+interface PendingApproval {
+  callId: string;
+  classification: ToolClassification;
+  expiresAt: number;
+}
+
+interface ApprovalDialogProps {
+  approval: PendingApproval;
+  onDecision: (decision: ApprovalDecision) => void;
+}
+
+function ApprovalDialog({ approval, onDecision }: Readonly<ApprovalDialogProps>) {
+  const { classification, callId, expiresAt } = approval;
+  const [remember, setRemember] = useState(false);
+  const timeLeft = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+
+  const handleApprove = useCallback(() => {
+    onDecision({ callId, approved: true, remember });
+  }, [callId, remember, onDecision]);
+
+  const handleDeny = useCallback(() => {
+    onDecision({ callId, approved: false });
+  }, [callId, onDecision]);
+
+  // Risk level badge color
+  let riskColor: string;
+  if (classification.riskLevel === 'critical') {
+    riskColor = 'var(--color-danger)';
+  } else if (classification.riskLevel === 'high') {
+    riskColor = '#ff9f43';
+  } else if (classification.riskLevel === 'medium') {
+    riskColor = 'var(--color-warning)';
+  } else {
+    riskColor = 'var(--color-accent)';
+  }
+
+  return (
+    <div className="approval-overlay" role="alertdialog" aria-modal="true" aria-label="Tool approval request">
+      <div className="approval-dialog">
+        <div className="approval-header">
+          <h3 className="approval-title">Zatwierdź wywołanie narzędzia</h3>
+          <span className="approval-risk-badge" style={{ borderColor: riskColor, color: riskColor }}>
+            {classification.riskLevel}
+          </span>
+        </div>
+        <div className="approval-body">
+          <p className="approval-tool-name">{classification.name}</p>
+          <p className="approval-description">{classification.description}</p>
+          <p className="approval-timer">Pozostało: {timeLeft}s</p>
+          <label className="approval-remember">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            {' '}Zapamiętaj decyzję dla tego narzędzia
+          </label>
+        </div>
+        <div className="approval-actions">
+          <button className="approval-btn approval-btn--deny" type="button" onClick={handleDeny}>
+            Odrzuć
+          </button>
+          <button className="approval-btn approval-btn--approve" type="button" onClick={handleApprove}>
+            Zatwierdź
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ?? Patch Conflict Dialog ???????????????????????????????????????????????
+
+interface PatchConflict {
+  conflict: Conflict;
+  patchId: string;
+}
+
+interface PatchConflictDialogProps {
+  conflict: PatchConflict;
+  onResolve: (action: 'apply' | 'skip' | 'edit') => void;
+}
+
+function PatchConflictDialog({ conflict, onResolve }: Readonly<PatchConflictDialogProps>) {
+  const { conflict: conflictData, patchId } = conflict;
+
+  // Build a simple diff preview from the conflict info
+  const diffLines = conflictData.filePath
+    ? [
+        { prefix: '---', text: `a/${conflictData.filePath}` },
+        { prefix: '+++', text: `b/${conflictData.filePath}` },
+        { prefix: '@@', text: `patch: ${patchId}` },
+      ]
+    : [];
+
+  let riskColor: string;
+  if (conflictData.riskLevel === 'critical') {
+    riskColor = 'var(--color-danger)';
+  } else if (conflictData.riskLevel === 'high') {
+    riskColor = '#ff9f43';
+  } else if (conflictData.riskLevel === 'medium') {
+    riskColor = 'var(--color-warning)';
+  } else {
+    riskColor = 'var(--color-accent)';
+  }
+
+  return (
+    <div className="approval-overlay" role="alertdialog" aria-modal="true" aria-label="Patch conflict">
+      <div className="approval-dialog patch-conflict-dialog">
+        <div className="approval-header">
+          <h3 className="approval-title">Konflikt patcha</h3>
+          <span className="approval-risk-badge" style={{ borderColor: riskColor, color: riskColor }}>
+            {conflictData.kind}
+          </span>
+        </div>
+        <div className="approval-body">
+          <p className="approval-tool-name">{conflictData.filePath}</p>
+          <p className="approval-description">{conflictData.description}</p>
+          {diffLines.length > 0 && (
+            <pre className="patch-conflict-diff" aria-label="Diff preview">
+              {diffLines.map((line, i) => (
+                <div key={i} className={`diff-line diff-line--${line.prefix === '---' ? 'removed' : line.prefix === '+++' ? 'added' : 'header'}`}>
+                  <span className="diff-prefix">{line.prefix}</span>
+                  <span className="diff-text">{line.text}</span>
+                </div>
+              ))}
+            </pre>
+          )}
+        </div>
+        <div className="approval-actions">
+          <button className="approval-btn approval-btn--deny" type="button" onClick={() => onResolve('skip')}>
+            Pomiń
+          </button>
+          <button className="approval-btn" type="button" onClick={() => onResolve('edit')}>
+            Edytuj
+          </button>
+          <button className="approval-btn approval-btn--approve" type="button" onClick={() => onResolve('apply')}>
+            Nadpisz
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ?? App ???????????????????????????????????????????????????????????????????
+
 export function App() {
   const agent = useMemo(getPreloadApi, []);
   const [startupState, setStartupState] = useState<StartupState | null>(null);
@@ -239,7 +420,7 @@ export function App() {
   const [workspaceStatus, setWorkspaceStatus] = useState('No workspace opened.');
   const [activePanel, setActivePanel] = useState<'explorer' | 'search' | 'chat'>('explorer');
   const chatStore = useChatStore(agent);
-  const [activeBottomPanel, setActiveBottomPanel] = useState<'problems' | 'services' | 'output'>('problems');
+  const [activeBottomPanel, setActiveBottomPanel] = useState<'problems' | 'services' | 'output' | 'event-log'>('problems');
   const [externalChanges, setExternalChanges] = useState<ReadonlySet<string>>(new Set());
   const editorStore = useEditorStore();
   const [diagnostics, setDiagnostics] = useState<readonly EditorDiagnostic[]>([]);
@@ -248,6 +429,65 @@ export function App() {
   const [deviceCode, setDeviceCode] = useState<{ userCode: string; verificationUri: string; verificationUriComplete?: string } | null>(null);
   const [identityMenuOpen, setIdentityMenuOpen] = useState(false);
   const identityMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // ?? Phase 7: Tool approval state ????????????????????????????????????????
+  const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
+  const [pendingPatchConflict, setPendingPatchConflict] = useState<PatchConflict | null>(null);
+
+  const handleApprovalDecision = useCallback(async (decision: ApprovalDecision) => {
+    setPendingApproval(null);
+    try {
+      const response = await agent.submitApproval?.(decision);
+      if (response?.status === 'error') {
+        console.warn('[App] Approval response error:', response.message);
+      }
+    } catch {
+      // silently ignore — approval may have expired
+    }
+  }, [agent]);
+
+  // Subscribe to tool approval requests from main process
+  useEffect(() => {
+    if (typeof agent.onToolApprovalRequest !== 'function') return;
+
+    const dispose = agent.onToolApprovalRequest((response: ToolCallResponse & { status: 'pending-approval' }) => {
+      setPendingApproval({
+        callId: response.callId,
+        classification: response.classification,
+        expiresAt: response.expiresAt,
+      });
+    });
+
+    return dispose;
+  }, [agent]);
+
+  // Subscribe to patch conflict events from main process
+  useEffect(() => {
+    if (typeof agent.onConflictDetected !== 'function') return;
+
+    const dispose = agent.onConflictDetected((conflict: Conflict) => {
+      setPendingPatchConflict({ conflict, patchId: conflict.patchId });
+    });
+
+    return dispose;
+  }, [agent]);
+
+  const handlePatchConflictResolve = useCallback(async (action: 'apply' | 'skip' | 'edit') => {
+    if (!pendingPatchConflict) return;
+
+    try {
+      const resolution = action === 'edit'
+        ? { conflictId: pendingPatchConflict.conflict.id, action, operations: [] as readonly [] }
+        : { conflictId: pendingPatchConflict.conflict.id, action };
+      await agent.resolveConflict?.(resolution);
+    } catch {
+      // silently ignore — conflict may have expired
+    }
+
+    setPendingPatchConflict(null);
+
+    // For 'edit', the agent would need to re-propose — handled by the chat flow
+  }, [agent, pendingPatchConflict]);
 
   const allDiagnostics = useMemo(
     () => [...ipcDiagnostics, ...diagnostics],
@@ -604,6 +844,9 @@ export function App() {
           <button type="button" role="tab" aria-selected={activeBottomPanel === 'output'} onClick={() => { setActiveBottomPanel('output'); }}>
             Output
           </button>
+          <button type="button" role="tab" aria-selected={activeBottomPanel === 'event-log'} onClick={() => { setActiveBottomPanel('event-log'); }}>
+            Event Log
+          </button>
         </div>
 
         <div className="panel-content">
@@ -630,6 +873,9 @@ export function App() {
           )}
           {activeBottomPanel === 'output' && (
             <p className="output-empty" aria-live="polite">No output.</p>
+          )}
+          {activeBottomPanel === 'event-log' && (
+            <EventLogPanel agent={agent} theme={themeSettings.theme} />
           )}
         </div>
       </section>
@@ -707,6 +953,20 @@ export function App() {
           )}
         </div>
       </footer>
+
+      {/* Phase 7: Tool approval dialog */}
+      {pendingApproval && (
+        <ApprovalDialog
+          approval={pendingApproval}
+          onDecision={handleApprovalDecision}
+        />
+      )}
+      {pendingPatchConflict && (
+        <PatchConflictDialog
+          conflict={pendingPatchConflict}
+          onResolve={handlePatchConflictResolve}
+        />
+      )}
     </main>
   );
 }

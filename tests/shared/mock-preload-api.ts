@@ -66,6 +66,10 @@ export function createMockPreloadApi(overrides: Partial<AgentDeckPreloadApi> = {
     testConnection: vi.fn().mockResolvedValue({ status: 'error', message: 'Test mode' }) as unknown as AgentDeckPreloadApi['testConnection'],
     setProviderConfig: vi.fn().mockResolvedValue(undefined) as unknown as AgentDeckPreloadApi['setProviderConfig'],
     getProviderConfig: vi.fn().mockResolvedValue({ baseUrl: '', hasApiKey: false }) as unknown as AgentDeckPreloadApi['getProviderConfig'],
+    // Event Log
+    getEventLog: vi.fn().mockResolvedValue({ status: 'ok', entries: [], total: 0 }) as unknown as AgentDeckPreloadApi['getEventLog'],
+    onEventLogUpdate: vi.fn().mockReturnValue(() => undefined) as unknown as AgentDeckPreloadApi['onEventLogUpdate'],
+    clearEventLog: vi.fn().mockResolvedValue(undefined) as unknown as AgentDeckPreloadApi['clearEventLog'],
     versions: { chrome: 'test', electron: 'test', node: 'test' },
     ...overrides
   } as AgentDeckPreloadApi;

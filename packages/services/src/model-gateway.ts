@@ -10,9 +10,13 @@ import type {
   ModelProviderId,
   ModelProviderState,
   SendMessageResult,
-  ToolCall
+  ToolCall,
+  ToolCallRequest,
+  ToolCallResponse,
+  ToolName
 } from '@agentdeck/shared';
 import { classifyError } from './model-errors';
+import type { ToolRouter } from './tool-router';
 
 // ?? Retry policy ??????????????????????????????????????????????????????????
 
@@ -173,6 +177,12 @@ export class ModelGateway extends EventEmitter {
   private activeProvider: ModelProviderId = 'ollama';
   private activeModel: string = DEFAULT_MODEL.id;
   private retryPolicy: RetryPolicy = { ...DEFAULT_RETRY_POLICY };
+  private toolRouter: ToolRouter | null = null;
+
+  /** Set the ToolRouter instance for executing tool calls through approval flow. */
+  setToolRouter(router: ToolRouter): void {
+    this.toolRouter = router;
+  }
 
   // ?? Provider adapter registration ???????????????????????????????????????
 
@@ -570,9 +580,46 @@ export class ModelGateway extends EventEmitter {
     if (!tool) {
       return JSON.stringify({ error: `Tool not found: ${toolCall.function.name}` });
     }
-    // Tool execution is handled by the agent-runtime layer.
-    // For now, return a placeholder that the agent can process.
-    return JSON.stringify({ status: 'pending', tool: toolCall.function.name, arguments: toolCall.function.arguments });
+
+    // If no ToolRouter is configured, return a placeholder
+    if (!this.toolRouter) {
+      return JSON.stringify({ status: 'pending', tool: toolCall.function.name, arguments: toolCall.function.arguments });
+    }
+
+    // Parse tool arguments
+    let parsedArgs: Record<string, unknown>;
+    try {
+      parsedArgs = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
+    } catch {
+      parsedArgs = { raw: toolCall.function.arguments };
+    }
+
+    // Build ToolCallRequest and execute through ToolRouter (PermissionBroker + ConflictBroker)
+    const request: ToolCallRequest = {
+      callId: toolCall.id,
+      toolName: toolCall.function.name as ToolName,
+      args: parsedArgs
+    };
+
+    const response: ToolCallResponse = await this.toolRouter.execute(request);
+
+    if (response.status === 'ok') {
+      return JSON.stringify({ status: 'ok', result: response.result });
+    }
+    if (response.status === 'pending-approval') {
+      return JSON.stringify({
+        status: 'pending-approval',
+        callId: response.callId,
+        classification: response.classification,
+        expiresAt: response.expiresAt,
+        message: 'Narzędzie wymaga zatwierdzenia przez użytkownika.'
+      });
+    }
+    if (response.status === 'denied') {
+      return JSON.stringify({ status: 'denied', reason: response.reason });
+    }
+    // error
+    return JSON.stringify({ status: 'error', code: response.code, message: response.message });
   }
 
   stopStreaming(tabId: string): void {

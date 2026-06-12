@@ -151,9 +151,28 @@ describe('PermissionBroker', () => {
   });
 
   describe('submitApproval', () => {
-    it('should return false for unknown callId', () => {
+    it('should return null for unknown callId', () => {
       const result = broker.submitApproval({ callId: 'nonexistent', approved: true });
-      expect(result).toBe(false);
+      expect(result).toBeNull();
+    });
+
+    it('should return the original request for known callId', async () => {
+      const req = makeReq('writeFile', { filePath: '/.env', content: 'test' });
+      await broker.processToolCall(req);
+
+      const result = broker.submitApproval({ callId: req.callId, approved: true });
+      expect(result).not.toBeNull();
+      expect(result!.callId).toBe(req.callId);
+      expect(result!.toolName).toBe('writeFile');
+    });
+
+    it('should remove the pending approval after submit', async () => {
+      const req = makeReq('writeFile', { filePath: '/.env', content: 'test' });
+      await broker.processToolCall(req);
+
+      expect(broker.getPendingCallIds()).toContain(req.callId);
+      broker.submitApproval({ callId: req.callId, approved: true });
+      expect(broker.getPendingCallIds()).not.toContain(req.callId);
     });
   });
 

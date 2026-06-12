@@ -37,7 +37,7 @@ const SENSITIVE_PATH_PATTERNS: RegExp[] = [
 const SKIP_DIRS = new Set(['.git', 'node_modules', '__pycache__', '.venv', 'venv', '.tox', 'dist', 'build', 'out', '.next', '.nuxt', 'coverage', '.nyc_output']);
 
 // Binary file extensions - skip when searching text.
-const BINARY_EXTS = new Set([
+export const BINARY_EXTS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.svg',
   '.woff', '.woff2', '.ttf', '.eot', '.otf',
   '.pdf', '.zip', '.gz', '.tar', '.7z', '.rar',
@@ -45,6 +45,12 @@ const BINARY_EXTS = new Set([
   '.pth', '.pyc', '.pkl', '.npy', '.npz',
   '.mp3', '.mp4', '.wav', '.ogg', '.webm'
 ]);
+
+/** Check whether a file path has a binary extension. */
+export function isBinaryFile(filePath: string): boolean {
+  const ext = extname(filePath).toLowerCase();
+  return BINARY_EXTS.has(ext);
+}
 
 export function isSensitivePath(filePath: string): boolean {
   const normalized = filePath.replaceAll('\\', '/');

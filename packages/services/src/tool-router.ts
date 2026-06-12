@@ -6,14 +6,17 @@ import type {
   ToolCallResponse
 } from '@agentdeck/shared';
 
-import { checkSensitivePath, type PermissionBroker } from './permission-broker';
+import { checkSensitivePath, isBinaryFile, type PermissionBroker } from './permission-broker';
 import {
   applyPatchWithConflictCheck,
+  ConflictBroker,
   classifyPatchRisk,
-  type ConflictBroker,
   generatePatchId
 } from './conflict-broker';
+// Use the static method directly
+const classifyOperationKind = ConflictBroker.classifyOperationKind;
 import { readEditorFile, writeEditorFile } from './editor-service';
+import type { EventLogService } from './event-log-service';
 import { searchFilesStandalone as workspaceSearch } from './workspace-service';
 
 // ?? Tool execution context ?????????????????????????????????????????????????
@@ -22,6 +25,7 @@ export interface ToolRouterOptions {
   workspaceRoots: readonly string[];
   permissionBroker: PermissionBroker;
   conflictBroker: ConflictBroker;
+  eventLogService?: EventLogService;
 }
 
 // ?? Tool Router ???????????????????????????????????????????????????????????=
@@ -30,11 +34,38 @@ export class ToolRouter {
   private readonly workspaceRoots: readonly string[];
   private readonly permissionBroker: PermissionBroker;
   private readonly conflictBroker: ConflictBroker;
+  private readonly eventLogService: EventLogService | null;
 
   constructor(options: ToolRouterOptions) {
     this.workspaceRoots = options.workspaceRoots;
     this.permissionBroker = options.permissionBroker;
     this.conflictBroker = options.conflictBroker;
+    this.eventLogService = options.eventLogService ?? null;
+  }
+
+  /**
+   * Log a patch-related event with diff to the event log.
+   */
+  private logPatchEvent(params: {
+    level: 'info' | 'warn' | 'error';
+    message: string;
+    diff: string;
+    filePath: string;
+    patchId: string;
+  }): void {
+    if (!this.eventLogService) return;
+    try {
+      this.eventLogService.appendPatchEvent({
+        level: params.level,
+        source: 'tool-router',
+        message: params.message,
+        diff: params.diff,
+        filePath: params.filePath,
+        patchId: params.patchId
+      });
+    } catch {
+      // Event log failure should not break tool execution
+    }
   }
 
   /**
@@ -42,7 +73,9 @@ export class ToolRouter {
    * Returns a response indicating success, pending approval, or error.
    */
   async execute(request: ToolCallRequest): Promise<ToolCallResponse> {
-    // Check sensitive paths for file-operating tools
+    // Check sensitive paths for file-operating tools.
+    // For applyPatch, the file path is nested inside args.patch.filePath,
+    // so extractFilePath now handles that case.
     const filePath = this.extractFilePath(request);
     const sensitiveCheck = filePath ? checkSensitivePath(filePath) : undefined;
 
@@ -229,7 +262,7 @@ export class ToolRouter {
 
     // Generate diff preview
     const { showDiff } = await import('./editor-service');
-    let diffResult;
+    let diffResult: Awaited<ReturnType<typeof showDiff>>;
     try {
       const currentContent = await readFile(filePath, 'utf8');
       // Apply patch to get modified content for diff
@@ -257,6 +290,17 @@ export class ToolRouter {
       diffResult = { status: 'error', code: 'UNKNOWN', message: 'Failed to generate diff' };
     }
 
+    // Log patch event with diff to event log
+    if (diffResult.status === 'ok') {
+      this.logPatchEvent({
+        level: 'info',
+        message: `Patch ${patch.id} zaproponowany dla ${filePath}`,
+        diff: diffResult.diff,
+        filePath,
+        patchId: patch.id
+      });
+    }
+
     return {
       status: 'ok',
       callId: request.callId,
@@ -279,9 +323,28 @@ export class ToolRouter {
       return this.missingArg(request, 'patch');
     }
 
+    // Defensive deep validation of patch data from untrusted source (model gateway).
+    // isToolCallRequest validates top-level shape but not nested args structure.
+    if (typeof patchData.filePath !== 'string' || patchData.filePath.length === 0) {
+      return {
+        status: 'error',
+        callId: request.callId,
+        code: 'UNKNOWN',
+        message: 'Invalid patch data: filePath must be a non-empty string.'
+      };
+    }
+    if (!Array.isArray(patchData.operations)) {
+      return {
+        status: 'error',
+        callId: request.callId,
+        code: 'UNKNOWN',
+        message: 'Invalid patch data: operations must be an array.'
+      };
+    }
+
     const patch: PatchSet = {
       id: patchId,
-      filePath: String(patchData.filePath),
+      filePath: patchData.filePath,
       baseHash: String(patchData.baseHash),
       operations: patchData.operations as PatchSet['operations'],
       author: String(patchData.author ?? 'agent'),
@@ -289,7 +352,20 @@ export class ToolRouter {
       createdAt: Number(patchData.createdAt ?? Date.now())
     };
 
-    // Extra approval for sensitive files
+    // Defense-in-depth: extract file path from nested patch data and check sensitive paths.
+    // Note: extractFilePath() also handles args.patch.filePath, but we validate here
+    // explicitly before any write operation for clarity and defense-in-depth.
+    const patchSensitiveCheck = checkSensitivePath(patch.filePath);
+    if (patchSensitiveCheck.isSensitive) {
+      return {
+        status: 'error',
+        callId: request.callId,
+        code: 'ACCESS_DENIED',
+        message: `Zastosowanie patcha na wrażliwej ścieżce zabronione: ${patch.filePath}`
+      };
+    }
+
+    // Extra approval for sensitive files (from top-level check, e.g. rename oldPath)
     if (sensitiveCheck?.isSensitive) {
       return {
         status: 'pending-approval',
@@ -307,15 +383,33 @@ export class ToolRouter {
     const result = await applyPatchWithConflictCheck(patch, this.conflictBroker);
 
     if (!result.success && result.conflict) {
+      // Log conflict event
+      this.logPatchEvent({
+        level: 'warn',
+        message: `Konflikt patcha ${patch.id}: ${result.conflict.description}`,
+        diff: '',
+        filePath: patch.filePath,
+        patchId: patch.id
+      });
+
       return {
         status: 'error',
         callId: request.callId,
-        code: 'UNKNOWN',
+        code: 'WRITE_CONFLICT',
         message: result.conflict.description
       };
     }
 
     if (!result.success) {
+      // Log error event
+      this.logPatchEvent({
+        level: 'error',
+        message: `Błąd aplikacji patcha ${patch.id}: ${result.error ?? 'unknown'}`,
+        diff: '',
+        filePath: patch.filePath,
+        patchId: patch.id
+      });
+
       return {
         status: 'error',
         callId: request.callId,
@@ -323,6 +417,15 @@ export class ToolRouter {
         message: result.error ?? 'Failed to apply patch'
       };
     }
+
+    // Log successful patch application
+    this.logPatchEvent({
+      level: 'info',
+      message: `Patch ${patch.id} zastosowany${result.autoMerged ? ' (auto-merge)' : ''} dla ${patch.filePath}`,
+      diff: '',
+      filePath: patch.filePath,
+      patchId: patch.id
+    });
 
     return {
       status: 'ok',
@@ -385,6 +488,25 @@ export class ToolRouter {
       };
     }
 
+    // Log binary file deletion with classifyOperationKind
+    if (isBinaryFile(filePath)) {
+      this.logPatchEvent({
+        level: 'warn',
+        message: `Usunięcie pliku binarnego: ${filePath}`,
+        diff: '',
+        filePath,
+        patchId: request.callId
+      });
+      const kind = classifyOperationKind('binary');
+      this.logPatchEvent({
+        level: 'info',
+        message: `Klasyfikacja operacji: ${kind} dla ${filePath}`,
+        diff: '',
+        filePath,
+        patchId: request.callId
+      });
+    }
+
     const { deleteFileStandalone } = await import('./workspace-service');
     const result = await deleteFileStandalone(filePath);
 
@@ -424,6 +546,25 @@ export class ToolRouter {
       };
     }
 
+    // Log binary file rename with classifyOperationKind
+    if (isBinaryFile(oldPath) || isBinaryFile(newPath)) {
+      this.logPatchEvent({
+        level: 'warn',
+        message: `Zmiana nazwy pliku binarnego: ${oldPath} → ${newPath}`,
+        diff: '',
+        filePath: oldPath,
+        patchId: request.callId
+      });
+      const kind = classifyOperationKind('binary');
+      this.logPatchEvent({
+        level: 'info',
+        message: `Klasyfikacja operacji: ${kind} dla ${oldPath}`,
+        diff: '',
+        filePath: oldPath,
+        patchId: request.callId
+      });
+    }
+
     const { renameFileStandalone } = await import('./workspace-service');
     const result = await renameFileStandalone(oldPath, newPath);
 
@@ -451,6 +592,11 @@ export class ToolRouter {
     for (const key of candidates) {
       const val = args[key];
       if (typeof val === 'string') return val;
+    }
+    // For applyPatch, the file path is nested inside args.patch.filePath
+    const patchData = args['patch'] as Record<string, unknown> | undefined;
+    if (patchData && typeof patchData.filePath === 'string') {
+      return patchData.filePath;
     }
     return undefined;
   }

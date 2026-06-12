@@ -1,3 +1,5 @@
+import { extname } from 'node:path';
+
 import type {
   ApprovalDecision,
   SensitivePathCheckResult,
@@ -7,6 +9,8 @@ import type {
   ToolName,
   ToolRiskLevel
 } from '@agentdeck/shared';
+
+import { BINARY_EXTS } from './workspace-service';
 
 // ?? Tool classification registry ???????????????????????????????????????????
 
@@ -89,6 +93,7 @@ interface PendingApproval {
   classification: ToolClassification;
   expiresAt: number;
   resolve: (decision: ApprovalDecision) => void;
+  promise: Promise<ApprovalDecision>;
 }
 
 // ?? Permission Broker ?????????????????????????????????????????????????????
@@ -122,6 +127,7 @@ export class PermissionBroker {
    * Read-only tools never require approval.
    * Mutating tools require approval unless an allow rule is set.
    * Sensitive paths always require approval regardless of tool.
+   * Binary file operations always require approval (escalated to critical).
    */
   requiresApproval(request: ToolCallRequest, sensitiveCheck?: SensitivePathCheckResult): boolean {
     const classification = TOOL_CLASSIFICATIONS[request.toolName];
@@ -133,10 +139,49 @@ export class PermissionBroker {
     // Sensitive paths always require approval, regardless of allow rules
     if (sensitiveCheck?.isSensitive) return true;
 
+    // Binary file operations always require approval
+    if (this.isBinaryOperation(request)) return true;
+
     // Check explicit allow rule
     if (this.allowRules.get(request.toolName) === true) return false;
 
     return classification.requiresApproval;
+  }
+
+  /**
+   * Check whether a tool call targets a binary file.
+   * Binary operations are escalated to critical risk.
+   */
+  isBinaryOperation(request: ToolCallRequest): boolean {
+    const filePath = this.extractFilePath(request);
+    if (!filePath) return false;
+    const ext = extname(filePath).toLowerCase();
+    return BINARY_EXTS.has(ext);
+  }
+
+  /** Extract the primary file path from a tool call request's args. */
+  extractFilePath(request: ToolCallRequest): string | undefined {
+    const args = request.args;
+    if (!args) return undefined;
+    // Common arg names across tools
+    const candidates = ['filePath', 'path', 'oldPath', 'sourcePath'];
+    for (const key of candidates) {
+      const val = args[key];
+      if (typeof val === 'string' && val.length > 0) return val;
+    }
+    return undefined;
+  }
+
+  /**
+   * Extract the effective risk level for a request, accounting for
+   * binary file escalation.
+   */
+  getEffectiveRisk(request: ToolCallRequest, sensitiveCheck?: SensitivePathCheckResult): ToolRiskLevel {
+    const classification = TOOL_CLASSIFICATIONS[request.toolName];
+    if (!classification) return 'critical';
+    if (this.isBinaryOperation(request)) return 'critical';
+    if (sensitiveCheck?.isSensitive) return escalateRisk(classification.riskLevel, true);
+    return classification.riskLevel;
   }
 
   /**
@@ -160,6 +205,8 @@ export class PermissionBroker {
   /**
    * Process a tool call request through the deny-first permission check.
    * Returns either an immediate result or a pending-approval response.
+   * When approval is required, the request is stored in the pending queue
+   * and can be resolved via submitApproval or waitForApproval.
    */
   async processToolCall(
     request: ToolCallRequest,
@@ -184,8 +231,22 @@ export class PermissionBroker {
       };
     }
 
-    // Need approval - create pending approval
+    // Need approval - store in pending queue and return pending-approval response
     const expiresAt = Date.now() + this.approvalTimeoutMs;
+
+    // Create the pending approval entry with a resolvable promise
+    let resolveFn: (decision: ApprovalDecision) => void;
+    const promise = new Promise<ApprovalDecision>(resolve => {
+      resolveFn = resolve;
+    });
+
+    this.pendingApprovals.set(request.callId, {
+      request,
+      classification,
+      expiresAt,
+      resolve: resolveFn!,
+      promise
+    });
 
     return {
       status: 'pending-approval',
@@ -197,39 +258,46 @@ export class PermissionBroker {
 
   /**
    * Submit an approval decision for a pending tool call.
-   * Returns true if the call was found and resolved, false if expired/unknown.
+   * Returns the original request if found and resolved, null if expired/unknown.
    */
-  submitApproval(decision: ApprovalDecision): boolean {
+  submitApproval(decision: ApprovalDecision): ToolCallRequest | null {
     const pending = this.pendingApprovals.get(decision.callId);
-    if (!pending) return false;
+    if (!pending) return null;
 
     this.pendingApprovals.delete(decision.callId);
     pending.resolve(decision);
-    return true;
+    return pending.request;
   }
 
   /**
    * Wait for an approval decision with timeout.
-   * Returns the decision or null if timed out.
+   * Returns both the decision and the original request, or null if timed out.
+   *
+   * Uses a race between the approval promise and a timeout. On timeout,
+   * the pending entry is deleted and the promise is resolved with a
+   * rejection-safe sentinel to prevent dangling entries.
    */
-  waitForApproval(callId: string): Promise<ApprovalDecision | null> {
-    return new Promise(resolve => {
-      const pending = this.pendingApprovals.get(callId);
-      if (!pending) {
-        resolve(null);
-        return;
-      }
+  async waitForApproval(callId: string): Promise<{ decision: ApprovalDecision; request: ToolCallRequest } | null> {
+    const pending = this.pendingApprovals.get(callId);
+    if (!pending) return null;
 
-      const timeout = setTimeout(() => {
-        this.pendingApprovals.delete(callId);
-        resolve(null);
-      }, this.approvalTimeoutMs);
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      this.pendingApprovals.delete(callId);
+    }, this.approvalTimeoutMs);
 
-      pending.resolve = (decision: ApprovalDecision) => {
-        clearTimeout(timeout);
-        resolve(decision);
-      };
-    });
+    const decision = await pending.promise;
+    clearTimeout(timeout);
+
+    // If the timeout fired before the promise resolved, the entry was already
+    // deleted. Return null to signal timeout.
+    if (timedOut) return null;
+
+    // If decision is undefined/null (shouldn't happen with proper resolve, but guard anyway)
+    if (!decision) return null;
+
+    return { decision, request: pending.request };
   }
 
   /** Get all pending approval call IDs. */
@@ -279,4 +347,10 @@ export function escalateRisk(baseRisk: ToolRiskLevel, isSensitive: boolean): Too
 
 export function isHighRisk(risk: ToolRiskLevel): boolean {
   return risk === 'high' || risk === 'critical';
+}
+
+/** Check whether a file path has a binary extension. */
+export function isBinaryFile(filePath: string): boolean {
+  const ext = extname(filePath).toLowerCase();
+  return BINARY_EXTS.has(ext);
 }

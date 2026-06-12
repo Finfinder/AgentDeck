@@ -7,6 +7,7 @@ import {
   isChatTabState,
   isDirectoryListing,
   isDiffResult,
+  isEventLogResult,
   isFileOperationResult,
   isFileReadResult,
   isFileWriteResult,
@@ -28,6 +29,8 @@ import {
   isWorkspaceModel,
   isWorkspaceSelection,
   type AgentDeckPreloadApi,
+  type EventLogFilter,
+  type EventLogEntry,
   type ChatStreamEvent,
   type ChatTabState,
   type DiffInput,
@@ -250,21 +253,22 @@ const api: AgentDeckPreloadApi = {
   onToolApprovalRequest: (handler: (response: ToolCallResponse & { status: 'pending-approval' }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, value: unknown) => {
       if (isToolCallResponse(value) && value.status === 'pending-approval') {
-        handler(value as ToolCallResponse & { status: 'pending-approval' });
+        handler(value);
       }
     };
     ipcRenderer.on(IPC_CHANNELS.toolApprovalRequest, listener);
     return () => { ipcRenderer.off(IPC_CHANNELS.toolApprovalRequest, listener); };
   },
   submitApproval: async (decision: ApprovalDecision) => {
-    await ipcRenderer.invoke(IPC_CHANNELS.toolApprovalResponse, decision);
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.toolApprovalResponse, decision);
+    return isToolCallResponse(value) ? value : { status: 'error' as const, callId: decision.callId, code: 'UNKNOWN' as const, message: 'Unexpected response from main process.' };
   },
   proposePatch: async (patch: Omit<PatchSet, 'id' | 'createdAt'>) => {
     const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.proposePatch, patch);
     return isPatchResult(value) ? value : { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Unexpected response from main process.' };
   },
-  applyPatch: async (patchId: string) => {
-    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.applyPatch, patchId);
+  applyPatch: async (patchId: string, patch: Omit<PatchSet, 'id' | 'createdAt'>) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.applyPatch, { patchId, patch });
     return isPatchResult(value) ? value : { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Unexpected response from main process.' };
   },
   onConflictDetected: (handler: (conflict: Conflict) => void) => {
@@ -284,6 +288,23 @@ const api: AgentDeckPreloadApi = {
   getFileHash: async (filePath: string) => {
     const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.getFileHash, filePath);
     return isFileHashResult(value) ? value : { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Unexpected response from main process.' };
+  },
+  // Event Log
+  getEventLog: async (filter?: EventLogFilter) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.getEventLog, filter);
+    return isEventLogResult(value) ? value : { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Unexpected response from event log.' };
+  },
+  onEventLogUpdate: (handler: (entry: EventLogEntry) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (value && typeof value === 'object' && 'id' in value && 'timestamp' in value && 'level' in value && 'source' in value && 'message' in value) {
+        handler(value as EventLogEntry);
+      }
+    };
+    ipcRenderer.on(IPC_CHANNELS.eventLogUpdate, listener);
+    return () => { ipcRenderer.off(IPC_CHANNELS.eventLogUpdate, listener); };
+  },
+  clearEventLog: async () => {
+    await ipcRenderer.invoke(IPC_CHANNELS.clearEventLog);
   },
   versions: {
     chrome: process.versions.chrome ?? 'unknown',

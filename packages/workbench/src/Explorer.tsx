@@ -343,7 +343,20 @@ export function Explorer({ agent, workspaceModel, onFileOpen }: ExplorerProps) {
     }
     const dir = parentPath(entry.path);
     const newPath = dir + '/' + value;
-    agent.renameFile(entry.path, newPath).then(() => {
+    // Route through PermissionBroker via toolCall if available, else fallback to direct IPC
+    const renamePromise = agent.toolCall
+      ? agent.toolCall({
+          callId: `explorer-rename-${Date.now()}`,
+          toolName: 'renameFile',
+          args: { oldPath: entry.path, newPath },
+        }).then((response) => {
+          if (response.status === 'error') {
+            throw new Error(response.message);
+          }
+          return response;
+        })
+      : agent.renameFile(entry.path, newPath);
+    renamePromise.then(() => {
       loadDir(currentPath).catch(err => console.error('[Explorer] loadDir error:', err));
     }).catch(err => console.error('[Explorer] renameFile error:', err));
     setRenameDialog(null);
@@ -368,13 +381,26 @@ export function Explorer({ agent, workspaceModel, onFileOpen }: ExplorerProps) {
     if (contextMenu === null) return;
     const entry = contextMenu.entry;
     const confirmed = globalThis.confirm(
-      `Are you sure you want to delete "${entry.name}"? This action cannot be undone.`
+      `Czy na pewno chcesz usunąć "${entry.name}"? Tej operacji nie można cofnąć.`
     );
     if (!confirmed) {
       setContextMenu(null);
       return;
     }
-    agent.deleteFile(entry.path).then(() => {
+    // Route through PermissionBroker via toolCall if available, else fallback to direct IPC
+    const deletePromise = agent.toolCall
+      ? agent.toolCall({
+          callId: `explorer-delete-${Date.now()}`,
+          toolName: 'deleteFile',
+          args: { filePath: entry.path },
+        }).then((response) => {
+          if (response.status === 'error') {
+            throw new Error(response.message);
+          }
+          return response;
+        })
+      : agent.deleteFile(entry.path);
+    deletePromise.then(() => {
       loadDir(currentPath).catch(err => console.error('[Explorer] loadDir error:', err));
     }).catch(err => console.error('[Explorer] deleteFile error:', err));
     setContextMenu(null);

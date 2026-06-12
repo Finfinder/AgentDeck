@@ -54,7 +54,11 @@ export const IPC_CHANNELS = {
   conflictDetected: 'agentdeck:v1:conflict:detected',
   conflictResolve: 'agentdeck:v1:conflict:resolve',
   checkSensitivePath: 'agentdeck:v1:permission:check-sensitive',
-  getFileHash: 'agentdeck:v1:editor:get-file-hash'
+  getFileHash: 'agentdeck:v1:editor:get-file-hash',
+  // Event Log
+  getEventLog: 'agentdeck:v1:event-log:get',
+  eventLogUpdate: 'agentdeck:v1:event-log:update',
+  clearEventLog: 'agentdeck:v1:event-log:clear'
 } as const satisfies Record<string, string>;
 
 export type ThemePreference = 'dark' | 'light';
@@ -283,6 +287,34 @@ export type DiffResult =
   | Readonly<{ status: 'ok'; diff: string }>
   | Readonly<{ status: 'error'; code: 'UNKNOWN'; message: string }>;
 
+// ?? Event Log types ???????????????????????????????????????????????????????
+
+export type EventLogLevel = 'info' | 'warn' | 'error';
+
+export type EventLogEntry = Readonly<{
+  id: string;
+  timestamp: number;
+  level: EventLogLevel;
+  source: string;
+  message: string;
+  diff?: string;
+  filePath?: string;
+  patchId?: string;
+}>;
+
+export type EventLogFilter = Readonly<{
+  levels?: readonly EventLogLevel[];
+  sources?: readonly string[];
+  searchText?: string;
+  hasDiffOnly?: boolean;
+  since?: number;
+  until?: number;
+}>;
+
+export type EventLogResult =
+  | Readonly<{ status: 'ok'; entries: readonly EventLogEntry[]; total: number }>
+  | Readonly<{ status: 'error'; code: 'UNKNOWN'; message: string }>;
+
 // ?? Phase 7: Permission Broker types ???????????????????????????????????????
 
 export type ToolRiskLevel = 'read-only' | 'low' | 'medium' | 'high' | 'critical';
@@ -326,7 +358,7 @@ export type ToolCallResponse =
   | Readonly<{
       status: 'error';
       callId: string;
-      code: 'TOOL_NOT_FOUND' | 'ACCESS_DENIED' | 'TIMEOUT' | 'UNKNOWN';
+      code: 'TOOL_NOT_FOUND' | 'ACCESS_DENIED' | 'TIMEOUT' | 'WRITE_CONFLICT' | 'UNKNOWN';
       message: string;
     }>
   | Readonly<{
@@ -366,6 +398,7 @@ export type PatchSet = Readonly<{
 
 export type PatchResult =
   | Readonly<{ status: 'ok'; patchId: string; appliedHash: string }>
+  | Readonly<{ status: 'ok'; patchId: string; appliedHash: string; autoMerged: true }>
   | Readonly<{ status: 'error'; code: 'CONFLICT' | 'FILE_NOT_FOUND' | 'ACCESS_DENIED' | 'UNKNOWN'; message: string }>;
 
 // ?? Phase 7: Conflict Broker types ?????????????????????????????????????????
@@ -462,13 +495,17 @@ export type AgentDeckPreloadApi = Readonly<{
   // Phase 7: Tool Router / Permission Broker / Conflict Broker
   toolCall?: (request: ToolCallRequest) => Promise<ToolCallResponse>;
   onToolApprovalRequest?: (handler: (response: ToolCallResponse & { status: 'pending-approval' }) => void) => () => void;
-  submitApproval?: (decision: ApprovalDecision) => Promise<void>;
+  submitApproval?: (decision: ApprovalDecision) => Promise<ToolCallResponse>;
   proposePatch?: (patch: Omit<PatchSet, 'id' | 'createdAt'>) => Promise<PatchResult>;
-  applyPatch?: (patchId: string) => Promise<PatchResult>;
+  applyPatch?: (patchId: string, patch: Omit<PatchSet, 'id' | 'createdAt'>) => Promise<PatchResult>;
   onConflictDetected?: (handler: (conflict: Conflict) => void) => () => void;
   resolveConflict?: (resolution: ConflictResolution) => Promise<void>;
   checkSensitivePath?: (filePath: string) => Promise<SensitivePathCheckResult>;
   getFileHash?: (filePath: string) => Promise<FileHashResult>;
+  // Event Log
+  getEventLog?: (filter?: EventLogFilter) => Promise<EventLogResult>;
+  onEventLogUpdate?: (handler: (entry: EventLogEntry) => void) => () => void;
+  clearEventLog?: () => Promise<void>;
   versions: Readonly<{
     chrome: string;
     electron: string;
@@ -713,6 +750,30 @@ export function isDiffInput(value: unknown): value is DiffInput {
 export function isDiffResult(value: unknown): value is DiffResult {
   if (!isRecord(value)) return false;
   if (value.status === 'ok') return typeof value.diff === 'string';
+  return value.status === 'error' && value.code === 'UNKNOWN' && typeof value.message === 'string';
+}
+
+// ?? Event Log guards ??????????????????????????????????????????????????????
+
+const EVENT_LOG_LEVELS = new Set<string>(['info', 'warn', 'error']);
+
+function isEventLogEntry(value: unknown): value is EventLogEntry {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === 'string' &&
+    typeof value.timestamp === 'number' &&
+    typeof value.level === 'string' &&
+    EVENT_LOG_LEVELS.has(value.level) &&
+    typeof value.source === 'string' &&
+    typeof value.message === 'string'
+  );
+}
+
+export function isEventLogResult(value: unknown): value is EventLogResult {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') {
+    return Array.isArray(value.entries) && value.entries.every(isEventLogEntry) && typeof value.total === 'number';
+  }
   return value.status === 'error' && value.code === 'UNKNOWN' && typeof value.message === 'string';
 }
 
