@@ -10,6 +10,16 @@ import type {
   ToolRiskLevel
 } from '@agentdeck/shared';
 
+// ?? Helpers ?????????????????????????????????????????????????????????????
+
+function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 // ?? Patch ID generation ???????????????????????????????????????????????????
 
 let patchCounter = 0;
@@ -273,36 +283,32 @@ export async function tryAutoMerge(
   }
 
   // Context-anchor validation: verify that the lines immediately before
-  // and after each operation's range still match the expected content.
-  // This detects when external edits have touched the same region, preventing
-  // silent "last writer wins" overwrites of concurrent user changes.
+  // and after each operation's range still match the expected content
+  // captured at patch creation time. This detects when external edits have
+  // touched the same region, preventing silent "last writer wins" overwrites
+  // of concurrent user changes.
   for (const op of rangedOps) {
     if (!op.range) continue;
-    const rangeStart = op.range.startLine;
-    const rangeEnd = op.range.endLine;
 
-    // Check 2 lines before the range (if they exist) for context anchor
-    const anchorBeforeStart = Math.max(0, rangeStart - 3);
-    const anchorBeforeEnd = rangeStart - 1;
-    if (anchorBeforeEnd > anchorBeforeStart) {
-      // The content just before the patch range should be unchanged.
-      // We verify by checking that the lines at the expected positions
-      // haven't been completely replaced (basic heuristic).
-      for (let i = anchorBeforeStart; i < anchorBeforeEnd; i++) {
-        if (i >= diskLines.length) {
-          return { merged: false, conflictingOps: operations };
-        }
+    // Compare contextBefore snapshot with actual disk lines before the range
+    if (op.contextBefore && op.contextBefore.length > 0) {
+      const actualBefore = diskLines.slice(
+        op.range.startLine - 1 - op.contextBefore.length,
+        op.range.startLine - 1
+      );
+      if (!arraysEqual(actualBefore, op.contextBefore)) {
+        return { merged: false, conflictingOps: operations };
       }
     }
 
-    // Check 2 lines after the range (if they exist) for context anchor
-    const anchorAfterStart = rangeEnd;
-    const anchorAfterEnd = Math.min(diskLines.length, rangeEnd + 2);
-    if (anchorAfterStart < anchorAfterEnd) {
-      for (let i = anchorAfterStart; i < anchorAfterEnd; i++) {
-        if (i >= diskLines.length) {
-          return { merged: false, conflictingOps: operations };
-        }
+    // Compare contextAfter snapshot with actual disk lines after the range
+    if (op.contextAfter && op.contextAfter.length > 0) {
+      const actualAfter = diskLines.slice(
+        op.range.endLine,
+        op.range.endLine + op.contextAfter.length
+      );
+      if (!arraysEqual(actualAfter, op.contextAfter)) {
+        return { merged: false, conflictingOps: operations };
       }
     }
   }

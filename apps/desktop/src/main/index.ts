@@ -26,6 +26,7 @@ import {
   type StartupState,
   type ToolCallRequest,
   type ToolRiskLevel,
+  type WorkspaceEditInput,
   type WorkspaceSelection
 } from '@agentdeck/shared';
 
@@ -51,12 +52,13 @@ let startupState: StartupState = {
   message: 'Application services have not been initialized yet.'
 };
 
-// Module-level reference to the ToolRouter, set by registerToolRouterIpc.
+// Module-level references set by registerToolRouterIpc.
 // Used by applyWorkspaceEdit IPC handler to route multi-file edits through PermissionBroker.
-let toolRouterRef: ToolRouter | null = null;
+
+let permissionBrokerRef: PermissionBroker | null = null;
 
 /** Check operations for sensitive paths. Returns ACCESS_DENIED result or null. */
-function checkSensitivePaths(edit: { operations: readonly { filePath: string }[] }): { status: 'error'; code: 'ACCESS_DENIED'; message: string } | null {
+function checkSensitivePaths(edit: WorkspaceEditInput): { status: 'error'; code: 'ACCESS_DENIED'; message: string } | null {
   for (const op of edit.operations) {
     if (checkSensitivePath(op.filePath).isSensitive) {
       return { status: 'error', code: 'ACCESS_DENIED', message: `Edycja wrażliwego pliku zabroniona: ${op.filePath}` };
@@ -65,38 +67,59 @@ function checkSensitivePaths(edit: { operations: readonly { filePath: string }[]
   return null;
 }
 
-/** Route a multi-file workspace edit through the ToolRouter approval flow. */
+/**
+ * Route a multi-file workspace edit through the PermissionBroker approval flow,
+ * then apply via applyWorkspaceEdit (which handles multiple files natively).
+ *
+ * Previously this incorrectly routed through ToolRouter with toolName='applyPatch',
+ * but toolApplyPatch expects { patchId, patch } args and only handles a single file
+ * — causing multi-file edits to always fail with missing-argument errors.
+ */
 async function routeMultiFileEdit(
-  edit: { operations: readonly { filePath: string }[] },
+  edit: WorkspaceEditInput,
   uniqueFiles: Set<string>,
   win: BrowserWindow,
 ): Promise<{ status: 'ok' } | { status: 'error'; code: string; message: string }> {
-  const router = toolRouterRef;
-  if (!router) {
-    return { status: 'error', code: 'UNKNOWN', message: 'Tool Router nie został zainicjalizowany.' };
+  const broker = permissionBrokerRef;
+  if (!broker) {
+    return { status: 'error', code: 'UNKNOWN', message: 'Permission Broker nie został zainicjalizowany.' };
   }
-  const toolRequest: ToolCallRequest = {
-    callId: `workspace-edit-${Date.now()}-${randomBytes(4).toString('hex')}`,
-    toolName: 'applyPatch',
-    args: { workspaceEdit: edit, fileCount: uniqueFiles.size, filePaths: Array.from(uniqueFiles) },
-  };
-  const response = await router.execute(toolRequest);
 
-  if (response.status === 'pending-approval') {
+  // Use 'writeFile' classification: high risk, requires approval — appropriate for multi-file edits.
+  const callId = `workspace-edit-${Date.now()}-${randomBytes(4).toString('hex')}`;
+  const toolRequest: ToolCallRequest = {
+    callId,
+    toolName: 'writeFile',
+    args: { filePath: Array.from(uniqueFiles), fileCount: uniqueFiles.size },
+  };
+
+  const permResult = await broker.processToolCall(toolRequest);
+
+  if (permResult.status === 'pending-approval') {
     if (!win.isDestroyed()) {
-      win.webContents.send(IPC_CHANNELS.toolApprovalRequest, response);
+      win.webContents.send(IPC_CHANNELS.toolApprovalRequest, permResult);
     }
     const kind = classifyOperationKind('multi-file');
     console.warn(`[main] Multi-file edit (${uniqueFiles.size} files) pending approval, kind: ${kind}`);
     return { status: 'error', code: 'UNKNOWN', message: 'Oczekuje na zatwierdzenie — edycja wielu plików (multi-file).' };
   }
 
-  if (response.status === 'error') {
-    return { status: 'error', code: (response as { code: string }).code ?? 'UNKNOWN', message: response.message };
+  if (permResult.status === 'error') {
+    return { status: 'error', code: (permResult as { code: string }).code ?? 'UNKNOWN', message: permResult.message };
   }
 
-  console.info(`[main] Multi-file edit (${uniqueFiles.size} files) applied after approval.`);
-  return { status: 'ok' };
+  // Approved — apply the multi-file workspace edit through the native editor service.
+  try {
+    const result = await applyWorkspaceEdit(edit);
+    if (result.status === 'error') {
+      return { status: 'error', code: result.code, message: result.message };
+    }
+    console.info(`[main] Multi-file edit (${uniqueFiles.size} files) applied after approval.`);
+    return { status: 'ok' };
+  } catch (err) {
+    console.error('[main] Multi-file applyWorkspaceEdit failed:', err);
+    return { status: 'error', code: 'UNKNOWN', message: String(err) };
+  }
 }
 
 function registerIpcHandlers(settingsService: SettingsService, workspaceService: WorkspaceService, mainWindow: BrowserWindow, identityService?: IdentityService, modelGateway?: ModelGateway): void {
@@ -490,7 +513,8 @@ function registerToolRouterIpc(mainWindow: BrowserWindow, workspaceService: Work
         modelGateway.setToolRouter(toolRouter);
       }
       // Expose at module level so applyWorkspaceEdit handler can route multi-file edits
-      toolRouterRef = toolRouter;
+      // toolRouterRef assignment removed
+      permissionBrokerRef = permissionBroker;
     }
     return toolRouter;
   }
@@ -598,10 +622,9 @@ function registerToolRouterIpc(mainWindow: BrowserWindow, workspaceService: Work
 
     if (response.status === 'error') {
       // If conflict detected, push conflict event to renderer for UI handling
-      const conflictData = (response as Record<string, unknown>).conflict;
-      if (response.code === 'WRITE_CONFLICT' && conflictData) {
+      if (response.code === 'WRITE_CONFLICT' && response.conflict) {
         if (!mainWindow.isDestroyed()) {
-          mainWindow.webContents.send(IPC_CHANNELS.conflictDetected, conflictData);
+          mainWindow.webContents.send(IPC_CHANNELS.conflictDetected, response.conflict);
         }
         return { status: 'error', code: 'WRITE_CONFLICT', message: response.message };
       }

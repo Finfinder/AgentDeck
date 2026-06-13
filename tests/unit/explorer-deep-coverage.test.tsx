@@ -480,4 +480,202 @@ describe('Explorer — deep coverage', () => {
       });
     });
   });
+
+  describe('toolCall status handling', () => {
+    it('does not refresh on delete when toolCall returns pending-approval', async () => {
+      const user = userEvent.setup();
+      globalThis.confirm = vi.fn().mockReturnValue(true);
+      const toolCall = vi.fn().mockResolvedValue({
+        status: 'pending-approval',
+        callId: 'pending-123',
+        classification: 'destructive',
+        expiresAt: Date.now() + 60000,
+      });
+      const entries = makeEntries([{ name: 'app.ts', path: '/workspace/app.ts', kind: 'file' }]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory, toolCall })} workspaceModel={singleRootWorkspace} />);
+
+      await waitFor(() => { expect(listDirectory).toHaveBeenCalledTimes(1); });
+      fireEvent.contextMenu(screen.getByText('app.ts'));
+      await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+
+      await waitFor(() => {
+        expect(toolCall).toHaveBeenCalledWith(expect.objectContaining({
+          toolName: 'deleteFile',
+          args: { filePath: '/workspace/app.ts' }
+        }));
+      });
+
+      // Should NOT refresh — file still exists, approval pending
+      expect(listDirectory).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not refresh on delete when toolCall returns denied', async () => {
+      const user = userEvent.setup();
+      globalThis.confirm = vi.fn().mockReturnValue(true);
+      const toolCall = vi.fn().mockResolvedValue({
+        status: 'denied',
+        callId: 'denied-456',
+        reason: 'User denied the operation',
+      });
+      const entries = makeEntries([{ name: 'app.ts', path: '/workspace/app.ts', kind: 'file' }]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory, toolCall })} workspaceModel={singleRootWorkspace} />);
+
+      await waitFor(() => { expect(listDirectory).toHaveBeenCalledTimes(1); });
+      fireEvent.contextMenu(screen.getByText('app.ts'));
+      await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+
+      await waitFor(() => {
+        expect(toolCall).toHaveBeenCalledWith(expect.objectContaining({
+          toolName: 'deleteFile',
+        }));
+      });
+
+      // Should NOT refresh — operation was denied
+      expect(listDirectory).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not refresh on delete when toolCall returns error', async () => {
+      const user = userEvent.setup();
+      globalThis.confirm = vi.fn().mockReturnValue(true);
+      const toolCall = vi.fn().mockResolvedValue({
+        status: 'error',
+        callId: 'err-789',
+        message: 'File not found',
+      });
+      const entries = makeEntries([{ name: 'app.ts', path: '/workspace/app.ts', kind: 'file' }]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory, toolCall })} workspaceModel={singleRootWorkspace} />);
+
+      await waitFor(() => { expect(listDirectory).toHaveBeenCalledTimes(1); });
+      fireEvent.contextMenu(screen.getByText('app.ts'));
+      await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+
+      await waitFor(() => {
+        expect(toolCall).toHaveBeenCalledWith(expect.objectContaining({
+          toolName: 'deleteFile',
+        }));
+      });
+
+      // Should NOT refresh — operation errored
+      expect(listDirectory).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not refresh on rename when toolCall returns pending-approval', async () => {
+      const user = userEvent.setup();
+      const toolCall = vi.fn().mockResolvedValue({
+        status: 'pending-approval',
+        callId: 'pending-rename-123',
+        classification: 'mutating',
+        expiresAt: Date.now() + 60000,
+      });
+      const entries = makeEntries([{ name: 'app.ts', path: '/workspace/app.ts', kind: 'file' }]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory, toolCall })} workspaceModel={singleRootWorkspace} />);
+
+      await waitFor(() => { expect(listDirectory).toHaveBeenCalledTimes(1); });
+      fireEvent.contextMenu(screen.getByText('app.ts'));
+      await user.click(screen.getByRole('menuitem', { name: 'Rename' }));
+
+      const input = screen.getByLabelText('New name');
+      await user.clear(input);
+      await user.type(input, 'newapp.ts');
+      await user.click(screen.getByRole('button', { name: 'Rename' }));
+
+      await waitFor(() => {
+        expect(toolCall).toHaveBeenCalledWith(expect.objectContaining({
+          toolName: 'renameFile',
+        }));
+      });
+
+      // Should NOT refresh — approval pending
+      expect(listDirectory).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not refresh on rename when toolCall returns denied', async () => {
+      const user = userEvent.setup();
+      const toolCall = vi.fn().mockResolvedValue({
+        status: 'denied',
+        callId: 'denied-rename-456',
+        reason: 'User denied the operation',
+      });
+      const entries = makeEntries([{ name: 'app.ts', path: '/workspace/app.ts', kind: 'file' }]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory, toolCall })} workspaceModel={singleRootWorkspace} />);
+
+      await waitFor(() => { expect(listDirectory).toHaveBeenCalledTimes(1); });
+      fireEvent.contextMenu(screen.getByText('app.ts'));
+      await user.click(screen.getByRole('menuitem', { name: 'Rename' }));
+
+      const input = screen.getByLabelText('New name');
+      await user.clear(input);
+      await user.type(input, 'newapp.ts');
+      await user.click(screen.getByRole('button', { name: 'Rename' }));
+
+      await waitFor(() => {
+        expect(toolCall).toHaveBeenCalledWith(expect.objectContaining({
+          toolName: 'renameFile',
+        }));
+      });
+
+      // Should NOT refresh — operation was denied
+      expect(listDirectory).toHaveBeenCalledTimes(1);
+    });
+
+    it('refreshes on delete when toolCall returns ok', async () => {
+      const user = userEvent.setup();
+      globalThis.confirm = vi.fn().mockReturnValue(true);
+      const toolCall = vi.fn().mockResolvedValue({ status: 'ok', callId: 'ok-123', result: null });
+      const entries = makeEntries([{ name: 'app.ts', path: '/workspace/app.ts', kind: 'file' }]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory, toolCall })} workspaceModel={singleRootWorkspace} />);
+
+      await waitFor(() => { expect(listDirectory).toHaveBeenCalledTimes(1); });
+      fireEvent.contextMenu(screen.getByText('app.ts'));
+      await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+
+      await waitFor(() => {
+        expect(toolCall).toHaveBeenCalledWith(expect.objectContaining({
+          toolName: 'deleteFile',
+        }));
+      });
+
+      // Should refresh — delete succeeded
+      await waitFor(() => { expect(listDirectory).toHaveBeenCalledTimes(2); });
+    });
+
+    it('refreshes on rename when toolCall returns ok', async () => {
+      const user = userEvent.setup();
+      const toolCall = vi.fn().mockResolvedValue({ status: 'ok', callId: 'ok-rename-123', result: null });
+      const entries = makeEntries([{ name: 'app.ts', path: '/workspace/app.ts', kind: 'file' }]);
+      const listDirectory = vi.fn().mockResolvedValue({ path: '/workspace', entries });
+
+      render(<Explorer agent={mockAgent({ listDirectory, toolCall })} workspaceModel={singleRootWorkspace} />);
+
+      await waitFor(() => { expect(listDirectory).toHaveBeenCalledTimes(1); });
+      fireEvent.contextMenu(screen.getByText('app.ts'));
+      await user.click(screen.getByRole('menuitem', { name: 'Rename' }));
+
+      const input = screen.getByLabelText('New name');
+      await user.clear(input);
+      await user.type(input, 'newapp.ts');
+      await user.click(screen.getByRole('button', { name: 'Rename' }));
+
+      await waitFor(() => {
+        expect(toolCall).toHaveBeenCalledWith(expect.objectContaining({
+          toolName: 'renameFile',
+        }));
+      });
+
+      // Should refresh — rename succeeded
+      await waitFor(() => { expect(listDirectory).toHaveBeenCalledTimes(2); });
+    });
+  });
 });

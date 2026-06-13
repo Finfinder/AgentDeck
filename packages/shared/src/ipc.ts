@@ -360,6 +360,7 @@ export type ToolCallResponse =
       callId: string;
       code: 'TOOL_NOT_FOUND' | 'ACCESS_DENIED' | 'TIMEOUT' | 'WRITE_CONFLICT' | 'UNKNOWN';
       message: string;
+      conflict?: Conflict;
     }>
   | Readonly<{
       status: 'denied';
@@ -384,6 +385,10 @@ export type PatchOperation = Readonly<{
     endCol: number;
   }>;
   text: string;
+  /** Snapshot of lines immediately before the range (from base content at patch creation time). */
+  contextBefore?: readonly string[];
+  /** Snapshot of lines immediately after the range (from base content at patch creation time). */
+  contextAfter?: readonly string[];
 }>;
 
 export type PatchSet = Readonly<{
@@ -976,8 +981,11 @@ export function isTestConnectionResult(value: unknown): value is TestConnectionR
 
 // ?? Phase 7: Tool Router / Permission Broker guards ????????????????????????
 
+
+
 const TOOL_RISK_LEVELS = new Set<string>(['read-only', 'low', 'medium', 'high', 'critical']);
 const TOOL_NAMES = new Set<string>(['readFile', 'searchFiles', 'listDirectory', 'proposePatch', 'applyPatch', 'deleteFile', 'renameFile', 'writeFile']);
+const TOOL_CALL_ERROR_CODES = new Set<string>(['TOOL_NOT_FOUND', 'ACCESS_DENIED', 'TIMEOUT', 'WRITE_CONFLICT', 'UNKNOWN']);
 
 export function isToolRiskLevel(value: unknown): value is ToolRiskLevel {
   return typeof value === 'string' && TOOL_RISK_LEVELS.has(value);
@@ -1015,7 +1023,7 @@ export function isToolCallResponse(value: unknown): value is ToolCallResponse {
     return typeof value.callId === 'string' && isToolClassification(value.classification) && typeof value.expiresAt === 'number';
   }
   if (value.status === 'error') {
-    return typeof value.callId === 'string' && typeof value.code === 'string' && typeof value.message === 'string';
+    return typeof value.callId === 'string' && typeof value.code === 'string' && TOOL_CALL_ERROR_CODES.has(value.code) && typeof value.message === 'string' && (value.conflict === undefined || isConflict(value.conflict));
   }
   if (value.status === 'denied') {
     return typeof value.callId === 'string' && typeof value.reason === 'string';

@@ -77,12 +77,12 @@ export class EventLogService extends EventEmitter {
     let filtered = [...this.entries];
 
     if (filter) {
-      if (filter.levels && filter.levels.length > 0) {
+      if (filter.levels !== undefined) {
         const levelSet = new Set(filter.levels);
         filtered = filtered.filter(e => levelSet.has(e.level));
       }
 
-      if (filter.sources && filter.sources.length > 0) {
+      if (filter.sources !== undefined) {
         const sourceSet = new Set(filter.sources);
         filtered = filtered.filter(e => sourceSet.has(e.source));
       }

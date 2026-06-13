@@ -126,7 +126,7 @@ export class ToolRouter {
         case 'deleteFile':
           return await this.toolDeleteFile(request, sensitiveCheck);
         case 'renameFile':
-          return await this.toolRenameFile(request, sensitiveCheck);
+          return await this.toolRenameFile(request);
         default:
           return {
             status: 'error',
@@ -396,7 +396,8 @@ export class ToolRouter {
         status: 'error',
         callId: request.callId,
         code: 'WRITE_CONFLICT',
-        message: result.conflict.description
+        message: result.conflict.description,
+        conflict: result.conflict
       };
     }
 
@@ -459,7 +460,7 @@ export class ToolRouter {
       return {
         status: 'error',
         callId: request.callId,
-        code: result.code === 'WRITE_CONFLICT' ? 'UNKNOWN' : result.code,
+        code: result.code,
         message: result.message
       };
     }
@@ -527,8 +528,7 @@ export class ToolRouter {
   }
 
   private async toolRenameFile(
-    request: ToolCallRequest,
-    sensitiveCheck?: { filePath: string; isSensitive: boolean; matchedPattern?: string }
+    request: ToolCallRequest
   ): Promise<ToolCallResponse> {
     const oldPath = this.getStringArg(request, 'oldPath');
     const newPath = this.getStringArg(request, 'newPath');
@@ -537,12 +537,22 @@ export class ToolRouter {
     if (!newPath) return this.missingArg(request, 'newPath');
 
     // Check both paths for sensitivity
-    if (sensitiveCheck?.isSensitive) {
+    const oldSensitive = checkSensitivePath(oldPath);
+    if (oldSensitive.isSensitive) {
       return {
         status: 'error',
         callId: request.callId,
         code: 'ACCESS_DENIED',
-        message: `Zmiana nazwy wrażliwego pliku zabroniona: ${oldPath}`
+        message: `Zmiana nazwy wrażliwego pliku zabroniona: ${oldPath} (matched: ${oldSensitive.matchedPattern})`
+      };
+    }
+    const newSensitive = checkSensitivePath(newPath);
+    if (newSensitive.isSensitive) {
+      return {
+        status: 'error',
+        callId: request.callId,
+        code: 'ACCESS_DENIED',
+        message: `Nadanie wrażliwej nazwy plikowi zabronione: ${newPath} (matched: ${newSensitive.matchedPattern})`
       };
     }
 

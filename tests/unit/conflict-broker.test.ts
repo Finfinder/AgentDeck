@@ -562,6 +562,87 @@ describe('tryAutoMerge', () => {
     expect(result.merged).toBe(true);
     expect(result.content).toBe('LINE1\nline2\nLINE3\nline4\nLINE5\n');
   });
+
+  it('should fail to auto-merge when contextBefore does not match disk content', async () => {
+    // Base: agent saw lines 1-5, creates patch for line 3 with context anchors
+    const baseContent = 'alpha\nbeta\ngamma\ndelta\nepsilon\n';
+    const diskLines = baseContent.split('\n');
+
+    // Agent's patch targets line 3 (gamma -> GAMMA), with context anchors
+    const operations = [{
+      text: 'GAMMA',
+      filePath: 'test.ts',
+      range: { startLine: 3, startCol: 1, endLine: 3, endCol: 6 },
+      contextBefore: [diskLines[0]!, diskLines[1]!], // expects "alpha", "beta"
+      contextAfter: [diskLines[3]!, diskLines[4]!]    // expects "delta", "epsilon"
+    }];
+
+    // External edit changes line 2 (beta -> BETA) — contextBefore no longer matches
+    const diskContent = 'alpha\nBETA\ngamma\ndelta\nepsilon\n';
+
+    const result = await tryAutoMerge(operations, diskContent);
+    expect(result.merged).toBe(false);
+    expect(result.conflictingOps).toBeDefined();
+  });
+
+  it('should fail to auto-merge when contextAfter does not match disk content', async () => {
+    const baseContent = 'alpha\nbeta\ngamma\ndelta\nepsilon\n';
+    const diskLines = baseContent.split('\n');
+
+    const operations = [{
+      text: 'GAMMA',
+      filePath: 'test.ts',
+      range: { startLine: 3, startCol: 1, endLine: 3, endCol: 6 },
+      contextBefore: [diskLines[0]!, diskLines[1]!], // expects "alpha", "beta"
+      contextAfter: [diskLines[3]!, diskLines[4]!]    // expects "delta", "epsilon"
+    }];
+
+    // External edit changes line 4 (delta -> DELTA) — contextAfter no longer matches
+    const diskContent = 'alpha\nbeta\ngamma\nDELTA\nepsilon\n';
+
+    const result = await tryAutoMerge(operations, diskContent);
+    expect(result.merged).toBe(false);
+    expect(result.conflictingOps).toBeDefined();
+  });
+
+  it('should auto-merge when context anchors match even if other lines changed', async () => {
+    // 6-line file: context anchors cover lines around the patch range,
+    // but external edit is on a line outside the anchor window.
+    const baseContent = 'alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\n';
+    const diskLines = baseContent.split('\n');
+
+    const operations = [{
+      text: 'GAMMA',
+      filePath: 'test.ts',
+      range: { startLine: 3, startCol: 1, endLine: 3, endCol: 6 },
+      contextBefore: [diskLines[0]!, diskLines[1]!], // expects "alpha", "beta"
+      contextAfter: [diskLines[3]!, diskLines[4]!]    // expects "delta", "epsilon"
+    }];
+
+    // External edit changes line 6 (zeta -> ZETA) — outside context anchors
+    const diskContent = 'alpha\nbeta\ngamma\ndelta\nepsilon\nZETA\n';
+
+    const result = await tryAutoMerge(operations, diskContent);
+    expect(result.merged).toBe(true);
+    expect(result.content).toBe('alpha\nbeta\nGAMMA\ndelta\nepsilon\nZETA\n');
+  });
+
+  it('should auto-merge when no context anchors are provided (graceful degradation)', async () => {
+    // Operations without contextBefore/contextAfter should still auto-merge
+    // (hash-level conflict detection in applyPatchWithConflictCheck is the safety net)
+    const operations = [{
+      text: 'GAMMA',
+      filePath: 'test.ts',
+      range: { startLine: 3, startCol: 1, endLine: 3, endCol: 6 }
+      // no contextBefore / contextAfter
+    }];
+
+    const diskContent = 'alpha\nbeta\ngamma\ndelta\nEPSILON\n';
+
+    const result = await tryAutoMerge(operations, diskContent);
+    expect(result.merged).toBe(true);
+    expect(result.content).toBe('alpha\nbeta\nGAMMA\ndelta\nEPSILON\n');
+  });
 });
 
 describe('applyPatchWithConflictCheck — auto-merge integration', () => {

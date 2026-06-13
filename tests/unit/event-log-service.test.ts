@@ -40,8 +40,12 @@ describe('EventLogService', () => {
       smallService.append({ level: 'info', source: 'test', message: '3' });
       smallService.append({ level: 'info', source: 'test', message: '4' });
 
-      const result = service.query();
-      expect(result.status === 'ok').toBe(true);
+      const result = smallService.query();
+      expect(result.status).toBe('ok');
+      if (result.status === 'ok') {
+        expect(result.entries).toHaveLength(3);
+        expect(result.entries.map(e => e.message)).toEqual(['4', '3', '2']);
+      }
     });
   });
 
@@ -86,6 +90,30 @@ describe('EventLogService', () => {
       if (result.status === 'ok') {
         expect(result.total).toBe(1);
         expect(result.entries[0]!.level).toBe('error');
+      }
+    });
+
+    it('should return zero entries when levels is empty array', () => {
+      service.append({ level: 'info', source: 'test', message: 'info msg' });
+      service.append({ level: 'error', source: 'test', message: 'error msg' });
+
+      const result = service.query({ levels: [] });
+      expect(result.status).toBe('ok');
+      if (result.status === 'ok') {
+        expect(result.total).toBe(0);
+        expect(result.entries).toHaveLength(0);
+      }
+    });
+
+    it('should return zero entries when sources is empty array', () => {
+      service.append({ level: 'info', source: 'tool-router', message: 'patch' });
+      service.append({ level: 'info', source: 'editor', message: 'edit' });
+
+      const result = service.query({ sources: [] });
+      expect(result.status).toBe('ok');
+      if (result.status === 'ok') {
+        expect(result.total).toBe(0);
+        expect(result.entries).toHaveLength(0);
       }
     });
 

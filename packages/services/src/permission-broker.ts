@@ -273,30 +273,27 @@ export class PermissionBroker {
    * Wait for an approval decision with timeout.
    * Returns both the decision and the original request, or null if timed out.
    *
-   * Uses a race between the approval promise and a timeout. On timeout,
-   * the pending entry is deleted and the promise is resolved with a
-   * rejection-safe sentinel to prevent dangling entries.
+   * Uses Promise.race between the approval promise and a timeout promise.
+   * On timeout the pending entry is deleted and null is returned.
+   * The timeout handle is always cleared to prevent stale deletions
+   * when the approval resolves first.
    */
   async waitForApproval(callId: string): Promise<{ decision: ApprovalDecision; request: ToolCallRequest } | null> {
     const pending = this.pendingApprovals.get(callId);
     if (!pending) return null;
 
-    let timedOut = false;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      this.pendingApprovals.delete(callId);
-    }, this.approvalTimeoutMs);
+    let timeoutHandle: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<null>(resolve => {
+      timeoutHandle = setTimeout(() => {
+        this.pendingApprovals.delete(callId);
+        resolve(null);
+      }, this.approvalTimeoutMs);
+    });
 
-    const decision = await pending.promise;
-    clearTimeout(timeout);
+    const decision = await Promise.race([pending.promise, timeoutPromise]);
+    clearTimeout(timeoutHandle!);
 
-    // If the timeout fired before the promise resolved, the entry was already
-    // deleted. Return null to signal timeout.
-    if (timedOut) return null;
-
-    // If decision is undefined/null (shouldn't happen with proper resolve, but guard anyway)
     if (!decision) return null;
-
     return { decision, request: pending.request };
   }
 

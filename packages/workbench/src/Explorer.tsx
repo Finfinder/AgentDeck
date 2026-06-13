@@ -2,13 +2,46 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { injectNonceCssRule } from './csp';
 
 import { pathBasename, normalizePathStr } from '@agentdeck/shared';
-import type { AgentDeckPreloadApi, DirectoryListing, FileEntry, WorkspaceModel } from '@agentdeck/shared';
+import type { AgentDeckPreloadApi, DirectoryListing, FileEntry, ToolCallResponse, WorkspaceModel } from '@agentdeck/shared';
 
 // Resolve the parent path without node:path - works for both '/' and '\\' separators.
 function parentPath(p: string): string {
   const normalized = normalizePathStr(p);
   const idx = normalized.lastIndexOf('/');
   return idx <= 0 ? normalized : normalized.slice(0, idx);
+}
+
+/** Error thrown when a tool call requires human-in-the-loop approval. */
+class ApprovalPendingError extends Error {
+  constructor(callId: string) {
+    super(`Operacja oczekuje na zatwierdzenie (callId: ${callId})`);
+    this.name = 'ApprovalPendingError';
+  }
+}
+
+/**
+ * Exhaustive assertion for ToolCallResponse status.
+ * Throws on 'error' and 'denied', throws ApprovalPendingError on 'pending-approval',
+ * and returns void on 'ok'.
+ *
+ * The `default` branch uses `never` to enforce compile-time exhaustiveness:
+ * if a new status is added to the union, TypeScript will error here.
+ */
+function assertToolCallSuccess(response: ToolCallResponse): void {
+  switch (response.status) {
+    case 'ok':
+      return;
+    case 'error':
+      throw new Error(response.message);
+    case 'denied':
+      throw new Error(`Operacja odrzucona: ${response.reason}`);
+    case 'pending-approval':
+      throw new ApprovalPendingError(response.callId);
+    default: {
+      const _exhaustive: never = response;
+      throw new Error(`Nieznany status odpowiedzi: ${(_exhaustive as ToolCallResponse).status}`);
+    }
+  }
 }
 
 interface ContextMenuState {
@@ -349,17 +382,28 @@ export function Explorer({ agent, workspaceModel, onFileOpen }: ExplorerProps) {
           callId: `explorer-rename-${Date.now()}`,
           toolName: 'renameFile',
           args: { oldPath: entry.path, newPath },
-        }).then((response) => {
-          if (response.status === 'error') {
-            throw new Error(response.message);
+        }).then((response) => assertToolCallSuccess(response))
+      : agent.renameFile(entry.path, newPath).then((result) => {
+          if (result.status !== 'ok') {
+            throw new Error(result.message);
           }
-          return response;
-        })
-      : agent.renameFile(entry.path, newPath);
-    renamePromise.then(() => {
-      loadDir(currentPath).catch(err => console.error('[Explorer] loadDir error:', err));
-    }).catch(err => console.error('[Explorer] renameFile error:', err));
-    setRenameDialog(null);
+        });
+    renamePromise
+      .then(() => {
+        loadDir(currentPath).catch(err => console.error('[Explorer] loadDir error:', err));
+        setRenameDialog(null);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof ApprovalPendingError) {
+          // Operation requires human approval — keep dialog open, do not refresh.
+          // TODO: Subscribe to approval resolution via agent.onToolApprovalRequest
+          // and resolve/reject the pending operation instead of leaving the dialog stuck.
+          console.info('[Explorer] renameFile pending approval:', err.message);
+          return;
+        }
+        console.error('[Explorer] renameFile error:', err);
+        setRenameDialog(null);
+      });
   }, [renameDialog, agent, currentPath, loadDir]);
 
   const handleRenameCancel = useCallback(() => {
@@ -393,17 +437,28 @@ export function Explorer({ agent, workspaceModel, onFileOpen }: ExplorerProps) {
           callId: `explorer-delete-${Date.now()}`,
           toolName: 'deleteFile',
           args: { filePath: entry.path },
-        }).then((response) => {
-          if (response.status === 'error') {
-            throw new Error(response.message);
+        }).then((response) => assertToolCallSuccess(response))
+      : agent.deleteFile(entry.path).then((result) => {
+          if (result.status !== 'ok') {
+            throw new Error(result.message);
           }
-          return response;
-        })
-      : agent.deleteFile(entry.path);
-    deletePromise.then(() => {
-      loadDir(currentPath).catch(err => console.error('[Explorer] loadDir error:', err));
-    }).catch(err => console.error('[Explorer] deleteFile error:', err));
-    setContextMenu(null);
+        });
+    deletePromise
+      .then(() => {
+        loadDir(currentPath).catch(err => console.error('[Explorer] loadDir error:', err));
+        setContextMenu(null);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof ApprovalPendingError) {
+          // Operation requires human approval — keep context menu open, do not refresh.
+          // TODO: Subscribe to approval resolution via agent.onToolApprovalRequest
+          // and resolve/reject the pending operation instead of leaving the menu stuck.
+          console.info('[Explorer] deleteFile pending approval:', err.message);
+          return;
+        }
+        console.error('[Explorer] deleteFile error:', err);
+        setContextMenu(null);
+      });
   }, [contextMenu, agent, currentPath, loadDir]);
 
   return (

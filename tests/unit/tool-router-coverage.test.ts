@@ -432,12 +432,36 @@ describe('ToolRouter — coverage', () => {
       expect(result.status).toBe('error');
     });
 
-    it('returns error for sensitive path', async () => {
+    it('returns error when oldPath is sensitive', async () => {
       const req = makeReq('renameFile', { oldPath: '/.env', newPath: '/.env.bak' });
       const result = await router.execute(req);
       expect(result.status).toBe('error');
       if (result.status === 'error') {
         expect(result.code).toBe('ACCESS_DENIED');
+        expect(result.message).toContain('/.env');
+        expect(result.message).toContain('Zmiana nazwy wrażliwego pliku zabroniona');
+      }
+    });
+
+    it('returns error when newPath is sensitive (rename non-sensitive into sensitive)', async () => {
+      const req = makeReq('renameFile', { oldPath: '/normal.ts', newPath: '/.env' });
+      const result = await router.execute(req);
+      expect(result.status).toBe('error');
+      if (result.status === 'error') {
+        expect(result.code).toBe('ACCESS_DENIED');
+        expect(result.message).toContain('/.env');
+        expect(result.message).toContain('Nadanie wrażliwej nazwy plikowi zabronione');
+      }
+    });
+
+    it('returns error when both paths are sensitive', async () => {
+      const req = makeReq('renameFile', { oldPath: '/.env', newPath: '/.secret' });
+      const result = await router.execute(req);
+      expect(result.status).toBe('error');
+      if (result.status === 'error') {
+        expect(result.code).toBe('ACCESS_DENIED');
+        // oldPath is checked first, so the error should mention oldPath
+        expect(result.message).toContain('Zmiana nazwy wrażliwego pliku zabroniona');
       }
     });
 

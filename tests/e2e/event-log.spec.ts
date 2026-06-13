@@ -38,7 +38,9 @@ test.afterAll(async () => {
   await rm(tempDir, { recursive: true, force: true });
 });
 
-// ?? Helper: open workspace so event log IPC is fully wired ???????????????=
+// ---------------------------------------------------------------------------
+// Helper: open workspace so event log IPC is fully wired
+// ---------------------------------------------------------------------------
 
 async function openWorkspace() {
   await stubDialog(app, 'showOpenDialog', {
@@ -49,7 +51,9 @@ async function openWorkspace() {
   await expect(page.locator('output[aria-label="Workspace status"]')).toContainText('opened', { timeout: 15000 });
 }
 
-// ?? Tests ?????????????????????????????????????????????????????????????????
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 test.describe('Event Log Panel — rendering', () => {
   test.beforeEach(async () => {

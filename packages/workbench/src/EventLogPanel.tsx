@@ -182,7 +182,12 @@ export function EventLogPanel({ agent, theme = 'dark' }: Readonly<EventLogPanelP
 
   // Load entries from event log service
   const loadEntries = useCallback(async () => {
-    if (!agent.getEventLog) return;
+    if (!agent.getEventLog) {
+      setIsLoading(false);
+      setEntries([]);
+      setTotal(0);
+      return;
+    }
     try {
       setIsLoading(true);
       const eventFilter: EventLogFilter = {
