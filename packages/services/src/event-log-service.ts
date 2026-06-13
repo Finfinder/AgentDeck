@@ -93,7 +93,7 @@ export class EventLogService extends EventEmitter {
           e =>
             e.message.toLowerCase().includes(search) ||
             e.source.toLowerCase().includes(search) ||
-            (e.filePath !== undefined && e.filePath.toLowerCase().includes(search))
+            e.filePath?.toLowerCase().includes(search)
         );
       }
 
@@ -189,8 +189,6 @@ function sanitizeDiff(diff: string): string {
 let instance: EventLogService | null = null;
 
 export function getEventLogService(): EventLogService {
-  if (!instance) {
-    instance = new EventLogService();
-  }
+  instance ??= new EventLogService();
   return instance;
 }

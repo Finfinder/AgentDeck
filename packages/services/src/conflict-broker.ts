@@ -234,6 +234,53 @@ export interface AutoMergeResult {
   conflictingOps?: readonly PatchOperation[];
 }
 
+function validateOperationRanges(
+  operations: readonly PatchOperation[],
+  diskLines: readonly string[]
+): readonly PatchOperation[] | null {
+  for (const op of operations) {
+    if (!op.range) continue;
+    if (op.range.startLine < 1 || op.range.startLine > diskLines.length) return [op];
+    if (op.range.endLine < 1 || op.range.endLine > diskLines.length) return [op];
+  }
+
+  return null;
+}
+
+function validateContextAnchors(
+  operations: readonly PatchOperation[],
+  diskLines: readonly string[]
+): boolean {
+  for (const op of operations) {
+    if (!op.range) continue;
+    if (!contextBeforeMatches(op, diskLines)) return false;
+    if (!contextAfterMatches(op, diskLines)) return false;
+  }
+
+  return true;
+}
+
+function contextBeforeMatches(op: PatchOperation, diskLines: readonly string[]): boolean {
+  if (!op.range || !op.contextBefore || op.contextBefore.length === 0) return true;
+
+  const actualBefore = diskLines.slice(
+    op.range.startLine - 1 - op.contextBefore.length,
+    op.range.startLine - 1
+  );
+  return arraysEqual(actualBefore, op.contextBefore);
+}
+
+function contextAfterMatches(op: PatchOperation, diskLines: readonly string[]): boolean {
+  if (!op.range || !op.contextAfter || op.contextAfter.length === 0) return true;
+
+  const actualAfter = diskLines.slice(
+    op.range.endLine,
+    op.range.endLine + op.contextAfter.length
+  );
+  return arraysEqual(actualAfter, op.contextAfter);
+}
+
+
 /**
  * Attempt to auto-merge patch operations into the current disk content.
  *
@@ -259,63 +306,24 @@ export async function tryAutoMerge(
 ): Promise<AutoMergeResult> {
   const rangedOps = operations.filter(op => op.range);
 
-  // Full replacement patches can't be auto-merged
   if (rangedOps.length === 0) {
     return { merged: false, conflictingOps: operations };
   }
 
-  // Overlapping operations within the patch are too complex for auto-merge
   if (hasInternalOverlap(operations)) {
     return { merged: false, conflictingOps: operations };
   }
 
   const diskLines = diskContent.split('\n');
-
-  // Validate all ranges are within disk bounds
-  for (const op of rangedOps) {
-    if (!op.range) continue;
-    if (op.range.startLine < 1 || op.range.startLine > diskLines.length) {
-      return { merged: false, conflictingOps: [op] };
-    }
-    if (op.range.endLine < 1 || op.range.endLine > diskLines.length) {
-      return { merged: false, conflictingOps: [op] };
-    }
+  const invalidRangeOps = validateOperationRanges(rangedOps, diskLines);
+  if (invalidRangeOps) {
+    return { merged: false, conflictingOps: invalidRangeOps };
   }
 
-  // Context-anchor validation: verify that the lines immediately before
-  // and after each operation's range still match the expected content
-  // captured at patch creation time. This detects when external edits have
-  // touched the same region, preventing silent "last writer wins" overwrites
-  // of concurrent user changes.
-  for (const op of rangedOps) {
-    if (!op.range) continue;
-
-    // Compare contextBefore snapshot with actual disk lines before the range
-    if (op.contextBefore && op.contextBefore.length > 0) {
-      const actualBefore = diskLines.slice(
-        op.range.startLine - 1 - op.contextBefore.length,
-        op.range.startLine - 1
-      );
-      if (!arraysEqual(actualBefore, op.contextBefore)) {
-        return { merged: false, conflictingOps: operations };
-      }
-    }
-
-    // Compare contextAfter snapshot with actual disk lines after the range
-    if (op.contextAfter && op.contextAfter.length > 0) {
-      const actualAfter = diskLines.slice(
-        op.range.endLine,
-        op.range.endLine + op.contextAfter.length
-      );
-      if (!arraysEqual(actualAfter, op.contextAfter)) {
-        return { merged: false, conflictingOps: operations };
-      }
-    }
+  if (!validateContextAnchors(rangedOps, diskLines)) {
+    return { merged: false, conflictingOps: operations };
   }
 
-  // All anchors validated — apply operations to disk content.
-  // Sort by startLine descending to preserve line positions when applying
-  // multiple operations.
   const merged = applyPatchToContent(diskContent, operations);
   if (merged === null) {
     return { merged: false, conflictingOps: operations };

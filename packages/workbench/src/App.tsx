@@ -379,12 +379,21 @@ function PatchConflictDialog({ conflict, onResolve }: Readonly<PatchConflictDial
           <p className="approval-description">{conflictData.description}</p>
           {diffLines.length > 0 && (
             <pre className="patch-conflict-diff" aria-label="Diff preview">
-              {diffLines.map((line, i) => (
-                <div key={i} className={`diff-line diff-line--${line.prefix === '---' ? 'removed' : line.prefix === '+++' ? 'added' : 'header'}`}>
-                  <span className="diff-prefix">{line.prefix}</span>
-                  <span className="diff-text">{line.text}</span>
-                </div>
-              ))}
+              {diffLines.map((line) => {
+                let lineKind = 'header';
+                if (line.prefix === '---') {
+                  lineKind = 'removed';
+                } else if (line.prefix === '+++') {
+                  lineKind = 'added';
+                }
+                const key = `${line.prefix}:${line.text}`;
+                return (
+                  <div key={key} className={`diff-line diff-line--${lineKind}`}>
+                    <span className="diff-prefix">{line.prefix}</span>
+                    <span className="diff-text">{line.text}</span>
+                  </div>
+                );
+              })}
             </pre>
           )}
         </div>

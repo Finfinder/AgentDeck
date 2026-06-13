@@ -41,8 +41,11 @@ describe('ModelGateway — coverage', () => {
 
     it('does nothing for unknown tab', () => {
       const gateway = new ModelGateway();
-      // Should not throw
+      const before = gateway.getConfig();
+
       gateway.setTabActiveModel('nonexistent', 'gpt-4');
+
+      expect(gateway.getConfig()).toEqual(before);
     });
 
     it('emits chat-tabs-changed when tab model changes', () => {
@@ -68,7 +71,11 @@ describe('ModelGateway — coverage', () => {
 
     it('does nothing for unknown tab', () => {
       const gateway = new ModelGateway();
+      const before = gateway.getConfig();
+
       gateway.setTabActiveProvider('nonexistent', 'openrouter');
+
+      expect(gateway.getConfig()).toEqual(before);
     });
 
     it('emits chat-tabs-changed when tab provider changes', () => {
@@ -677,7 +684,8 @@ describe('ModelGateway — coverage', () => {
       const gateway = new ModelGateway();
       const mockRouter = { execute: vi.fn() };
       gateway.setToolRouter(mockRouter as never);
-      // No error means success
+
+      expect(mockRouter.execute).toBeDefined();
     });
   });
 
@@ -735,6 +743,7 @@ describe('ModelGateway — coverage', () => {
     it('does nothing for unknown tab', () => {
       const gateway = new ModelGateway();
       gateway.stopStreaming('nonexistent');
+      expect(gateway.getChatTab('nonexistent')).toBeUndefined();
     });
   });
 
