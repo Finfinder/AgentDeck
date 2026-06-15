@@ -211,20 +211,28 @@ async function* parseOpenAIStream(
 
 // ?? OpenAI-compatible base adapter ???????????????????????????????????????
 
+export type ApiKeyProvider = (providerId: ModelProviderId) => Promise<string | null>;
+
 abstract class OpenAICompatibleAdapter implements ModelProviderAdapter {
   abstract readonly providerId: ModelProviderId;
   abstract readonly label: string;
 
+  protected constructor(private readonly apiKeyProvider?: ApiKeyProvider) {}
+
   protected abstract buildChatUrl(baseUrl: string): string;
   protected abstract buildModelsUrl(baseUrl: string): string;
-  protected abstract buildHeaders(baseUrl: string): Record<string, string>;
+  protected abstract buildHeaders(baseUrl: string): Promise<Record<string, string>>;
   protected abstract parseModelsResponse(data: unknown): readonly ModelInfo[];
+
+  protected async getApiKey(providerId: ModelProviderId): Promise<string | null> {
+    return this.apiKeyProvider ? await this.apiKeyProvider(providerId) : null;
+  }
 
   async healthCheck(baseUrl: string): Promise<boolean> {
     try {
       const response = await fetchWithTimeout(this.buildModelsUrl(baseUrl), {
         method: 'GET',
-        headers: this.buildHeaders(baseUrl),
+        headers: await this.buildHeaders(baseUrl),
         timeoutMs: 5000
       });
       return response.ok;
@@ -237,7 +245,7 @@ abstract class OpenAICompatibleAdapter implements ModelProviderAdapter {
     try {
       const response = await fetchWithTimeout(this.buildModelsUrl(baseUrl), {
         method: 'GET',
-        headers: this.buildHeaders(baseUrl),
+        headers: await this.buildHeaders(baseUrl),
         timeoutMs: 10000
       });
       if (!response.ok) return [];
@@ -249,13 +257,23 @@ abstract class OpenAICompatibleAdapter implements ModelProviderAdapter {
   }
 
   protected buildMessagePayload(message: ChatMessage): Record<string, unknown> {
-    const payload: Record<string, unknown> = { role: message.role, content: message.content };
-    if (message.tool_calls !== undefined) {
-      payload.tool_calls = message.tool_calls.map(tc => ({
-        id: tc.id,
-        type: tc.type,
-        function: { name: tc.function.name, arguments: tc.function.arguments }
-      }));
+    const hasToolCalls = message.tool_calls !== undefined && message.tool_calls.length > 0;
+    const payload: Record<string, unknown> = {
+      role: message.role,
+      content: hasToolCalls ? null : message.content
+    };
+    if (hasToolCalls) {
+      payload.tool_calls = message.tool_calls.map((tc, index) => {
+        const args = typeof tc.function.arguments === 'string' && tc.function.arguments.trim()
+          ? tc.function.arguments
+          : '{}';
+        const id = tc.id?.trim() ? tc.id : `call_${index}`;
+        return {
+          id,
+          type: tc.type,
+          function: { name: tc.function.name, arguments: args }
+        };
+      });
     }
     if (message.tool_call_id !== undefined) {
       payload.tool_call_id = message.tool_call_id;
@@ -285,7 +303,7 @@ abstract class OpenAICompatibleAdapter implements ModelProviderAdapter {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...this.buildHeaders(baseUrl)
+          ...await this.buildHeaders(baseUrl)
         },
         body: JSON.stringify(body),
         ...(signal ? { signal } : {}),
@@ -317,6 +335,10 @@ export class OpenRouterAdapter extends OpenAICompatibleAdapter {
   readonly providerId = 'openrouter' as const;
   readonly label = 'OpenRouter';
 
+  constructor(apiKeyProvider?: ApiKeyProvider) {
+    super(apiKeyProvider);
+  }
+
   protected buildChatUrl(baseUrl: string): string {
     return `${baseUrl}/chat/completions`;
   }
@@ -325,11 +347,11 @@ export class OpenRouterAdapter extends OpenAICompatibleAdapter {
     return `${baseUrl}/models`;
   }
 
-  protected buildHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {};
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (apiKey) {
-      headers['Authorization'] = `Bearer ${apiKey}`;
+  protected async buildHeaders(): Promise<Record<string, string>> {
+    const apiKey = process.env.OPENROUTER_API_KEY ?? await this.getApiKey('openrouter');
+    const headers = buildAuthorizationHeaders(apiKey);
+    if (!apiKey) {
+      console.warn('[OpenRouterAdapter] Missing OpenRouter API key; request will not include Authorization header.');
     }
     return headers;
   }
@@ -360,6 +382,10 @@ export class OllamaAdapter extends OpenAICompatibleAdapter {
   readonly providerId = 'ollama' as const;
   readonly label = 'Ollama';
 
+  constructor(apiKeyProvider?: ApiKeyProvider) {
+    super(apiKeyProvider);
+  }
+
   protected buildChatUrl(baseUrl: string): string {
     return `${baseUrl}/api/chat`;
   }
@@ -368,7 +394,7 @@ export class OllamaAdapter extends OpenAICompatibleAdapter {
     return `${baseUrl}/api/tags`;
   }
 
-  protected buildHeaders(): Record<string, string> {
+  protected async buildHeaders(): Promise<Record<string, string>> {
     return {};
   }
 
@@ -384,7 +410,7 @@ export class OllamaAdapter extends OpenAICompatibleAdapter {
         name: String(item.name ?? 'Unknown'),
         provider: 'ollama' as const,
         contextWindow: 4096,
-        supportsTools: false,
+        supportsTools: true,
         supportsStreaming: true,
         supportsEmbeddings: false
       }))
@@ -425,7 +451,14 @@ export class OllamaAdapter extends OpenAICompatibleAdapter {
       stream: true
     };
     if (tools && tools.length > 0) {
-      body.tools = tools;
+      body.tools = tools.map(tool => ({
+        type: 'function',
+        function: {
+          name: tool.function.name,
+          description: tool.function.description,
+          parameters: tool.function.parameters
+        }
+      }));
     }
 
     const response = await fetchWithTimeout(this.buildChatUrl(baseUrl), {
@@ -548,6 +581,10 @@ export class LmStudioAdapter extends OpenAICompatibleAdapter {
   readonly providerId = 'lmstudio' as const;
   readonly label = 'LM Studio';
 
+  constructor(apiKeyProvider?: ApiKeyProvider) {
+    super(apiKeyProvider);
+  }
+
   protected buildChatUrl(baseUrl: string): string {
     return `${baseUrl}/chat/completions`;
   }
@@ -556,7 +593,7 @@ export class LmStudioAdapter extends OpenAICompatibleAdapter {
     return `${baseUrl}/models`;
   }
 
-  protected buildHeaders(): Record<string, string> {
+  protected async buildHeaders(): Promise<Record<string, string>> {
     return {};
   }
 
@@ -586,6 +623,10 @@ export class OpenAiCompatibleAdapter extends OpenAICompatibleAdapter {
   readonly providerId = 'openai-compatible' as const;
   readonly label = 'OpenAI Compatible';
 
+  constructor(apiKeyProvider?: ApiKeyProvider) {
+    super(apiKeyProvider);
+  }
+
   protected buildChatUrl(baseUrl: string): string {
     return `${baseUrl}/chat/completions`;
   }
@@ -594,13 +635,8 @@ export class OpenAiCompatibleAdapter extends OpenAICompatibleAdapter {
     return `${baseUrl}/models`;
   }
 
-  protected buildHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {};
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (apiKey) {
-      headers['Authorization'] = `Bearer ${apiKey}`;
-    }
-    return headers;
+  protected async buildHeaders(): Promise<Record<string, string>> {
+    return buildAuthorizationHeaders(process.env.OPENAI_API_KEY ?? await this.getApiKey('openai-compatible'));
   }
 
   protected parseModelsResponse(data: unknown): readonly ModelInfo[] {
@@ -625,11 +661,19 @@ export class OpenAiCompatibleAdapter extends OpenAICompatibleAdapter {
 
 // ?? Factory ???????????????????????????????????????????????????????????????
 
-export function createDefaultAdapters(): readonly ModelProviderAdapter[] {
+export function createDefaultAdapters(apiKeyProvider?: ApiKeyProvider): readonly ModelProviderAdapter[] {
   return [
-    new OpenRouterAdapter(),
+    new OpenRouterAdapter(apiKeyProvider),
     new OllamaAdapter(),
     new LmStudioAdapter(),
-    new OpenAiCompatibleAdapter()
+    new OpenAiCompatibleAdapter(apiKeyProvider)
   ];
+}
+
+function buildAuthorizationHeaders(apiKey: string | null): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+  return headers;
 }

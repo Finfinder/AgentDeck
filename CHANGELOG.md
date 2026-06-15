@@ -14,6 +14,11 @@ Format zgodny z [Keep a Changelog](https://keepachangelog.com/pl/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Dodano narzędzie agenta `create_file` do tworzenia nowych plików tekstowych bez nadpisywania istniejących ścieżek.
+- Dodano backendowy `@agentdeck/agent-runtime` z Session Brokerem, worker lifecycle, `stopSession`, retry/cancellation, crash/resume, subagent tasks, scoped permissions i immutable snapshots.
+
 ### Fixed
 
 - Usunięto `execFile` z `defaultOpenUrl` — zastąpiono przez wymagany `openUrl` callback z Electron `shell.openExternal`, eliminując CodeQL alert `js/command-line-injection` (CWE-78).

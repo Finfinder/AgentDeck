@@ -3,6 +3,11 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
+  isAgentRuntimeResult,
+  isAgentRuntimeSessionState,
+
+  isAgentRuntimeTaskState,
+  isAgentRuntimeWorkerState,
   isChatStreamEvent,
   isChatTabState,
   isDirectoryListing,
@@ -14,6 +19,9 @@ import {
   isIdentitySession,
   isIdentitySessionWarning,
   isModelGatewayConfig,
+  isPermissionApprovalResult,
+  isPermissionBrokerState,
+  isPermissionDecision,
   isModelProviderConfig,
   isSendMessageResult,
   isTestConnectionResult,
@@ -23,6 +31,11 @@ import {
   isWorkspaceModel,
   isWorkspaceSelection,
   type AgentDeckPreloadApi,
+  type PermissionApprovalInput,
+  type PermissionDecision,
+  type AgentRuntimeStartSubagentOptions,
+  type AgentRuntimeTaskState,
+  type AgentRuntimeWorkerState,
   type ChatStreamEvent,
   type ChatTabState,
   type DiffInput,
@@ -42,6 +55,10 @@ const invalidStartupState: StartupState = {
   code: 'INVALID_STARTUP_STATE',
   message: 'The main process returned an invalid startup state.'
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
 
 const api: AgentDeckPreloadApi = {
   getStartupState: async () => {
@@ -201,6 +218,90 @@ const api: AgentDeckPreloadApi = {
     ipcRenderer.on(IPC_CHANNELS.chatTabsChanged, listener);
     return () => { ipcRenderer.off(IPC_CHANNELS.chatTabsChanged, listener); };
   },
+  onAgentRuntimeSessionChanged: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (isAgentRuntimeSessionState(value)) handler(value);
+    };
+    ipcRenderer.on(IPC_CHANNELS.agentRuntimeSessionChanged, listener);
+    return () => { ipcRenderer.off(IPC_CHANNELS.agentRuntimeSessionChanged, listener); };
+  },
+  onAgentRuntimeTaskChanged: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (isAgentRuntimeTaskState(value)) handler(value);
+    };
+    ipcRenderer.on(IPC_CHANNELS.agentRuntimeTaskChanged, listener);
+    return () => { ipcRenderer.off(IPC_CHANNELS.agentRuntimeTaskChanged, listener); };
+  },
+  onAgentRuntimeWorkerChanged: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (isAgentRuntimeWorkerState(value)) handler(value);
+    };
+    ipcRenderer.on(IPC_CHANNELS.agentRuntimeWorkerChanged, listener);
+    return () => { ipcRenderer.off(IPC_CHANNELS.agentRuntimeWorkerChanged, listener); };
+  },
+  onAgentRuntimeSessionCrashed: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, session: unknown, error: unknown) => {
+      if (isAgentRuntimeSessionState(session) && isRecord(error)) {
+        handler(session, { message: typeof error.message === 'string' ? error.message : 'Runtime session crashed.' });
+      }
+    };
+    ipcRenderer.on(IPC_CHANNELS.agentRuntimeSessionCrashed, listener);
+    return () => { ipcRenderer.off(IPC_CHANNELS.agentRuntimeSessionCrashed, listener); };
+  },
+  listAgentRuntimeSessions: async () => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.agentRuntimeListSessions);
+    return Array.isArray(value) ? value.filter(isAgentRuntimeSessionState) : [];
+  },
+  getAgentRuntimeSession: async sessionId => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.agentRuntimeGetSession, sessionId);
+    return isAgentRuntimeSessionState(value) ? value : undefined;
+  },
+  listAgentRuntimeWorkers: async sessionId => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.agentRuntimeListWorkers, sessionId);
+    return Array.isArray(value) ? value.filter(isAgentRuntimeWorkerState) : [];
+  },
+  getAgentRuntimeWorker: async workerId => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.agentRuntimeGetWorker, workerId);
+    return isAgentRuntimeWorkerState(value) ? value : undefined;
+  },
+  listAgentRuntimeTasks: async sessionId => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.agentRuntimeListTasks, sessionId);
+    return Array.isArray(value) ? value.filter(isAgentRuntimeTaskState) : [];
+  },
+  getAgentRuntimeTask: async taskId => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.agentRuntimeGetTask, taskId);
+    return isAgentRuntimeTaskState(value) ? value : undefined;
+  },
+  startAgentRuntimeWorker: async options => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.agentRuntimeStartWorker, options);
+    return isAgentRuntimeResult<AgentRuntimeWorkerState>(value)
+      ? value
+      : { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Unexpected response from main process.' };
+  },
+  startAgentRuntimeSubagent: async (options: AgentRuntimeStartSubagentOptions) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.agentRuntimeStartSubagent, options);
+    return isAgentRuntimeResult<AgentRuntimeTaskState>(value)
+      ? value
+      : { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Unexpected response from main process.' };
+  },
+  resumeAgentRuntimeWorker: async options => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.agentRuntimeResumeWorker, options);
+    return isAgentRuntimeResult<AgentRuntimeWorkerState>(value)
+      ? value
+      : { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Unexpected response from main process.' };
+  },
+  stopAgentRuntimeWorker: async workerId => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.agentRuntimeStopWorker, workerId);
+    return isAgentRuntimeResult<AgentRuntimeWorkerState>(value)
+      ? value
+      : { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Unexpected response from main process.' };
+  },
+  stopAgentRuntimeSession: async sessionId => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.agentRuntimeStopSession, sessionId);
+    return isAgentRuntimeResult<readonly AgentRuntimeWorkerState[]>(value)
+      ? value
+      : { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Unexpected response from main process.' };
+  },
   // Model Gateway secure config
   getApiKey: async (providerId: string) => {
     const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.modelGatewayGetApiKey, providerId);
@@ -231,6 +332,24 @@ const api: AgentDeckPreloadApi = {
   },
   setActiveProvider: async (tabId: string, providerId: string) => {
     await ipcRenderer.invoke(IPC_CHANNELS.chatSetActiveProvider, tabId, providerId);
+  },
+  // Permission Broker
+  getPermissionBrokerState: async () => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.permissionBrokerGetState);
+    return isPermissionBrokerState(value) ? value : { decisions: [], prompts: [], grants: [], audit: [] };
+  },
+  approvePermissionDecision: async (input: PermissionApprovalInput) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.permissionBrokerApproveDecision, input);
+    return isPermissionApprovalResult(value) ? value : { status: 'error', code: 'UNKNOWN', message: 'Invalid approval result from main process.' };
+  },
+  onPermissionDecision: (handler: (decision: PermissionDecision) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (isPermissionDecision(value)) {
+        handler(value);
+      }
+    };
+    ipcRenderer.on(IPC_CHANNELS.permissionBrokerDecisionChanged, listener);
+    return () => { ipcRenderer.off(IPC_CHANNELS.permissionBrokerDecisionChanged, listener); };
   },
   versions: {
     chrome: process.versions.chrome ?? 'unknown',

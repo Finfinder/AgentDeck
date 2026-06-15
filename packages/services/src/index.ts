@@ -95,6 +95,7 @@ export {
   applyWorkspaceEdit,
   clearBuffers,
   closeBuffer,
+  createEditorFile,
   createEditorTab,
   createTabId,
   getBufferDirty,
@@ -110,6 +111,23 @@ export { createIdentityService, IdentityService } from './identity-service';
 export type { SecureStore, SecureStoreWarning, IdentityServiceOptions } from './identity-service';
 export type { IdentitySession } from '@agentdeck/shared';
 export { ModelGateway, createModelGateway, getModelGateway } from './model-gateway';
-export type { ModelProviderAdapter, ToolDefinition, RetryPolicy } from './model-gateway';
+export { createAgentRuntime } from '@agentdeck/agent-runtime';
+export type {
+  AgentRuntime,
+  AgentRuntimeEventEntry,
+  AgentRuntimePermissionScope,
+  AgentRuntimeResult,
+  AgentRuntimeSessionState,
+  AgentRuntimeStartSessionOptions,
+  AgentRuntimeStartWorkerOptions,
+  AgentRuntimeStartSubagentOptions,
+  AgentRuntimeResumeOptions,
+  AgentRuntimeTaskState,
+  AgentRuntimeWorkerDefinition,
+  AgentRuntimeWorkerInput,
+  AgentRuntimeWorkerOutput,
+  AgentRuntimeWorkerState
+} from '@agentdeck/agent-runtime';
+export type { ModelProviderAdapter, ToolDefinition, ToolExecutor, ToolExecutionContext, WorkspaceRootProvider, RetryPolicy } from './model-gateway';
 export { OpenRouterAdapter, OllamaAdapter, LmStudioAdapter, OpenAiCompatibleAdapter, createDefaultAdapters, STREAM_HEARTBEAT_TIMEOUT_MS } from './model-providers';
 export { classifyError } from './model-errors';

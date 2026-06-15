@@ -37,45 +37,47 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Fetch gateway config on mount
-  useEffect(() => {
-    agent.getModelGatewayConfig().then(setConfig).catch(() => {});
+  const fetchProviderConfigs = useCallback(async (
+    nextConfig: ModelGatewayConfig,
+    currentConfigs: Record<string, ProviderConfigState>
+  ): Promise<Record<string, ProviderConfigState>> => {
+    const configs: Record<string, ProviderConfigState> = {};
+    const initial: Record<string, string> = {};
+
+    for (const provider of nextConfig.providers) {
+      const providerConfig = await agent.getProviderConfig?.(provider.id) ?? { baseUrl: '', hasApiKey: false };
+      const existing = currentConfigs[provider.id];
+
+      configs[provider.id] = {
+        baseUrl: providerConfig.baseUrl,
+        apiKey: providerConfig.hasApiKey ? '••••••••' : (existing?.apiKey ?? ''),
+        showApiKey: existing?.showApiKey ?? false,
+        testing: existing?.testing ?? false,
+        testResult: existing?.testResult ?? null
+      };
+      initial[provider.id] = providerConfig.baseUrl;
+    }
+
+    savedUrlsRef.current = initial;
+    return configs;
   }, [agent]);
 
-  // Fetch provider configs (base URL, API key status) for all providers
+  const loadProviderConfigs = useCallback(async (
+    nextConfig: ModelGatewayConfig,
+    currentConfigs: Record<string, ProviderConfigState>
+  ): Promise<void> => {
+    setProviderConfigs(await fetchProviderConfigs(nextConfig, currentConfigs));
+  }, [fetchProviderConfigs]);
+
+  // Fetch gateway config on mount
   useEffect(() => {
-    if (!config) return;
-    const fetchConfigs = async () => {
-      const configs: Record<string, ProviderConfigState> = {};
-      for (const provider of config.providers) {
-        const providerConfig = await agent.getProviderConfig?.(provider.id) ?? { baseUrl: '', hasApiKey: false };
-        const hasApiKey = providerConfig.hasApiKey;
-        configs[provider.id] = {
-          baseUrl: providerConfig.baseUrl,
-          apiKey: '',
-          showApiKey: false,
-          testing: false,
-          testResult: null
-        };
-        // Check if API key exists (don't fetch the actual key)
-        if (hasApiKey) {
-          const entry = configs[provider.id];
-          if (entry) entry.apiKey = '••••••••';
-        }
-      }
-      setProviderConfigs(configs);
-      // Initialize saved URLs from fetched configs
-      const initial: Record<string, string> = {};
-      for (const provider of config.providers) {
-        const pc = await agent.getProviderConfig?.(provider.id);
-        if (pc) {
-          initial[provider.id] = pc.baseUrl;
-        }
-      }
-      savedUrlsRef.current = initial;
-    };
-    fetchConfigs().catch(() => {});
-  }, [agent, config]);
+    agent.getModelGatewayConfig()
+      .then(async (gatewayConfig) => {
+        setConfig(gatewayConfig);
+        await loadProviderConfigs(gatewayConfig, {});
+      })
+      .catch(() => {});
+  }, [agent, loadProviderConfigs]);
 
   // Sync messages from store
   useEffect(() => {
@@ -263,17 +265,18 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
       await new Promise(resolve => setTimeout(resolve, 1500 - elapsed));
     }
 
-    // Refresh gateway config to get updated models list
+    // Refresh gateway config to get updated models list and provider key status
     if (result.status === 'ok') {
       const freshConfig = await agent.getModelGatewayConfig();
       setConfig(freshConfig);
+      await loadProviderConfigs(freshConfig, providerConfigs);
     }
 
     setProviderConfigs(prev => ({
       ...prev,
       [tab.activeProvider]: { ...(prev[tab.activeProvider] ?? { baseUrl: '', apiKey: '', showApiKey: false, testing: false, testResult: null }), testing: false, testResult: result }
     }));
-  }, [agent, tab.activeProvider, providerConfigs]);
+  }, [agent, loadProviderConfigs, providerConfigs, tab.activeProvider]);
 
   const handleToggleApiKeyVisibility = useCallback(() => {
     setProviderConfigs(prev => ({
@@ -304,7 +307,10 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
 
   const handleStop = useCallback(async () => {
     await agent.stopStreaming(tab.id);
-  }, [agent, tab.id]);
+    if (tab.runtimeWorkerId) {
+      await agent.stopAgentRuntimeWorker?.(tab.runtimeWorkerId);
+    }
+  }, [agent, tab.id, tab.runtimeWorkerId]);
 
   return (
     <div className="chat-panel" role="tabpanel" aria-label={`Chat: ${tab.title}`}>

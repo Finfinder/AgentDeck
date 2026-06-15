@@ -204,6 +204,7 @@ export function parseCodeWorkspace(text: string, filePath: string): WorkspaceMod
 export class WorkspaceService extends EventEmitter {
   private readonly recentFilePath: string;
   private activeWatchers: FSWatcher[] = [];
+  private activeRoots: string[] = [];
 
   constructor(userDataPath: string) {
     super();
@@ -225,6 +226,7 @@ export class WorkspaceService extends EventEmitter {
       const model = parseCodeWorkspace(text, path);
 
       if (model.status === 'ok') {
+        this.activeRoots = model.folders.map(f => f.path);
         this.startWatchers(model.folders.map(f => f.path));
         await this.saveRecentWorkspace({ path, name: basename(path), kind, lastOpened: Date.now() });
       }
@@ -233,6 +235,7 @@ export class WorkspaceService extends EventEmitter {
     }
 
     // Folder workspace
+    this.activeRoots = [path];
     this.startWatchers([path]);
     await this.saveRecentWorkspace({ path, name: basename(path), kind: 'folder', lastOpened: Date.now() });
     return { status: 'ok', filePath: path, kind: 'folder', folders: [{ path }] };
@@ -240,6 +243,7 @@ export class WorkspaceService extends EventEmitter {
 
   closeWorkspace(): void {
     this.stopWatchers();
+    this.activeRoots = [];
   }
 
   async deleteFile(filePath: string): Promise<FileOperationResult> {
@@ -309,6 +313,10 @@ export class WorkspaceService extends EventEmitter {
     } catch {
       return [];
     }
+  }
+
+  getActiveWorkspaceRoots(): readonly string[] {
+    return [...this.activeRoots];
   }
 
   private normalizeRelPath(root: string, fullPath: string): string {

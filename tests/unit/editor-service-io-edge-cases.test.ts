@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   clearBuffers,
   closeBuffer,
+  createEditorFile,
   createEditorTab,
   getBufferDirty,
   getOpenBuffers,
@@ -158,6 +159,33 @@ describe('EditorService I/O edge cases', () => {
     });
   });
 
+  describe('createEditorFile', () => {
+    it('creates a new file atomically', async () => {
+      const filePath = join(tempDir!, 'new.ts');
+      const result = await createEditorFile(filePath, 'const created = true;');
+      expect(result.status).toBe('ok');
+
+      const diskContent = await readFile(filePath, 'utf8');
+      expect(diskContent).toBe('const created = true;');
+      expect(getOpenBuffers()).toContain(filePath);
+    });
+
+    it('rejects existing file without overwriting', async () => {
+      const filePath = join(tempDir!, 'existing.ts');
+      await writeFile(filePath, 'old content', 'utf8');
+
+      const result = await createEditorFile(filePath, 'new content');
+      expect(result).toEqual({
+        status: 'error',
+        code: 'WRITE_CONFLICT',
+        message: `File already exists: ${filePath}`
+      });
+
+      const diskContent = await readFile(filePath, 'utf8');
+      expect(diskContent).toBe('old content');
+    });
+  });
+
   describe('buffer management', () => {
     it('closeBuffer removes buffer from tracking', async () => {
       const filePath = join(tempDir!, 'close.ts');
@@ -213,9 +241,9 @@ describe('EditorService I/O edge cases', () => {
     });
 
     it('handles Windows-style paths', () => {
-      const tab = createEditorTab('C:\\Users\\Rafal\\app.ts');
+      const tab = createEditorTab(String.raw`C:\Users\Rafal\app.ts`);
       expect(tab.fileName).toBe('app.ts');
-      expect(tab.filePath).toBe('C:\\Users\\Rafal\\app.ts');
+      expect(tab.filePath).toBe(String.raw`C:\Users\Rafal\app.ts`);
     });
 
     it('handles file with multiple dots', () => {

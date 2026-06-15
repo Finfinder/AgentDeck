@@ -219,6 +219,18 @@ The retry policy can be customized programmatically:
 modelGateway.setRetryPolicy({ maxRetries: 5, baseDelayMs: 2000 });
 ```
 
+## Built-in Agent Tools
+
+AgentDeck registers a small set of safe local tools for chat-driven workflows:
+
+- `read_file` — reads a UTF-8 text file from the workspace.
+- `search_files` — searches text across workspace roots with include/exclude glob filters.
+- `create_file` — creates a new UTF-8 text file with `wx` semantics, so an existing file is never overwritten.
+- `apply_patch` — applies workspace edit operations to opened editor buffers.
+- `show_diff` — generates a unified diff between original and modified text.
+
+`create_file` resolves relative paths against the active workspace roots, creates missing parent directories, and rejects ambiguous or existing paths before writing.
+
 ## What this MVP contains (scope)
 
 The AgentDeck MVP targets a vertical slice that validates the agent-first developer experience:

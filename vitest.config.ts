@@ -10,6 +10,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@agentdeck/agent-runtime': resolve(rootDir, 'packages/agent-runtime/src/index.ts'),
+      '@agentdeck/permission-broker': resolve(rootDir, 'packages/permission-broker/src/index.ts'),
       '@agentdeck/services': resolve(rootDir, 'packages/services/src/index.ts'),
       '@agentdeck/shared': resolve(rootDir, 'packages/shared/src/index.ts'),
       '@agentdeck/workbench': resolve(rootDir, 'packages/workbench/src/index.ts'),

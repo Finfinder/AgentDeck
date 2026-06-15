@@ -1255,6 +1255,259 @@ h2 {
 
 /* ??? Problems Panel - Grouped by file ?????????????????????? */
 
+.runtime-workers-panel,
+.runtime-event-log {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.runtime-workers-header,
+.runtime-worker-card,
+.runtime-event-log-header,
+.runtime-event-log-entry,
+.runtime-crash-notification {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-panel-raised);
+}
+
+.runtime-workers-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.runtime-workers-status {
+  color: var(--color-muted);
+  font-size: 0.78rem;
+}
+
+.runtime-workers-list {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.runtime-task-activity-panel {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.runtime-task-activity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-panel-raised);
+}
+
+.runtime-task-activity-count,
+.runtime-task-activity-status {
+  color: var(--color-muted);
+  font-size: 0.78rem;
+}
+
+.runtime-task-activity-status {
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.runtime-task-activity-list {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.runtime-task-card {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-panel-raised);
+}
+
+.runtime-task-main {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.runtime-worker-card {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.runtime-worker-main {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.runtime-worker-status {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--color-muted);
+  background: rgba(183, 192, 204, 0.12);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.status-idle {
+  color: var(--color-muted);
+  background: rgba(183, 192, 204, 0.12);
+}
+
+.status-running {
+  color: var(--color-accent-strong);
+  background: rgba(89, 216, 196, 0.14);
+}
+
+.status-pending {
+  color: var(--color-warning);
+  background: rgba(242, 200, 91, 0.14);
+}
+
+.status-completed {
+  color: var(--color-accent-strong);
+  background: rgba(89, 216, 196, 0.14);
+}
+
+.status-cancelled {
+  color: var(--color-subtle);
+  background: rgba(127, 139, 154, 0.12);
+}
+
+.status-failed {
+  color: var(--color-danger);
+  background: rgba(255, 122, 122, 0.14);
+}
+
+.status-stopping {
+  color: var(--color-warning);
+  background: rgba(242, 200, 91, 0.14);
+}
+
+.status-stopped {
+  color: var(--color-subtle);
+  background: rgba(127, 139, 154, 0.12);
+}
+
+.status-crashed {
+  color: var(--color-danger);
+  background: rgba(255, 122, 122, 0.14);
+}
+
+.runtime-worker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.runtime-event-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.runtime-event-log-count {
+  color: var(--color-muted);
+  font-size: 0.78rem;
+}
+
+.runtime-event-log-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-3);
+  list-style-position: inside;
+}
+
+.runtime-event-log-entry {
+  display: grid;
+  grid-template-columns: minmax(130px, auto) minmax(120px, auto) minmax(0, 1fr) auto auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.78rem;
+}
+
+.runtime-event-log-entry--error {
+  border-color: color-mix(in srgb, var(--color-danger) 55%, var(--color-border));
+  background: rgba(255, 122, 122, 0.08);
+}
+
+.runtime-event-log-entry--success {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  background: rgba(89, 216, 196, 0.08);
+}
+
+.runtime-event-log-entry--info {
+  background: transparent;
+}
+
+.runtime-event-log-time {
+  color: var(--color-subtle);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 0.72rem;
+}
+
+.runtime-event-log-type {
+  color: var(--color-muted);
+  font-weight: 700;
+}
+
+.runtime-event-log-message {
+  overflow-wrap: anywhere;
+}
+
+.runtime-event-log-detail {
+  color: var(--color-subtle);
+  font-size: 0.72rem;
+}
+
+.runtime-crash-notification {
+  display: grid;
+  grid-template-columns: minmax(160px, auto) minmax(0, 1fr) auto auto auto auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-3);
+  border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 16%, var(--color-panel-raised));
+}
+
+.runtime-crash-notification strong {
+  color: var(--color-danger);
+}
+
+.runtime-crash-notification span {
+  overflow-wrap: anywhere;
+  font-size: 0.78rem;
+}
+
+.runtime-crash-dismiss {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 1rem;
+}
+
 .problems-group-list {
   list-style: none;
   margin: 0;
@@ -1985,6 +2238,119 @@ h2 {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border-width: 0;
+}
+
+/* ?? Permission Broker UI ???????????????????????????????????????????????? */
+
+.permission-prompts {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.permission-prompts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.permission-prompts-header h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text);
+}
+
+.permission-prompts-header span {
+  font-size: 0.75rem;
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
+.permission-prompts-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.permission-prompt-card {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-panel-raised);
+}
+
+.permission-prompt-main {
+  display: grid;
+  gap: 2px;
+}
+
+.permission-prompt-main strong {
+  font-size: 0.82rem;
+  color: var(--color-text);
+}
+
+.permission-prompt-target {
+  font-size: 0.72rem;
+  color: var(--color-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-prompt-reason {
+  font-size: 0.72rem;
+  color: var(--color-muted);
+}
+
+.permission-risk {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.permission-risk--safe { background: color-mix(in srgb, var(--color-accent) 20%, transparent); color: var(--color-accent-strong); }
+.permission-risk--low { background: color-mix(in srgb, var(--color-accent) 12%, transparent); color: var(--color-accent); }
+.permission-risk--medium { background: color-mix(in srgb, var(--color-warning) 20%, transparent); color: var(--color-warning); }
+.permission-risk--high { background: color-mix(in srgb, var(--color-danger) 20%, transparent); color: var(--color-danger); }
+.permission-risk--critical { background: var(--color-danger); color: var(--color-text); }
+
+.permission-prompt-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.permission-approve-btn {
+  border-color: color-mix(in srgb, var(--color-accent) 64%, var(--color-border));
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+  font-size: 0.75rem;
+  padding: 4px 12px;
+}
+
+.permission-approve-btn:hover {
+  background: var(--color-accent-strong);
+}
+
+.permission-deny-btn {
+  border-color: var(--color-border);
+  color: var(--color-text);
+  background: transparent;
+  font-size: 0.75rem;
+  padding: 4px 12px;
+}
+
+.permission-deny-btn:hover {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
 }
 
 
