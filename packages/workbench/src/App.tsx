@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { DEFAULT_THEME_SETTINGS, isIdentitySession, type IdentitySession, type AgentDeckPreloadApi, type EditorDiagnostic, type FsChangeEvent, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection, type AgentRuntimeEventEntry, type AgentRuntimeSessionState, type AgentRuntimeTaskState, type AgentRuntimeWorkerState, type PermissionApprovalInput, type PermissionDecision } from '@agentdeck/shared';
+import { DEFAULT_THEME_SETTINGS, isIdentitySession, type AgentDeckPreloadApi, type ApprovalDecision, type Conflict, type EditorDiagnostic, type EventLogEntry, type FsChangeEvent, type IdentitySession, type StartupState, type ThemePreference, type ThemeSettings, type ToolCallResponse, type ToolClassification, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection, type AgentRuntimeEventEntry, type AgentRuntimeSessionState, type AgentRuntimeTaskState, type AgentRuntimeWorkerState, type PermissionApprovalInput, type PermissionDecision } from '@agentdeck/shared';
 
 import { ChatPanel, ChatTabs, useChatStore } from './chat';
 import { EditorSurface } from './editor';
+import { EventLogPanel } from './EventLogPanel';
 import { useEditorStore } from './editor/useEditorStore';
 import { MenuBar } from './MenuBar';
 import { ProblemsPanel } from './ProblemsPanel';
@@ -76,6 +77,15 @@ const DEV_PRELOAD_API: AgentDeckPreloadApi = {
   resumeAgentRuntimeWorker: async () => ({ status: 'error' as const, code: 'UNKNOWN' as const, message: 'Dev mode - no runtime worker.' }),
   stopAgentRuntimeWorker: async () => ({ status: 'error' as const, code: 'UNKNOWN' as const, message: 'Dev mode - no runtime worker.' }),
   stopAgentRuntimeSession: async () => ({ status: 'error' as const, code: 'UNKNOWN' as const, message: 'Dev mode - no runtime session.' }),
+  // Phase 7: Tool Router / Permission Broker / Conflict Broker dev stubs
+  onConflictDetected: () => () => undefined,
+  resolveConflict: async () => undefined,
+  checkSensitivePath: async () => ({ filePath: '', isSensitive: false }),
+  getFileHash: async () => ({ status: 'ok' as const, hash: 'dev-hash' }),
+  // Event Log dev stubs
+  getEventLog: async () => ({ status: 'ok' as const, entries: [] as readonly EventLogEntry[], total: 0 }),
+  onEventLogUpdate: () => () => undefined,
+  clearEventLog: async () => undefined,
   // Model Gateway secure config dev stubs
   getApiKey: async () => null,
   setApiKey: async () => undefined,
@@ -1231,6 +1241,30 @@ export function App() {
         </div>
       </footer>
     </main>
+  );
+}
+
+// ?? Phase 7: Patch Conflict Dialog ???????????????????????????????????????
+
+interface PatchConflict {
+  conflict: Conflict;
+  patchId: string;
+}
+
+interface PatchConflictDialogProps {
+  conflict: PatchConflict;
+  onResolve: (resolution: { strategy: 'ours' | 'theirs' | 'manual'; content?: string }) => void;
+  onClose: () => void;
+}
+
+function PatchConflictDialog({ conflict, onResolve, onClose }: PatchConflictDialogProps): React.ReactElement {
+  return (
+    <div role="dialog" aria-label="Patch conflict">
+      <p>Conflict in {conflict.conflict.filePath}</p>
+      <button onClick={() => onResolve({ strategy: 'ours' })}>Use ours</button>
+      <button onClick={() => onResolve({ strategy: 'theirs' })}>Use theirs</button>
+      <button onClick={onClose}>Close</button>
+    </div>
   );
 }
 
