@@ -1,3 +1,22 @@
+import type {
+  PermissionActionKind,
+  PermissionActorKind,
+  PermissionApprovalInput,
+  PermissionApprovalResult,
+  PermissionAuditEntry,
+  PermissionBrokerState,
+  PermissionDecision,
+  PermissionDecisionKind,
+  PermissionEvaluation,
+  PermissionGrant,
+  PermissionGrantDuration,
+  PermissionGrantScope,
+  PermissionPrompt,
+  PermissionRequest,
+  PermissionRiskLevel,
+  PermissionRuntimeKind
+} from '@agentdeck/permission-broker';
+
 export const IPC_CHANNELS = {
   getStartupState: 'agentdeck:v1:startup:get-state',
   getThemeSettings: 'agentdeck:v1:settings:get-theme',
@@ -43,6 +62,26 @@ export const IPC_CHANNELS = {
   // Tab model/provider selection
   chatSetActiveModel: 'agentdeck:v1:chat:set-active-model',
   chatSetActiveProvider: 'agentdeck:v1:chat:set-active-provider',
+  // Agent Runtime
+  agentRuntimeListSessions: 'agentdeck:v1:agent-runtime:list-sessions',
+  agentRuntimeGetSession: 'agentdeck:v1:agent-runtime:get-session',
+  agentRuntimeListWorkers: 'agentdeck:v1:agent-runtime:list-workers',
+  agentRuntimeGetWorker: 'agentdeck:v1:agent-runtime:get-worker',
+  agentRuntimeListTasks: 'agentdeck:v1:agent-runtime:list-tasks',
+  agentRuntimeGetTask: 'agentdeck:v1:agent-runtime:get-task',
+  agentRuntimeStartWorker: 'agentdeck:v1:agent-runtime:start-worker',
+  agentRuntimeStartSubagent: 'agentdeck:v1:agent-runtime:start-subagent',
+  agentRuntimeResumeWorker: 'agentdeck:v1:agent-runtime:resume-worker',
+  agentRuntimeStopWorker: 'agentdeck:v1:agent-runtime:stop-worker',
+  agentRuntimeStopSession: 'agentdeck:v1:agent-runtime:stop-session',
+  agentRuntimeSessionChanged: 'agentdeck:v1:agent-runtime:session-changed',
+  agentRuntimeTaskChanged: 'agentdeck:v1:agent-runtime:task-changed',
+  agentRuntimeWorkerChanged: 'agentdeck:v1:agent-runtime:worker-changed',
+  agentRuntimeSessionCrashed: 'agentdeck:v1:agent-runtime:session-crashed',
+  // Permission Broker
+  permissionBrokerGetState: 'agentdeck:v1:permission-broker:get-state',
+  permissionBrokerApproveDecision: 'agentdeck:v1:permission-broker:approve-decision',
+  permissionBrokerDecisionChanged: 'agentdeck:v1:permission-broker:decision-changed',
   // Phase 7: Tool Router / Permission Broker / Conflict Broker
   toolCall: 'agentdeck:v1:tool:call',
   toolCallResult: 'agentdeck:v1:tool:call-result',
@@ -287,154 +326,6 @@ export type DiffResult =
   | Readonly<{ status: 'ok'; diff: string }>
   | Readonly<{ status: 'error'; code: 'UNKNOWN'; message: string }>;
 
-// ?? Event Log types ???????????????????????????????????????????????????????
-
-export type EventLogLevel = 'info' | 'warn' | 'error';
-
-export type EventLogEntry = Readonly<{
-  id: string;
-  timestamp: number;
-  level: EventLogLevel;
-  source: string;
-  message: string;
-  diff?: string;
-  filePath?: string;
-  patchId?: string;
-}>;
-
-export type EventLogFilter = Readonly<{
-  levels?: readonly EventLogLevel[];
-  sources?: readonly string[];
-  searchText?: string;
-  hasDiffOnly?: boolean;
-  since?: number;
-  until?: number;
-}>;
-
-export type EventLogResult =
-  | Readonly<{ status: 'ok'; entries: readonly EventLogEntry[]; total: number }>
-  | Readonly<{ status: 'error'; code: 'UNKNOWN'; message: string }>;
-
-// ?? Phase 7: Permission Broker types ???????????????????????????????????????
-
-export type ToolRiskLevel = 'read-only' | 'low' | 'medium' | 'high' | 'critical';
-
-export type ToolName =
-  | 'readFile'
-  | 'searchFiles'
-  | 'listDirectory'
-  | 'proposePatch'
-  | 'applyPatch'
-  | 'deleteFile'
-  | 'renameFile'
-  | 'writeFile';
-
-export type ToolClassification = Readonly<{
-  name: ToolName;
-  riskLevel: ToolRiskLevel;
-  requiresApproval: boolean;
-  description: string;
-}>;
-
-export type ToolCallRequest = Readonly<{
-  callId: string;
-  toolName: ToolName;
-  args: Record<string, unknown>;
-  session?: string;
-}>;
-
-export type ToolCallResponse =
-  | Readonly<{
-      status: 'ok';
-      callId: string;
-      result: unknown;
-    }>
-  | Readonly<{
-      status: 'pending-approval';
-      callId: string;
-      classification: ToolClassification;
-      expiresAt: number;
-    }>
-  | Readonly<{
-      status: 'error';
-      callId: string;
-      code: 'TOOL_NOT_FOUND' | 'ACCESS_DENIED' | 'TIMEOUT' | 'WRITE_CONFLICT' | 'UNKNOWN';
-      message: string;
-      conflict?: Conflict;
-    }>
-  | Readonly<{
-      status: 'denied';
-      callId: string;
-      reason: string;
-    }>;
-
-export type ApprovalDecision = Readonly<{
-  callId: string;
-  approved: boolean;
-  remember?: boolean;
-}>;
-
-// ?? Phase 7: Patch model types ??????????????????????????????????????????????
-
-export type PatchOperation = Readonly<{
-  filePath: string;
-  range?: Readonly<{
-    startLine: number;
-    startCol: number;
-    endLine: number;
-    endCol: number;
-  }>;
-  text: string;
-  /** Snapshot of lines immediately before the range (from base content at patch creation time). */
-  contextBefore?: readonly string[];
-  /** Snapshot of lines immediately after the range (from base content at patch creation time). */
-  contextAfter?: readonly string[];
-}>;
-
-export type PatchSet = Readonly<{
-  id: string;
-  filePath: string;
-  baseHash: string;
-  operations: readonly PatchOperation[];
-  author: string;
-  riskLevel: ToolRiskLevel;
-  createdAt: number;
-}>;
-
-export type PatchResult =
-  | Readonly<{ status: 'ok'; patchId: string; appliedHash: string }>
-  | Readonly<{ status: 'ok'; patchId: string; appliedHash: string; autoMerged: true }>
-  | Readonly<{ status: 'error'; code: 'CONFLICT' | 'FILE_NOT_FOUND' | 'ACCESS_DENIED' | 'UNKNOWN'; message: string }>;
-
-// ?? Phase 7: Conflict Broker types ?????????????????????????????????????????
-
-export type ConflictKind = 'patch-conflict' | 'delete' | 'rename' | 'binary' | 'multi-file' | 'high-risk';
-
-export type Conflict = Readonly<{
-  id: string;
-  kind: ConflictKind;
-  patchId: string;
-  filePath: string;
-  description: string;
-  riskLevel: ToolRiskLevel;
-  createdAt: number;
-}>;
-
-export type ConflictResolution =
-  | Readonly<{ conflictId: string; action: 'apply' }>
-  | Readonly<{ conflictId: string; action: 'skip' }>
-  | Readonly<{ conflictId: string; action: 'edit'; operations: readonly PatchOperation[] }>;
-
-export type FileHashResult =
-  | Readonly<{ status: 'ok'; hash: string }>
-  | Readonly<{ status: 'error'; code: 'FILE_NOT_FOUND' | 'ACCESS_DENIED' | 'UNKNOWN'; message: string }>;
-
-export type SensitivePathCheckResult = Readonly<{
-  filePath: string;
-  isSensitive: boolean;
-  matchedPattern?: string;
-}>;
-
 export type IdentitySession = Readonly<{
   isLoggedIn: boolean;
   provider?: 'github';
@@ -488,16 +379,7 @@ export type AgentDeckPreloadApi = Readonly<{
   stopStreaming: (tabId: string) => Promise<void>;
   onChatStream: (handler: (tabId: string, event: ChatStreamEvent) => void) => () => void;
   onChatTabsChange: (handler: (tabs: readonly ChatTabState[]) => void) => () => void;
-  // Model Gateway secure config
-  getApiKey?: (providerId: string) => Promise<string | null>;
-  setApiKey?: (providerId: string, apiKey: string) => Promise<void>;
-  deleteApiKey?: (providerId: string) => Promise<void>;
-  testConnection?: (providerId: string, baseUrl: string) => Promise<{ status: 'ok' | 'error'; message?: string; models?: readonly ModelInfo[] }>;
-  setProviderConfig?: (providerId: string, baseUrl: string) => Promise<void>;
-  getProviderConfig?: (providerId: string) => Promise<ModelProviderConfig>;
-  setActiveModel?: (tabId: string, modelId: string) => Promise<void>;
-  setActiveProvider?: (tabId: string, providerId: string) => Promise<void>;
-  // Phase 7: Tool Router / Permission Broker / Conflict Broker
+  // Phase 7: Tool Router / Permission Broker / Conflict Broker / Event Log
   toolCall?: (request: ToolCallRequest) => Promise<ToolCallResponse>;
   onToolApprovalRequest?: (handler: (response: ToolCallResponse & { status: 'pending-approval' }) => void) => () => void;
   submitApproval?: (decision: ApprovalDecision) => Promise<ToolCallResponse>;
@@ -511,6 +393,34 @@ export type AgentDeckPreloadApi = Readonly<{
   getEventLog?: (filter?: EventLogFilter) => Promise<EventLogResult>;
   onEventLogUpdate?: (handler: (entry: EventLogEntry) => void) => () => void;
   clearEventLog?: () => Promise<void>;
+  onAgentRuntimeSessionChanged?: (handler: (session: AgentRuntimeSessionState) => void) => (() => void) | undefined;
+  onAgentRuntimeTaskChanged?: (handler: (task: AgentRuntimeTaskState) => void) => (() => void) | undefined;
+  onAgentRuntimeWorkerChanged?: (handler: (worker: AgentRuntimeWorkerState) => void) => (() => void) | undefined;
+  onAgentRuntimeSessionCrashed?: (handler: (session: AgentRuntimeSessionState, error: { message: string }) => void) => (() => void) | undefined;
+  listAgentRuntimeSessions?: () => Promise<readonly AgentRuntimeSessionState[]>;
+  getAgentRuntimeSession?: (sessionId: string) => Promise<AgentRuntimeSessionState | undefined>;
+  listAgentRuntimeWorkers?: (sessionId?: string) => Promise<readonly AgentRuntimeWorkerState[]>;
+  getAgentRuntimeWorker?: (workerId: string) => Promise<AgentRuntimeWorkerState | undefined>;
+  listAgentRuntimeTasks?: (sessionId?: string) => Promise<readonly AgentRuntimeTaskState[]>;
+  getAgentRuntimeTask?: (taskId: string) => Promise<AgentRuntimeTaskState | undefined>;
+  startAgentRuntimeWorker?: (options: AgentRuntimeStartWorkerOptions) => Promise<AgentRuntimeResult<AgentRuntimeWorkerState>>;
+  startAgentRuntimeSubagent?: (options: AgentRuntimeStartSubagentOptions) => Promise<AgentRuntimeResult<AgentRuntimeTaskState>>;
+  resumeAgentRuntimeWorker?: (options: AgentRuntimeResumeOptions) => Promise<AgentRuntimeResult<AgentRuntimeWorkerState>>;
+  stopAgentRuntimeWorker?: (workerId: string) => Promise<AgentRuntimeResult<AgentRuntimeWorkerState>>;
+  stopAgentRuntimeSession?: (sessionId: string) => Promise<AgentRuntimeResult<readonly AgentRuntimeWorkerState[]>>;
+  // Permission Broker
+  getPermissionBrokerState?: () => Promise<PermissionBrokerState>;
+  approvePermissionDecision?: (input: PermissionApprovalInput) => Promise<PermissionApprovalResult>;
+  onPermissionDecision?: (handler: (decision: PermissionDecision) => void) => (() => void) | undefined;
+  // Model Gateway secure config
+  getApiKey?: (providerId: string) => Promise<string | null>;
+  setApiKey?: (providerId: string, apiKey: string) => Promise<void>;
+  deleteApiKey?: (providerId: string) => Promise<void>;
+  testConnection?: (providerId: string, baseUrl: string) => Promise<{ status: 'ok' | 'error'; message?: string; models?: readonly ModelInfo[] }>;
+  setProviderConfig?: (providerId: string, baseUrl: string) => Promise<void>;
+  getProviderConfig?: (providerId: string) => Promise<ModelProviderConfig>;
+  setActiveModel?: (tabId: string, modelId: string) => Promise<void>;
+  setActiveProvider?: (tabId: string, providerId: string) => Promise<void>;
   versions: Readonly<{
     chrome: string;
     electron: string;
@@ -520,6 +430,222 @@ export type AgentDeckPreloadApi = Readonly<{
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+const PERMISSION_ACTION_KINDS = new Set<string>(['read', 'write', 'delete', 'terminal', 'network', 'mcpTool', 'secretsAccess', 'workspaceEdit']);
+const PERMISSION_ACTOR_KINDS = new Set<string>(['agent', 'extension', 'mcp', 'user']);
+const PERMISSION_DECISION_KINDS = new Set<string>(['allow', 'prompt', 'deny']);
+const PERMISSION_RISK_LEVELS = new Set<string>(['safe', 'low', 'medium', 'high', 'critical']);
+const PERMISSION_GRANT_DURATIONS = new Set<string>(['once', 'session']);
+const PERMISSION_RUNTIME_KINDS = new Set<string>(['parent', 'subagent']);
+const PERMISSION_APPROVAL_DECISIONS = new Set<string>(['allow', 'deny']);
+const PERMISSION_APPROVAL_CODES = new Set<string>(['DECISION_NOT_FOUND', 'INVALID_SCOPE', 'UNKNOWN']);
+const PERMISSION_AUDIT_TYPES = new Set<string>(['permission.request', 'permission.decision', 'permission.after-tool']);
+const PERMISSION_AUDIT_OUTCOMES = new Set<string>(['success', 'error', 'blocked']);
+
+function isPermissionString(value: unknown, allowed: ReadonlySet<string>): value is string {
+  return typeof value === 'string' && allowed.has(value);
+}
+
+export function isPermissionActionKind(value: unknown): value is PermissionActionKind {
+  return isPermissionString(value, PERMISSION_ACTION_KINDS);
+}
+
+export function isPermissionActorKind(value: unknown): value is PermissionActorKind {
+  return isPermissionString(value, PERMISSION_ACTOR_KINDS);
+}
+
+export function isPermissionDecisionKind(value: unknown): value is PermissionDecisionKind {
+  return isPermissionString(value, PERMISSION_DECISION_KINDS);
+}
+
+export function isPermissionRiskLevel(value: unknown): value is PermissionRiskLevel {
+  return isPermissionString(value, PERMISSION_RISK_LEVELS);
+}
+
+export function isPermissionGrantDuration(value: unknown): value is PermissionGrantDuration {
+  return isPermissionString(value, PERMISSION_GRANT_DURATIONS);
+}
+
+export function isPermissionRuntimeKind(value: unknown): value is PermissionRuntimeKind {
+  return isPermissionString(value, PERMISSION_RUNTIME_KINDS);
+}
+
+function isOptionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === 'string';
+}
+
+function isOptionalNumber(value: unknown): value is number | undefined {
+  return value === undefined || typeof value === 'number';
+}
+
+function isOptionalRuntimeKind(value: unknown): value is PermissionRuntimeKind | undefined {
+  return value === undefined || isPermissionRuntimeKind(value);
+}
+
+function isOptionalStringArray(value: unknown): value is readonly string[] | undefined {
+  return value === undefined || (Array.isArray(value) && value.every(item => typeof item === 'string'));
+}
+
+function isMetadata(value: unknown): value is Record<string, unknown> {
+  return isRecord(value);
+}
+
+export function isPermissionGrantScope(value: unknown): value is PermissionGrantScope {
+  if (!isRecord(value)) return false;
+  return (
+    isOptionalString(value.toolName) &&
+    (value.action === undefined || isPermissionActionKind(value.action)) &&
+    isOptionalString(value.workspaceGlob) &&
+    isOptionalString(value.host) &&
+    isOptionalString(value.command) &&
+    isOptionalString(value.mcpServerId)
+  );
+}
+
+export function isPermissionGrant(value: unknown): value is PermissionGrant {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === 'string' &&
+    typeof value.sessionId === 'string' &&
+    isOptionalString(value.taskId) &&
+    isPermissionActorKind(value.actorKind) &&
+    isPermissionActionKind(value.action) &&
+    isPermissionGrantScope(value.scope) &&
+    isPermissionGrantDuration(value.duration) &&
+    typeof value.requiresPrompt === 'boolean' &&
+    value.grantedBy === 'user' &&
+    typeof value.createdAt === 'number' &&
+    isOptionalRuntimeKind(value.runtimeKind) &&
+    isOptionalNumber(value.expiresAt)
+  );
+}
+
+export function isPermissionRequest(value: unknown): value is PermissionRequest {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === 'string' &&
+    typeof value.sessionId === 'string' &&
+    typeof value.taskId === 'string' &&
+    isOptionalString(value.workerId) &&
+    isPermissionActorKind(value.actorKind) &&
+    isPermissionActionKind(value.kind) &&
+    isOptionalString(value.toolName) &&
+    typeof value.target === 'string' &&
+    isMetadata(value.metadata) &&
+    isOptionalStringArray(value.workspaceRoots) &&
+    isOptionalRuntimeKind(value.runtimeKind)
+  );
+}
+
+export function isPermissionEvaluation(value: unknown): value is PermissionEvaluation {
+  if (!isRecord(value)) return false;
+  return (
+    isPermissionDecisionKind(value.decision) &&
+    isPermissionRiskLevel(value.risk) &&
+    typeof value.reason === 'string' &&
+    (value.grant === undefined || isPermissionGrant(value.grant)) &&
+    isOptionalString(value.decisionId)
+  );
+}
+
+export function isPermissionDecision(value: unknown): value is PermissionDecision {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === 'string' &&
+    typeof value.requestId === 'string' &&
+    typeof value.sessionId === 'string' &&
+    typeof value.taskId === 'string' &&
+    isOptionalString(value.workerId) &&
+    isPermissionActorKind(value.actorKind) &&
+    isPermissionActionKind(value.kind) &&
+    isOptionalString(value.toolName) &&
+    typeof value.target === 'string' &&
+    isOptionalRuntimeKind(value.runtimeKind) &&
+    isPermissionRiskLevel(value.risk) &&
+    isPermissionDecisionKind(value.decision) &&
+    typeof value.reason === 'string' &&
+    typeof value.createdAt === 'number'
+  );
+}
+
+export function isPermissionPrompt(value: unknown): value is PermissionPrompt {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.decisionId === 'string' &&
+    typeof value.requestId === 'string' &&
+    typeof value.sessionId === 'string' &&
+    typeof value.taskId === 'string' &&
+    isOptionalString(value.workerId) &&
+    isPermissionActorKind(value.actorKind) &&
+    isPermissionActionKind(value.kind) &&
+    isOptionalString(value.toolName) &&
+    typeof value.target === 'string' &&
+    isOptionalRuntimeKind(value.runtimeKind) &&
+    isPermissionRiskLevel(value.risk) &&
+    typeof value.reason === 'string' &&
+    isMetadata(value.metadata) &&
+    typeof value.createdAt === 'number'
+  );
+}
+
+export function isPermissionApprovalInput(value: unknown): value is PermissionApprovalInput {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.decisionId === 'string' &&
+    isPermissionString(value.decision, PERMISSION_APPROVAL_DECISIONS) &&
+    isPermissionGrantDuration(value.duration) &&
+    (value.scope === undefined || isPermissionGrantScope(value.scope))
+  );
+}
+
+export function isPermissionApprovalResult(value: unknown): value is PermissionApprovalResult {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') {
+    return isPermissionDecision(value.decision) && (value.grant === undefined || isPermissionGrant(value.grant));
+  }
+  return (
+    value.status === 'error' &&
+    isPermissionString(value.code, PERMISSION_APPROVAL_CODES) &&
+    typeof value.message === 'string'
+  );
+}
+
+export function isPermissionAuditEntry(value: unknown): value is PermissionAuditEntry {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === 'string' &&
+    typeof value.sessionId === 'string' &&
+    isOptionalString(value.taskId) &&
+    isOptionalString(value.workerId) &&
+    typeof value.decisionId === 'string' &&
+    isPermissionString(value.type, PERMISSION_AUDIT_TYPES) &&
+    isPermissionActorKind(value.actorKind) &&
+    isPermissionActionKind(value.action) &&
+    typeof value.target === 'string' &&
+    isOptionalString(value.toolName) &&
+    isOptionalRuntimeKind(value.runtimeKind) &&
+    isPermissionRiskLevel(value.risk) &&
+    isPermissionDecisionKind(value.decision) &&
+    typeof value.reason === 'string' &&
+    typeof value.createdAt === 'number' &&
+    (value.outcome === undefined || isPermissionString(value.outcome, PERMISSION_AUDIT_OUTCOMES)) &&
+    isOptionalNumber(value.durationMs)
+  );
+}
+
+export function isPermissionBrokerState(value: unknown): value is PermissionBrokerState {
+  if (!isRecord(value)) return false;
+  return (
+    Array.isArray(value.decisions) &&
+    value.decisions.every(isPermissionDecision) &&
+    Array.isArray(value.prompts) &&
+    value.prompts.every(isPermissionPrompt) &&
+    Array.isArray(value.grants) &&
+    value.grants.every(isPermissionGrant) &&
+    Array.isArray(value.audit) &&
+    value.audit.every(isPermissionAuditEntry)
+  );
 }
 
 function isStartupServiceDescriptor(value: unknown): value is StartupServiceDescriptor {
@@ -758,30 +884,6 @@ export function isDiffResult(value: unknown): value is DiffResult {
   return value.status === 'error' && value.code === 'UNKNOWN' && typeof value.message === 'string';
 }
 
-// ?? Event Log guards ??????????????????????????????????????????????????????
-
-const EVENT_LOG_LEVELS = new Set<string>(['info', 'warn', 'error']);
-
-function isEventLogEntry(value: unknown): value is EventLogEntry {
-  if (!isRecord(value)) return false;
-  return (
-    typeof value.id === 'string' &&
-    typeof value.timestamp === 'number' &&
-    typeof value.level === 'string' &&
-    EVENT_LOG_LEVELS.has(value.level) &&
-    typeof value.source === 'string' &&
-    typeof value.message === 'string'
-  );
-}
-
-export function isEventLogResult(value: unknown): value is EventLogResult {
-  if (!isRecord(value)) return false;
-  if (value.status === 'ok') {
-    return Array.isArray(value.entries) && value.entries.every(isEventLogEntry) && typeof value.total === 'number';
-  }
-  return value.status === 'error' && value.code === 'UNKNOWN' && typeof value.message === 'string';
-}
-
 // ?? Model Gateway types ???????????????????????????????????????????????????
 
 export type ModelProviderId = 'openrouter' | 'ollama' | 'lmstudio' | 'openai-compatible';
@@ -839,6 +941,8 @@ export type ChatTabState = Readonly<{
   activeModel: string;
   activeProvider: ModelProviderId;
   isStreaming: boolean;
+  runtimeSessionId?: string;
+  runtimeWorkerId?: string;
   error?: string;
 }>;
 
@@ -861,6 +965,303 @@ export type ModelProviderConfig = Readonly<{
 export type TestConnectionResult =
   | Readonly<{ status: 'ok'; models: readonly ModelInfo[] }>
   | Readonly<{ status: 'error'; message: string }>;
+
+export type AgentRuntimeResult<T> =
+  | Readonly<{ status: 'ok'; value: T }>
+  | Readonly<{
+      status: 'error';
+      code: 'SESSION_NOT_FOUND' | 'WORKER_NOT_FOUND' | 'INVALID_SCOPE' | 'TASK_NOT_FOUND' | 'ALREADY_RUNNING' | 'UNKNOWN';
+      message: string;
+    }>;
+
+export type AgentRuntimePermissionScope = Readonly<{
+  sessionId: string;
+  taskId: string;
+  kind: 'parent' | 'subagent';
+  allowedTools: readonly string[];
+}>;
+
+export type AgentRuntimeWorkerInput = Readonly<{
+  sessionId: string;
+  taskId: string;
+  agentName: string;
+  modelId: string;
+  prompt: string;
+  contextSnapshot: readonly string[];
+  permissionScope: AgentRuntimePermissionScope;
+}>;
+
+export type AgentRuntimeWorkerOutput = Readonly<{
+  summary: string;
+  references: readonly string[];
+  toolsUsed: readonly string[];
+}>;
+
+export type AgentRuntimeWorkerDefinition = Readonly<{
+  id: string;
+  run(
+    input: AgentRuntimeWorkerInput,
+    signal: AbortSignal
+  ): Promise<AgentRuntimeWorkerOutput>;
+}>;
+
+export type AgentRuntimeSessionState = Readonly<{
+  id: string;
+  chatTabId: string;
+  modelId: string;
+  agentName: string;
+  status: 'active' | 'crashed' | 'stopped';
+  permissionScope: AgentRuntimePermissionScope;
+  context: readonly string[];
+  eventLog: readonly AgentRuntimeEventEntry[];
+  workers: readonly AgentRuntimeWorkerState[];
+  tasks: readonly AgentRuntimeTaskState[];
+  resumeToken?: string;
+}>;
+
+export type AgentRuntimeWorkerState = Readonly<{
+  id: string;
+  sessionId: string;
+  taskId: string;
+  status: 'idle' | 'running' | 'stopping' | 'stopped' | 'crashed';
+  attempt: number;
+  maxRetries: number;
+  lastError?: string;
+  startedAt?: number;
+  stoppedAt?: number;
+  output?: AgentRuntimeWorkerOutput;
+}>;
+
+export type AgentRuntimeTaskState = Readonly<{
+  id: string;
+  sessionId: string;
+  parentTaskId?: string;
+  kind: 'chat' | 'subagent';
+  agentName: string;
+  modelId: string;
+  prompt: string;
+  status: 'pending' | 'running' | 'completed' | 'cancelled' | 'failed';
+  permissionScope: AgentRuntimePermissionScope;
+  context: readonly string[];
+  toolsUsed: readonly string[];
+  result?: AgentRuntimeWorkerOutput;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}>;
+
+export type AgentRuntimeEventEntry = Readonly<{
+  id: string;
+  sessionId: string;
+  taskId?: string;
+  workerId?: string;
+  type: 'session-created' | 'session-stopped' | 'worker-started' | 'worker-stopped' | 'worker-crashed' | 'worker-resumed' | 'task-created' | 'task-updated' | 'task-completed' | 'task-failed' | 'task-cancelled';
+  message: string;
+  timestamp: number;
+}>;
+
+export type AgentRuntimeStartSessionOptions = Readonly<{
+  chatTabId: string;
+  modelId: string;
+  agentName: string;
+  context?: readonly string[];
+  allowedTools?: readonly string[];
+}>;
+
+export type AgentRuntimeStartWorkerOptions = Readonly<{
+  sessionId: string;
+  taskId: string;
+  prompt: string;
+  context?: readonly string[];
+  allowedTools?: readonly string[];
+}>;
+
+export type AgentRuntimeStartSubagentOptions = Readonly<{
+  sessionId: string;
+  name: string;
+  goal: string;
+  modelId: string;
+  context?: readonly string[];
+  allowedTools?: readonly string[];
+  parentTaskId?: string;
+}>;
+
+export type AgentRuntimeResumeOptions = Readonly<{
+  sessionId: string;
+  workerId: string;
+}>;
+
+export type PermissionAction = PermissionActionKind;
+export type PermissionActionKindAlias = PermissionActionKind;
+
+export type PermissionActor = PermissionActorKind;
+export type PermissionActorKindAlias = PermissionActorKind;
+
+export type PermissionRuntime = PermissionRuntimeKind;
+export type PermissionRuntimeKindAlias = PermissionRuntimeKind;
+
+export type PermissionRisk = PermissionRiskLevel;
+export type PermissionRiskLevelAlias = PermissionRiskLevel;
+
+export type PermissionDecisionType = PermissionDecision;
+export type PermissionDecisionKindAlias = PermissionDecisionKind;
+
+export type PermissionPromptState = PermissionPrompt;
+export type PermissionApproval = PermissionApprovalInput;
+export type PermissionApprovalOutcome = PermissionApprovalResult;
+export type PermissionGrantState = PermissionGrant;
+export type PermissionGrantDurationValue = PermissionGrantDuration;
+export type PermissionGrantScopeValue = PermissionGrantScope;
+export type PermissionRequestState = PermissionRequest;
+export type PermissionBrokerSnapshot = PermissionBrokerState;
+export type PermissionAuditEntryAlias = PermissionAuditEntry;
+export type PermissionEvaluationAlias = PermissionEvaluation;
+
+export type EventLogLevel = 'info' | 'warn' | 'error';
+
+export type EventLogEntry = Readonly<{
+  id: string;
+  timestamp: number;
+  level: EventLogLevel;
+  source: string;
+  message: string;
+  diff?: string;
+  filePath?: string;
+  patchId?: string;
+}>;
+
+export type EventLogFilter = Readonly<{
+  levels?: readonly EventLogLevel[];
+  sources?: readonly string[];
+  searchText?: string;
+  hasDiffOnly?: boolean;
+  since?: number;
+  until?: number;
+}>;
+
+export type EventLogResult =
+  | Readonly<{ status: 'ok'; entries: readonly EventLogEntry[]; total: number }>
+  | Readonly<{ status: 'error'; code: 'UNKNOWN'; message: string }>;
+
+// ?? Phase 7: Permission Broker types ???????????????????????????????????????
+
+export type ToolRiskLevel = 'read-only' | 'low' | 'medium' | 'high' | 'critical';
+
+export type ToolName =
+  | 'readFile'
+  | 'searchFiles'
+  | 'listDirectory'
+  | 'proposePatch'
+  | 'applyPatch'
+  | 'deleteFile'
+  | 'renameFile'
+  | 'writeFile';
+
+export type ToolClassification = Readonly<{
+  name: ToolName;
+  riskLevel: ToolRiskLevel;
+  requiresApproval: boolean;
+  description: string;
+}>;
+
+export type ToolCallRequest = Readonly<{
+  callId: string;
+  toolName: ToolName;
+  args: Record<string, unknown>;
+  session?: string;
+}>;
+
+export type ToolCallResponse =
+  | Readonly<{
+      status: 'ok';
+      callId: string;
+      result: unknown;
+    }>
+  | Readonly<{
+      status: 'pending-approval';
+      callId: string;
+      classification: ToolClassification;
+      expiresAt: number;
+    }>
+  | Readonly<{
+      status: 'error';
+      callId: string;
+      code: 'TOOL_NOT_FOUND' | 'ACCESS_DENIED' | 'TIMEOUT' | 'WRITE_CONFLICT' | 'UNKNOWN';
+      message: string;
+      conflict?: Conflict;
+    }>
+  | Readonly<{
+      status: 'denied';
+      callId: string;
+      reason: string;
+    }>;
+
+export type ApprovalDecision = Readonly<{
+  callId: string;
+  approved: boolean;
+  remember?: boolean;
+}>;
+
+// ?? Phase 7: Patch model types ??????????????????????????????????????????????
+
+export type PatchOperation = Readonly<{
+  filePath: string;
+  range?: Readonly<{
+    startLine: number;
+    startCol: number;
+    endLine: number;
+    endCol: number;
+  }>;
+  text: string;
+  /** Snapshot of lines immediately before the range (from base content at patch creation time). */
+  contextBefore?: readonly string[];
+  /** Snapshot of lines immediately after the range (from base content at patch creation time). */
+  contextAfter?: readonly string[];
+}>;
+
+export type PatchSet = Readonly<{
+  id: string;
+  filePath: string;
+  baseHash: string;
+  operations: readonly PatchOperation[];
+  author: string;
+  riskLevel: ToolRiskLevel;
+  createdAt: number;
+}>;
+
+export type PatchResult =
+  | Readonly<{ status: 'ok'; patchId: string; appliedHash: string }>
+  | Readonly<{ status: 'ok'; patchId: string; appliedHash: string; autoMerged: true }>
+  | Readonly<{ status: 'error'; code: 'CONFLICT' | 'FILE_NOT_FOUND' | 'ACCESS_DENIED' | 'UNKNOWN'; message: string }>;
+
+// ?? Phase 7: Conflict Broker types ?????????????????????????????????????????
+
+export type ConflictKind = 'patch-conflict' | 'delete' | 'rename' | 'binary' | 'multi-file' | 'high-risk';
+
+export type Conflict = Readonly<{
+  id: string;
+  kind: ConflictKind;
+  patchId: string;
+  filePath: string;
+  description: string;
+  riskLevel: ToolRiskLevel;
+  createdAt: number;
+}>;
+
+export type ConflictResolution =
+  | Readonly<{ conflictId: string; action: 'apply' }>
+  | Readonly<{ conflictId: string; action: 'skip' }>
+  | Readonly<{ conflictId: string; action: 'edit'; operations: readonly PatchOperation[] }>;
+
+export type FileHashResult =
+  | Readonly<{ status: 'ok'; hash: string }>
+  | Readonly<{ status: 'error'; code: 'FILE_NOT_FOUND' | 'ACCESS_DENIED' | 'UNKNOWN'; message: string }>;
+
+export type SensitivePathCheckResult = Readonly<{
+  filePath: string;
+  isSensitive: boolean;
+  matchedPattern?: string;
+}>;
 
 // ?? Model Gateway guards ??????????????????????????????????????????????????
 
@@ -933,15 +1334,21 @@ export function isChatMessage(value: unknown): value is ChatMessage {
 
 export function isChatTabState(value: unknown): value is ChatTabState {
   if (!isRecord(value)) return false;
-  return (
-    typeof value.id === 'string' &&
-    typeof value.title === 'string' &&
-    Array.isArray(value.messages) &&
-    value.messages.every(isChatMessage) &&
-    typeof value.activeModel === 'string' &&
-    isModelProviderId(value.activeProvider) &&
-    typeof value.isStreaming === 'boolean'
-  );
+  if (
+    typeof value.id !== 'string' ||
+    typeof value.title !== 'string' ||
+    !Array.isArray(value.messages) ||
+    !value.messages.every(isChatMessage) ||
+    typeof value.activeModel !== 'string' ||
+    !isModelProviderId(value.activeProvider) ||
+    typeof value.isStreaming !== 'boolean'
+  ) {
+    return false;
+  }
+  if (value.runtimeSessionId !== undefined && typeof value.runtimeSessionId !== 'string') return false;
+  if (value.runtimeWorkerId !== undefined && typeof value.runtimeWorkerId !== 'string') return false;
+  if (value.error !== undefined && typeof value.error !== 'string') return false;
+  return true;
 }
 
 export function isChatStreamEvent(value: unknown): value is ChatStreamEvent {
@@ -966,6 +1373,18 @@ export function isSendMessageResult(value: unknown): value is SendMessageResult 
   );
 }
 
+export function isEventLogResult(value: unknown): value is EventLogResult {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') {
+    return Array.isArray(value.entries) && typeof value.total === 'number';
+  }
+  return (
+    value.status === 'error' &&
+    typeof value.code === 'string' &&
+    typeof value.message === 'string'
+  );
+}
+
 export function isModelProviderConfig(value: unknown): value is ModelProviderConfig {
   if (!isRecord(value)) return false;
   return typeof value.baseUrl === 'string' && typeof value.hasApiKey === 'boolean';
@@ -979,13 +1398,9 @@ export function isTestConnectionResult(value: unknown): value is TestConnectionR
   return value.status === 'error' && typeof value.message === 'string';
 }
 
-// ?? Phase 7: Tool Router / Permission Broker guards ????????????????????????
-
-
-
-const TOOL_RISK_LEVELS = new Set<string>(['read-only', 'low', 'medium', 'high', 'critical']);
 const TOOL_NAMES = new Set<string>(['readFile', 'searchFiles', 'listDirectory', 'proposePatch', 'applyPatch', 'deleteFile', 'renameFile', 'writeFile']);
 const TOOL_CALL_ERROR_CODES = new Set<string>(['TOOL_NOT_FOUND', 'ACCESS_DENIED', 'TIMEOUT', 'WRITE_CONFLICT', 'UNKNOWN']);
+const TOOL_RISK_LEVELS = new Set<string>(['read-only', 'low', 'medium', 'high', 'critical']);
 
 export function isToolRiskLevel(value: unknown): value is ToolRiskLevel {
   return typeof value === 'string' && TOOL_RISK_LEVELS.has(value);
@@ -1122,4 +1537,163 @@ export function isSensitivePathCheckResult(value: unknown): value is SensitivePa
     typeof value.filePath === 'string' &&
     typeof value.isSensitive === 'boolean'
   );
+}
+
+const AGENT_RUNTIME_PERMISSION_KINDS = new Set<string>(['parent', 'subagent']);
+const AGENT_RUNTIME_WORKER_STATUSES = new Set<string>(['idle', 'running', 'stopping', 'stopped', 'crashed']);
+const AGENT_RUNTIME_TASK_STATUSES = new Set<string>(['pending', 'running', 'completed', 'cancelled', 'failed']);
+const AGENT_RUNTIME_EVENT_TYPES = new Set<string>(['session-created', 'session-stopped', 'worker-started', 'worker-stopped', 'worker-crashed', 'worker-resumed', 'task-created', 'task-updated', 'task-completed', 'task-failed', 'task-cancelled']);
+const AGENT_RUNTIME_SESSION_STATUSES = new Set<string>(['active', 'crashed', 'stopped']);
+
+export function isAgentRuntimeResult<T>(value: unknown, valueGuard?: (value: unknown) => value is T): value is AgentRuntimeResult<T> {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') {
+    return valueGuard === undefined || valueGuard(value.value);
+  }
+  return (
+    value.status === 'error' &&
+    typeof value.code === 'string' &&
+    ['SESSION_NOT_FOUND', 'WORKER_NOT_FOUND', 'INVALID_SCOPE', 'TASK_NOT_FOUND', 'ALREADY_RUNNING', 'UNKNOWN'].includes(value.code) &&
+    typeof value.message === 'string'
+  );
+}
+
+export function isAgentRuntimePermissionScope(value: unknown): value is AgentRuntimePermissionScope {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.sessionId === 'string' &&
+    typeof value.taskId === 'string' &&
+    typeof value.kind === 'string' && AGENT_RUNTIME_PERMISSION_KINDS.has(value.kind) &&
+    Array.isArray(value.allowedTools) &&
+    value.allowedTools.every(tool => typeof tool === 'string')
+  );
+}
+
+export function isAgentRuntimeWorkerOutput(value: unknown): value is AgentRuntimeWorkerOutput {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.summary === 'string' &&
+    Array.isArray(value.references) &&
+    value.references.every(reference => typeof reference === 'string') &&
+    Array.isArray(value.toolsUsed) &&
+    value.toolsUsed.every(tool => typeof tool === 'string')
+  );
+}
+
+export function isAgentRuntimeWorkerState(value: unknown): value is AgentRuntimeWorkerState {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.id !== 'string' ||
+    typeof value.sessionId !== 'string' ||
+    typeof value.taskId !== 'string' ||
+    typeof value.status !== 'string' || !AGENT_RUNTIME_WORKER_STATUSES.has(value.status) ||
+    typeof value.attempt !== 'number' ||
+    typeof value.maxRetries !== 'number'
+  ) {
+    return false;
+  }
+  if (value.lastError !== undefined && typeof value.lastError !== 'string') return false;
+  if (value.startedAt !== undefined && typeof value.startedAt !== 'number') return false;
+  if (value.stoppedAt !== undefined && typeof value.stoppedAt !== 'number') return false;
+  if (value.output !== undefined && !isAgentRuntimeWorkerOutput(value.output)) return false;
+  return true;
+}
+
+export function isAgentRuntimeTaskState(value: unknown): value is AgentRuntimeTaskState {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.id !== 'string' ||
+    typeof value.sessionId !== 'string' ||
+    typeof value.agentName !== 'string' ||
+    typeof value.modelId !== 'string' ||
+    typeof value.prompt !== 'string' ||
+    typeof value.status !== 'string' || !AGENT_RUNTIME_TASK_STATUSES.has(value.status) ||
+    !isAgentRuntimePermissionScope(value.permissionScope) ||
+    !Array.isArray(value.context) ||
+    !value.context.every(item => typeof item === 'string') ||
+    !Array.isArray(value.toolsUsed) ||
+    !value.toolsUsed.every(item => typeof item === 'string') ||
+    typeof value.createdAt !== 'number' ||
+    typeof value.updatedAt !== 'number'
+  ) {
+    return false;
+  }
+  if (value.parentTaskId !== undefined && typeof value.parentTaskId !== 'string') return false;
+  if (value.result !== undefined && !isAgentRuntimeWorkerOutput(value.result)) return false;
+  if (value.error !== undefined && typeof value.error !== 'string') return false;
+  return true;
+}
+
+export function isAgentRuntimeEventEntry(value: unknown): value is AgentRuntimeEventEntry {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.id !== 'string' ||
+    typeof value.sessionId !== 'string' ||
+    typeof value.type !== 'string' || !AGENT_RUNTIME_EVENT_TYPES.has(value.type) ||
+    typeof value.message !== 'string' ||
+    typeof value.timestamp !== 'number'
+  ) {
+    return false;
+  }
+  if (value.taskId !== undefined && typeof value.taskId !== 'string') return false;
+  if (value.workerId !== undefined && typeof value.workerId !== 'string') return false;
+  return true;
+}
+
+export function isAgentRuntimeSessionState(value: unknown): value is AgentRuntimeSessionState {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.id !== 'string' ||
+    typeof value.chatTabId !== 'string' ||
+    typeof value.modelId !== 'string' ||
+    typeof value.agentName !== 'string' ||
+    typeof value.status !== 'string' || !AGENT_RUNTIME_SESSION_STATUSES.has(value.status) ||
+    !isAgentRuntimePermissionScope(value.permissionScope) ||
+    !Array.isArray(value.context) ||
+    !value.context.every(item => typeof item === 'string') ||
+    !Array.isArray(value.eventLog) ||
+    !value.eventLog.every(isAgentRuntimeEventEntry) ||
+    !Array.isArray(value.workers) ||
+    !value.workers.every(isAgentRuntimeWorkerState) ||
+    !Array.isArray(value.tasks) ||
+    !value.tasks.every(isAgentRuntimeTaskState)
+  ) {
+    return false;
+  }
+  if (value.resumeToken !== undefined && typeof value.resumeToken !== 'string') return false;
+  return true;
+}
+
+export function isAgentRuntimeStartWorkerOptions(value: unknown): value is AgentRuntimeStartWorkerOptions {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.sessionId !== 'string' ||
+    typeof value.taskId !== 'string' ||
+    typeof value.prompt !== 'string'
+  ) {
+    return false;
+  }
+  if (value.context !== undefined && (!Array.isArray(value.context) || !value.context.every(item => typeof item === 'string'))) return false;
+  if (value.allowedTools !== undefined && (!Array.isArray(value.allowedTools) || !value.allowedTools.every(item => typeof item === 'string'))) return false;
+  return true;
+}
+
+export function isAgentRuntimeStartSubagentOptions(value: unknown): value is AgentRuntimeStartSubagentOptions {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.sessionId !== 'string' ||
+    typeof value.name !== 'string' ||
+    typeof value.goal !== 'string' ||
+    typeof value.modelId !== 'string'
+  ) {
+    return false;
+  }
+  if (value.context !== undefined && (!Array.isArray(value.context) || !value.context.every(item => typeof item === 'string'))) return false;
+  if (value.allowedTools !== undefined && (!Array.isArray(value.allowedTools) || !value.allowedTools.every(item => typeof item === 'string'))) return false;
+  if (value.parentTaskId !== undefined && typeof value.parentTaskId !== 'string') return false;
+  return true;
+}
+
+export function isAgentRuntimeResumeOptions(value: unknown): value is AgentRuntimeResumeOptions {
+  return isRecord(value) && typeof value.sessionId === 'string' && typeof value.workerId === 'string';
 }

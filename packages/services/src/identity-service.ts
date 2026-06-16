@@ -3,7 +3,8 @@ import { randomBytes } from 'node:crypto';
 import { writeFile, readFile, mkdir, chmod } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import type { IdentitySession } from '@agentdeck/shared';
+import type { IdentitySession, ModelProviderId } from '@agentdeck/shared';
+import { isModelProviderId } from '@agentdeck/shared';
 
 function buildProfile(profile: Record<string, unknown>): NonNullable<IdentitySession['profile']> {
   const login = profile.login;
@@ -130,6 +131,24 @@ export class IdentityService {
         : createDefaultSecureStore(this.userDataPath, this.options.onFallbackWarning);
     }
     return this.secureStorePromise;
+  }
+
+  async getModelApiKey(providerId: ModelProviderId): Promise<string | null> {
+    if (!isModelProviderId(providerId)) return null;
+    const store = await this.getSecureStore();
+    return store.getPassword('agentdeck', `api-key-${providerId}`);
+  }
+
+  async setModelApiKey(providerId: ModelProviderId, apiKey: string): Promise<void> {
+    if (!isModelProviderId(providerId)) return;
+    const store = await this.getSecureStore();
+    await store.setPassword('agentdeck', `api-key-${providerId}`, apiKey);
+  }
+
+  async deleteModelApiKey(providerId: ModelProviderId): Promise<void> {
+    if (!isModelProviderId(providerId)) return;
+    const store = await this.getSecureStore();
+    await store.deletePassword('agentdeck', `api-key-${providerId}`);
   }
 
   private async openUrl(url: string) {

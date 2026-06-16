@@ -73,7 +73,7 @@ function createTab(overrides: Partial<ChatTabState> = {}): ChatTabState {
   };
 }
 
-describe('ChatPanel — Model Configuration', () => {
+describe('ChatPanel ÔÇö Model Configuration', () => {
   it('renders model config toggle button', async () => {
     const agent = createMockAgent();
     const tab = createTab();
@@ -293,6 +293,53 @@ describe('ChatPanel — Model Configuration', () => {
     expect(testBtn).toBeDisabled();
   });
 
+  it('preserves saved API key mask after successful connection test refreshes models', async () => {
+    const user = userEvent.setup();
+    const agent = createMockAgent({
+      getModelGatewayConfig: vi.fn()
+        .mockResolvedValueOnce({
+          providers: [
+            { id: 'ollama', label: 'Ollama', status: 'ready', baseUrl: 'http://localhost:11434', models: [
+              { id: 'llama2', name: 'Llama 2', provider: 'ollama', contextWindow: 4096, supportsTools: false, supportsStreaming: true, supportsEmbeddings: false }
+            ]},
+            { id: 'openrouter', label: 'OpenRouter', status: 'idle', baseUrl: 'https://openrouter.ai/api/v1', models: [] }
+          ],
+          activeProvider: 'openrouter',
+          activeModel: 'default'
+        })
+        .mockResolvedValueOnce({
+          providers: [
+            { id: 'ollama', label: 'Ollama', status: 'ready', baseUrl: 'http://localhost:11434', models: [
+              { id: 'llama2', name: 'Llama 2', provider: 'ollama', contextWindow: 4096, supportsTools: false, supportsStreaming: true, supportsEmbeddings: false }
+            ]},
+            { id: 'openrouter', label: 'OpenRouter', status: 'ready', baseUrl: 'https://openrouter.ai/api/v1', models: [
+              { id: 'openai/gpt-4.1-mini', name: 'GPT-4.1 Mini', provider: 'openrouter', contextWindow: 1047576, supportsTools: true, supportsStreaming: true, supportsEmbeddings: false }
+            ]}
+          ],
+          activeProvider: 'openrouter',
+          activeModel: 'default'
+        }),
+      getProviderConfig: vi.fn().mockResolvedValue({ baseUrl: 'https://openrouter.ai/api/v1', hasApiKey: true }),
+      setProviderConfig: vi.fn().mockResolvedValue(undefined),
+      testConnection: vi.fn().mockResolvedValue({ status: 'ok' })
+    } as Partial<AgentDeckPreloadApi>);
+    const tab = createTab({ activeProvider: 'openrouter', activeModel: 'default' });
+
+    render(<ChatPanel agent={agent} tab={tab} />);
+
+    await user.click(screen.getByRole('button', { name: /show model configuration/i }));
+
+    const apiKeyInput = screen.getByLabelText('API Key') as HTMLInputElement;
+    await waitFor(() => expect(apiKeyInput.value).toBe('ÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇó'));
+
+    const testBtn = screen.getByRole('button', { name: /test connection/i });
+    await user.click(testBtn);
+
+    await waitFor(() => expect(agent.getModelGatewayConfig).toHaveBeenCalledTimes(2), { timeout: 2500 });
+    expect(apiKeyInput.value).toBe('ÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇó');
+    expect(agent.getProviderConfig).toHaveBeenCalledWith('openrouter');
+  });
+
   it('calls testConnection when test button is clicked with URL', async () => {
     const user = userEvent.setup();
     const agent = createMockAgent({
@@ -356,7 +403,7 @@ describe('ChatPanel — Model Configuration', () => {
     await waitFor(() => expect(saveBtn).toBeEnabled());
     await user.click(saveBtn);
 
-    // Now delete button should be enabled (key is '••••••••' after save)
+    // Now delete button should be enabled (key is 'ÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇó' after save)
     const deleteBtn = screen.getByRole('button', { name: /delete api key/i });
     await user.click(deleteBtn);
 
@@ -458,7 +505,7 @@ describe('ChatPanel — Model Configuration', () => {
 
     const urlInput = screen.getByLabelText('API URL');
     await user.clear(urlInput);
-    await user.type(urlInput, 'http://custom:8080');
+    await user.type(urlInput, 'https://custom.example.test:8080');
 
     const saveUrlBtn = screen.getByRole('button', { name: /save api url/i });
     await waitFor(() => expect(saveUrlBtn).toBeEnabled());
@@ -478,13 +525,13 @@ describe('ChatPanel — Model Configuration', () => {
 
     const urlInput = screen.getByLabelText('API URL');
     await user.clear(urlInput);
-    await user.type(urlInput, 'http://custom:8080');
+    await user.type(urlInput, 'https://custom.example.test:8080');
 
     const saveUrlBtn = screen.getByRole('button', { name: /save api url/i });
     await waitFor(() => expect(saveUrlBtn).toBeEnabled());
     await user.click(saveUrlBtn);
 
-    expect(agent.setProviderConfig).toHaveBeenCalledWith('ollama', 'http://custom:8080');
+    expect(agent.setProviderConfig).toHaveBeenCalledWith('ollama', 'https://custom.example.test:8080');
   });
 
   it('disables save URL button after saving', async () => {
@@ -502,7 +549,7 @@ describe('ChatPanel — Model Configuration', () => {
     // Change URL
     const urlInput = screen.getByLabelText('API URL');
     await user.clear(urlInput);
-    await user.type(urlInput, 'http://custom:8080');
+    await user.type(urlInput, 'https://custom.example.test:8080');
 
     // Save
     const saveUrlBtn = screen.getByRole('button', { name: /save api url/i });
@@ -529,15 +576,15 @@ describe('ChatPanel — Model Configuration', () => {
     // Change URL
     const urlInput = screen.getByLabelText('API URL');
     await user.clear(urlInput);
-    await user.type(urlInput, 'http://custom:8080');
+    await user.type(urlInput, 'https://custom.example.test:8080');
 
     // Click test
     const testBtn = screen.getByRole('button', { name: /test connection/i });
     await user.click(testBtn);
 
     // setProviderConfig should be called before testConnection
-    expect(agent.setProviderConfig).toHaveBeenCalledWith('ollama', 'http://custom:8080');
-    expect(agent.testConnection).toHaveBeenCalledWith('ollama', 'http://custom:8080');
+    expect(agent.setProviderConfig).toHaveBeenCalledWith('ollama', 'https://custom.example.test:8080');
+    expect(agent.testConnection).toHaveBeenCalledWith('ollama', 'https://custom.example.test:8080');
 
     // Verify call order: setProviderConfig before testConnection
     const setCallOrder = (agent.setProviderConfig as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;

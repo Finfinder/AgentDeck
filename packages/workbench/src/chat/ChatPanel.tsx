@@ -37,45 +37,47 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Fetch gateway config on mount
-  useEffect(() => {
-    agent.getModelGatewayConfig().then(setConfig).catch(() => {});
+  const fetchProviderConfigs = useCallback(async (
+    nextConfig: ModelGatewayConfig,
+    currentConfigs: Record<string, ProviderConfigState>
+  ): Promise<Record<string, ProviderConfigState>> => {
+    const configs: Record<string, ProviderConfigState> = {};
+    const initial: Record<string, string> = {};
+
+    for (const provider of nextConfig.providers) {
+      const providerConfig = await agent.getProviderConfig?.(provider.id) ?? { baseUrl: '', hasApiKey: false };
+      const existing = currentConfigs[provider.id];
+
+      configs[provider.id] = {
+        baseUrl: providerConfig.baseUrl,
+        apiKey: providerConfig.hasApiKey ? 'ÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇó' : (existing?.apiKey ?? ''),
+        showApiKey: existing?.showApiKey ?? false,
+        testing: existing?.testing ?? false,
+        testResult: existing?.testResult ?? null
+      };
+      initial[provider.id] = providerConfig.baseUrl;
+    }
+
+    savedUrlsRef.current = initial;
+    return configs;
   }, [agent]);
 
-  // Fetch provider configs (base URL, API key status) for all providers
+  const loadProviderConfigs = useCallback(async (
+    nextConfig: ModelGatewayConfig,
+    currentConfigs: Record<string, ProviderConfigState>
+  ): Promise<void> => {
+    setProviderConfigs(await fetchProviderConfigs(nextConfig, currentConfigs));
+  }, [fetchProviderConfigs]);
+
+  // Fetch gateway config on mount
   useEffect(() => {
-    if (!config) return;
-    const fetchConfigs = async () => {
-      const configs: Record<string, ProviderConfigState> = {};
-      for (const provider of config.providers) {
-        const providerConfig = await agent.getProviderConfig?.(provider.id) ?? { baseUrl: '', hasApiKey: false };
-        const hasApiKey = providerConfig.hasApiKey;
-        configs[provider.id] = {
-          baseUrl: providerConfig.baseUrl,
-          apiKey: '',
-          showApiKey: false,
-          testing: false,
-          testResult: null
-        };
-        // Check if API key exists (don't fetch the actual key)
-        if (hasApiKey) {
-          const entry = configs[provider.id];
-          if (entry) entry.apiKey = '••••••••';
-        }
-      }
-      setProviderConfigs(configs);
-      // Initialize saved URLs from fetched configs
-      const initial: Record<string, string> = {};
-      for (const provider of config.providers) {
-        const pc = await agent.getProviderConfig?.(provider.id);
-        if (pc) {
-          initial[provider.id] = pc.baseUrl;
-        }
-      }
-      savedUrlsRef.current = initial;
-    };
-    fetchConfigs().catch(() => {});
-  }, [agent, config]);
+    agent.getModelGatewayConfig()
+      .then(async (gatewayConfig) => {
+        setConfig(gatewayConfig);
+        await loadProviderConfigs(gatewayConfig, {});
+      })
+      .catch(() => {});
+  }, [agent, loadProviderConfigs]);
 
   // Sync messages from store
   useEffect(() => {
@@ -116,7 +118,7 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
   // The gateway emits tabs-changed BEFORE done/error, so by the time
   // tabs-changed arrives, tab.messages already contains the new assistant
   // message. We sync localMessages immediately and let the done/error
-  // stream event clear the streaming state — no duplication occurs.
+  // stream event clear the streaming state ÔÇö no duplication occurs.
   useEffect(() => {
     if (!agent.onChatTabsChange) return;
 
@@ -220,11 +222,11 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
 
   const handleSaveApiKey = useCallback(async () => {
     const cfg = providerConfigs[tab.activeProvider];
-    if (!cfg?.apiKey || cfg.apiKey === '••••••••') return;
+    if (!cfg?.apiKey || cfg.apiKey === 'ÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇó') return;
     await agent.setApiKey?.(tab.activeProvider, cfg.apiKey);
     setProviderConfigs(prev => ({
       ...prev,
-      [tab.activeProvider]: { ...(prev[tab.activeProvider] ?? { baseUrl: '', apiKey: '', showApiKey: false, testing: false, testResult: null }), apiKey: '••••••••' }
+      [tab.activeProvider]: { ...(prev[tab.activeProvider] ?? { baseUrl: '', apiKey: '', showApiKey: false, testing: false, testResult: null }), apiKey: 'ÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇó' }
     }));
   }, [agent, tab.activeProvider, providerConfigs]);
 
@@ -263,17 +265,18 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
       await new Promise(resolve => setTimeout(resolve, 1500 - elapsed));
     }
 
-    // Refresh gateway config to get updated models list
+    // Refresh gateway config to get updated models list and provider key status
     if (result.status === 'ok') {
       const freshConfig = await agent.getModelGatewayConfig();
       setConfig(freshConfig);
+      await loadProviderConfigs(freshConfig, providerConfigs);
     }
 
     setProviderConfigs(prev => ({
       ...prev,
       [tab.activeProvider]: { ...(prev[tab.activeProvider] ?? { baseUrl: '', apiKey: '', showApiKey: false, testing: false, testResult: null }), testing: false, testResult: result }
     }));
-  }, [agent, tab.activeProvider, providerConfigs]);
+  }, [agent, loadProviderConfigs, providerConfigs, tab.activeProvider]);
 
   const handleToggleApiKeyVisibility = useCallback(() => {
     setProviderConfigs(prev => ({
@@ -304,7 +307,10 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
 
   const handleStop = useCallback(async () => {
     await agent.stopStreaming(tab.id);
-  }, [agent, tab.id]);
+    if (tab.runtimeWorkerId) {
+      await agent.stopAgentRuntimeWorker?.(tab.runtimeWorkerId);
+    }
+  }, [agent, tab.id, tab.runtimeWorkerId]);
 
   return (
     <div className="chat-panel" role="tabpanel" aria-label={`Chat: ${tab.title}`}>
@@ -317,7 +323,7 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
           aria-label={showConfig ? 'Hide model configuration' : 'Show model configuration'}
           title="Model configuration"
         >
-          {showConfig ? '▼' : '▶'} Model
+          {showConfig ? 'Ôľ╝' : 'ÔľÂ'} Model
         </button>
         <span className="chat-config-summary">
           {currentProvider?.label ?? 'Unknown'} / {tab.activeModel}
@@ -394,7 +400,7 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
                 aria-label="Save API URL"
                 title="Save API URL"
               >
-                {savingProviders[tab.activeProvider] ? '⏳' : '💾'}
+                {savingProviders[tab.activeProvider] ? 'ÔĆ│' : '­čĺż'}
               </button>
             </div>
           </div>
@@ -423,7 +429,7 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
                 aria-label={currentConfig.showApiKey ? 'Hide API key' : 'Show API key'}
                 title={currentConfig.showApiKey ? 'Hide' : 'Show'}
               >
-                {currentConfig.showApiKey ? '🙈' : '👁'}
+                {currentConfig.showApiKey ? '­čÖł' : '­čĹü'}
               </button>
               <button
                 className="chat-config-icon-btn"
@@ -431,9 +437,9 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
                 onClick={handleSaveApiKey}
                 aria-label="Save API key"
                 title="Save API key securely"
-                disabled={tab.isStreaming || !currentConfig.apiKey || currentConfig.apiKey === '••••••••'}
+                disabled={tab.isStreaming || !currentConfig.apiKey || currentConfig.apiKey === 'ÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇó'}
               >
-                💾
+                ­čĺż
               </button>
               <button
                 className="chat-config-icon-btn chat-config-icon-btn-danger"
@@ -443,7 +449,7 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
                 title="Delete stored API key"
                 disabled={tab.isStreaming || !currentConfig.apiKey}
               >
-                🗑
+                ­čŚĹ
               </button>
             </div>
           </div>
@@ -462,11 +468,11 @@ export function ChatPanel({ agent, tab }: ChatPanelProps) {
                 aria-label="Test connection"
                 aria-busy={currentConfig.testing}
               >
-                {currentConfig.testing ? '⏳ Testing...' : 'Test Connection'}
+                {currentConfig.testing ? 'ÔĆ│ Testing...' : 'Test Connection'}
               </button>
               {currentConfig.testResult && !currentConfig.testing && (
                 <span className={`chat-config-test-result ${currentConfig.testResult.status === 'ok' ? 'test-ok' : 'test-error'}`} role="status">
-                  {currentConfig.testResult.status === 'ok' ? '✓ Connected' : `✗ ${currentConfig.testResult.message ?? 'Failed'}`}
+                  {currentConfig.testResult.status === 'ok' ? 'Ôťô Connected' : `ÔťŚ ${currentConfig.testResult.message ?? 'Failed'}`}
                 </span>
               )}
             </div>

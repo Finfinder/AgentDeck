@@ -1,9 +1,9 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '@agentdeck/workbench';
-import { DEFAULT_THEME_SETTINGS, type AgentDeckPreloadApi } from '@agentdeck/shared';
+import { DEFAULT_THEME_SETTINGS, type AgentDeckPreloadApi, type AgentRuntimeEventEntry, type AgentRuntimeSessionState, type AgentRuntimeTaskState, type AgentRuntimeWorkerState } from '@agentdeck/shared';
 
 function mockPreloadApi(overrides: Partial<AgentDeckPreloadApi> = {}): AgentDeckPreloadApi {
   return {
@@ -274,6 +274,123 @@ describe('App startup services', () => {
     await act(async () => { render(<App />); });
 
     expect(await screen.findByRole('status', { name: 'Startup state' })).toHaveTextContent('Ready');
+  });
+});
+
+describe('App Agent Runtime panels', () => {
+  beforeEach(() => {
+    setAgentDeck(mockPreloadApi());
+  });
+
+  it('renders Task Activity panel with tools used by runtime tasks', async () => {
+    const task: AgentRuntimeTaskState = {
+      id: 'task-1',
+      sessionId: 'session-1',
+      kind: 'chat',
+      agentName: 'test-agent',
+      modelId: 'default',
+      prompt: 'Analyze the workspace',
+      status: 'completed',
+      permissionScope: {
+        sessionId: 'session-1',
+        taskId: 'task-1',
+        kind: 'parent',
+        allowedTools: ['mcp.filesystem.read']
+      },
+      context: [],
+      toolsUsed: ['mcp.filesystem.read'],
+      createdAt: 1710000000000,
+      updatedAt: 1710000001000,
+      result: {
+        summary: 'Workspace analyzed.',
+        references: ['README.md'],
+        toolsUsed: ['mcp.filesystem.read']
+      }
+    };
+    const listAgentRuntimeTasks = vi.fn().mockResolvedValue([task]);
+    const onAgentRuntimeTaskChanged = vi.fn().mockReturnValue(() => undefined);
+
+    setAgentDeck(mockPreloadApi({ listAgentRuntimeTasks, onAgentRuntimeTaskChanged }));
+    await act(async () => { render(<App />); });
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Task Activity' }));
+
+    expect(listAgentRuntimeTasks).toHaveBeenCalled();
+    expect(await screen.findByRole('heading', { name: 'Task Activity' })).toBeInTheDocument();
+    expect(screen.getByText('test-agent (chat)')).toBeInTheDocument();
+    expect(screen.getByText('Tools used: mcp.filesystem.read')).toBeInTheDocument();
+    expect(screen.getByText('Worker tools: mcp.filesystem.read')).toBeInTheDocument();
+  });
+});
+
+describe('App Agent Runtime crash notifications', () => {
+  beforeEach(() => {
+    setAgentDeck(mockPreloadApi());
+  });
+
+  it('shows crash notification and event log when session crash event is emitted', async () => {
+    let crashHandler: ((session: AgentRuntimeSessionState, error: { message: string }) => void) | null = null;
+    const runtimeEvent: AgentRuntimeEventEntry = {
+      id: 'evt-crash-1',
+      sessionId: 'session-1',
+      taskId: 'task-1',
+      workerId: 'worker-1',
+      type: 'worker-crashed',
+      message: 'Worker failed after timeout',
+      timestamp: 1710000000000
+    };
+    const crashedWorker: AgentRuntimeWorkerState = {
+      id: 'worker-1',
+      sessionId: 'session-1',
+      taskId: 'task-1',
+      status: 'crashed',
+      attempt: 1,
+      maxRetries: 2,
+      lastError: 'Worker failed after timeout',
+      startedAt: 1710000000000,
+      stoppedAt: 1710000001000
+    };
+    const crashedSession: AgentRuntimeSessionState = {
+      id: 'session-1',
+      chatTabId: 'tab-1',
+      modelId: 'default',
+      agentName: 'test-agent',
+      status: 'crashed',
+      permissionScope: {
+        sessionId: 'session-1',
+        taskId: 'task-1',
+        kind: 'parent',
+        allowedTools: []
+      },
+      context: [],
+      eventLog: [runtimeEvent],
+      workers: [crashedWorker],
+      tasks: []
+    };
+    const onAgentRuntimeSessionCrashed = vi.fn().mockImplementation((handler: (session: AgentRuntimeSessionState, error: { message: string }) => void) => {
+      crashHandler = handler;
+      return () => undefined;
+    });
+
+    setAgentDeck(mockPreloadApi({ onAgentRuntimeSessionCrashed }));
+    await act(async () => { render(<App />); });
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Workers' }));
+
+    expect(onAgentRuntimeSessionCrashed).toHaveBeenCalled();
+    expect(crashHandler).toBeTruthy();
+
+    await act(async () => {
+      crashHandler!({
+        ...crashedSession,
+        workers: [{ ...crashedWorker, lastError: 'Session crashed after timeout' }]
+      }, { message: 'Session crashed after timeout' });
+    });
+
+    const crashBanner = await screen.findByRole('alert', { name: 'Agent Runtime worker crashed' });
+    expect(within(crashBanner).getByText('Worker failed after timeout')).toBeInTheDocument();
+    expect(within(crashBanner).getByText('Worker: worker-1')).toBeInTheDocument();
+    expect(screen.getByLabelText('Agent Runtime event log')).toBeInTheDocument();
   });
 });
 
