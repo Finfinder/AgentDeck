@@ -1264,7 +1264,11 @@ function addReference(references: string[] | Set<string>, reference: string): vo
 }
 
 function collectReferencesFromMarkdownLinks(content: string, references: Set<string>): void {
-  const markdownLinkPattern = /\[([^\]]+)\]\(([^)]+)\)/g;
+  // Guard against excessively long input to prevent potential ReDoS
+  if (content.length > 100_000) return;
+
+  // Use a non-backtracking pattern: negated character classes are deterministic
+  const markdownLinkPattern = /\[([^\]]{1,500})\]\(([^)]{1,2000})\)/g;
   let match: RegExpExecArray | null;
 
   while ((match = markdownLinkPattern.exec(content)) !== null) {
