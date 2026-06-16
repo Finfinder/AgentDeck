@@ -205,7 +205,7 @@ describe('EventLogPanel — coverage', () => {
       await waitFor(() => { expect(screen.getByText('Event Log')).toBeDefined(); });
 
       // The first event has a diff, so "Pokaż diff" button should be present
-      expect(screen.getByText('Pokaż diff')).toBeDefined();
+      expect(await screen.findByText('Pokaż diff')).toBeDefined();
     });
 
     it('does not render diff button for entries without diff', async () => {

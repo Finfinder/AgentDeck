@@ -10,7 +10,7 @@ import { MenuBar } from './MenuBar';
 import { ProblemsPanel } from './ProblemsPanel';
 import { SidebarContent } from './SidebarContent';
 
-type BottomPanelName = 'problems' | 'services' | 'workers' | 'task-activity' | 'output';
+type BottomPanelName = 'problems' | 'services' | 'workers' | 'task-activity' | 'output' | 'event-log';
 
 const STARTUP_STATE_READ_ERROR_MESSAGE = 'Unable to read startup state.';
 const THEME_SETTINGS_READ_ERROR_MESSAGE = 'Unable to read theme settings.';
@@ -614,6 +614,9 @@ export function App() {
   const [runtimeCrash, setRuntimeCrash] = useState<RuntimeCrashNotification | null>(null);
   const [runtimeEventLog, setRuntimeEventLog] = useState<readonly AgentRuntimeEventEntry[]>([]);
   const [permissionPrompts, setPermissionPrompts] = useState<readonly PermissionDecision[]>([]);
+  // ?? Phase 7: Tool approval state ????????????????????????????????????????
+  const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
+  const [pendingPatchConflict, setPendingPatchConflict] = useState<PatchConflict | null>(null);
   const handleRuntimeCrash = useCallback((session: AgentRuntimeSessionState, error: { message: string }) => {
     const latestMessage = getLatestCrashMessage(session) ?? error.message;
 
@@ -655,6 +658,61 @@ export function App() {
   const handleDiagnosticsChange = useCallback((next: readonly EditorDiagnostic[]) => {
     setDiagnostics(next);
   }, []);
+
+  // ?? Phase 7: Tool approval handlers & subscriptions ?????????????????????
+
+  const handleApprovalDecision = useCallback(async (decision: ApprovalDecision) => {
+    setPendingApproval(null);
+    try {
+      const response = await agent.submitApproval?.(decision);
+      if (response?.status === 'error') {
+        console.warn('[App] Approval response error:', response.message);
+      }
+    } catch {
+      // silently ignore — approval may have expired
+    }
+  }, [agent]);
+
+  // Subscribe to tool approval requests from main process
+  useEffect(() => {
+    if (typeof agent.onToolApprovalRequest !== 'function') return;
+
+    const dispose = agent.onToolApprovalRequest((response: ToolCallResponse & { status: 'pending-approval' }) => {
+      setPendingApproval({
+        callId: response.callId,
+        classification: response.classification,
+        expiresAt: response.expiresAt,
+      });
+    });
+
+    return dispose;
+  }, [agent]);
+
+  // Subscribe to patch conflict events from main process
+  useEffect(() => {
+    if (typeof agent.onConflictDetected !== 'function') return;
+
+    const dispose = agent.onConflictDetected((conflict: Conflict) => {
+      setPendingPatchConflict({ conflict, patchId: conflict.patchId });
+    });
+
+    return dispose;
+  }, [agent]);
+
+  const handlePatchConflictResolve = useCallback(async (action: 'apply' | 'skip' | 'edit') => {
+    if (!pendingPatchConflict) return;
+
+    try {
+      const resolution = action === 'edit'
+        ? { conflictId: pendingPatchConflict.conflict.id, action, operations: [] as readonly [] }
+        : { conflictId: pendingPatchConflict.conflict.id, action };
+      await agent.resolveConflict?.(resolution);
+    } catch {
+      // silently ignore — conflict may have expired
+    }
+
+    setPendingPatchConflict(null);
+  }, [agent, pendingPatchConflict]);
 
   // Poll IPC for workspace-level diagnostics (supports E2E mocks and future LSP integration)
   useEffect(() => {
@@ -1057,6 +1115,9 @@ export function App() {
           <button type="button" role="tab" aria-selected={activeBottomPanel === 'output'} onClick={() => { setActiveBottomPanel('output'); }}>
             Output
           </button>
+          <button type="button" role="tab" aria-selected={activeBottomPanel === 'event-log'} onClick={() => { setActiveBottomPanel('event-log'); }}>
+            Event Log
+          </button>
         </div>
 
         <div className="panel-content">
@@ -1125,6 +1186,9 @@ export function App() {
           )}
           {activeBottomPanel === 'output' && (
             <p className="output-empty" aria-live="polite">No output.</p>
+          )}
+          {activeBottomPanel === 'event-log' && (
+            <EventLogPanel agent={agent} theme={themeSettings.theme} />
           )}
           {permissionPrompts.length > 0 && activeBottomPanel === 'problems' && (
             <section className="permission-prompts" aria-label="Permission prompts">
@@ -1240,11 +1304,96 @@ export function App() {
           )}
         </div>
       </footer>
+      {pendingApproval && (
+        <ApprovalDialog
+          approval={pendingApproval}
+          onDecision={handleApprovalDecision}
+        />
+      )}
+      {pendingPatchConflict && (
+        <PatchConflictDialog
+          conflict={pendingPatchConflict}
+          onResolve={handlePatchConflictResolve}
+        />
+      )}
     </main>
   );
 }
 
-// ?? Phase 7: Patch Conflict Dialog ???????????????????????????????????????
+// ?? Phase 7: Tool approval state ????????????????????????????????????????
+
+interface PendingApproval {
+  callId: string;
+  classification: ToolClassification;
+  expiresAt: number;
+}
+
+interface ApprovalDialogProps {
+  approval: PendingApproval;
+  onDecision: (decision: ApprovalDecision) => void;
+}
+
+function ApprovalDialog({ approval, onDecision }: Readonly<ApprovalDialogProps>) {
+  const { classification, callId, expiresAt } = approval;
+  const [remember, setRemember] = useState(false);
+  const timeLeft = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+
+  const handleApprove = useCallback(() => {
+    onDecision({ callId, approved: true, remember });
+  }, [callId, remember, onDecision]);
+
+  const handleDeny = useCallback(() => {
+    onDecision({ callId, approved: false });
+  }, [callId, onDecision]);
+
+  // Risk level badge color
+  let riskColor: string;
+  if (classification.riskLevel === 'critical') {
+    riskColor = 'var(--color-danger)';
+  } else if (classification.riskLevel === 'high') {
+    riskColor = '#ff9f43';
+  } else if (classification.riskLevel === 'medium') {
+    riskColor = 'var(--color-warning)';
+  } else {
+    riskColor = 'var(--color-accent)';
+  }
+
+  return (
+    <div className="approval-overlay" role="alertdialog" aria-modal="true" aria-label="Tool approval request">
+      <div className="approval-dialog">
+        <div className="approval-header">
+          <h3 className="approval-title">Zatwierdź wywołanie narzędzia</h3>
+          <span className="approval-risk-badge" style={{ borderColor: riskColor, color: riskColor }}>
+            {classification.riskLevel}
+          </span>
+        </div>
+        <div className="approval-body">
+          <p className="approval-tool-name">{classification.name}</p>
+          <p className="approval-description">{classification.description}</p>
+          <p className="approval-timer">Pozostało: {timeLeft}s</p>
+          <label className="approval-remember">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            {' '}Zapamiętaj decyzję dla tego narzędzia
+          </label>
+        </div>
+        <div className="approval-actions">
+          <button className="approval-btn approval-btn--deny" type="button" onClick={handleDeny}>
+            Odrzuć
+          </button>
+          <button className="approval-btn approval-btn--approve" type="button" onClick={handleApprove}>
+            Zatwierdź
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ?? Patch Conflict Dialog ???????????????????????????????????????????????
 
 interface PatchConflict {
   conflict: Conflict;
@@ -1253,17 +1402,76 @@ interface PatchConflict {
 
 interface PatchConflictDialogProps {
   conflict: PatchConflict;
-  onResolve: (resolution: { strategy: 'ours' | 'theirs' | 'manual'; content?: string }) => void;
-  onClose: () => void;
+  onResolve: (action: 'apply' | 'skip' | 'edit') => void;
 }
 
-function PatchConflictDialog({ conflict, onResolve, onClose }: PatchConflictDialogProps): React.ReactElement {
+function PatchConflictDialog({ conflict, onResolve }: Readonly<PatchConflictDialogProps>) {
+  const { conflict: conflictData, patchId } = conflict;
+
+  // Build a simple diff preview from the conflict info
+  const diffLines = conflictData.filePath
+    ? [
+        { prefix: '---', text: `a/${conflictData.filePath}` },
+        { prefix: '+++', text: `b/${conflictData.filePath}` },
+        { prefix: '@@', text: `patch: ${patchId}` },
+      ]
+    : [];
+
+  let riskColor: string;
+  if (conflictData.riskLevel === 'critical') {
+    riskColor = 'var(--color-danger)';
+  } else if (conflictData.riskLevel === 'high') {
+    riskColor = '#ff9f43';
+  } else if (conflictData.riskLevel === 'medium') {
+    riskColor = 'var(--color-warning)';
+  } else {
+    riskColor = 'var(--color-accent)';
+  }
+
   return (
-    <div role="dialog" aria-label="Patch conflict">
-      <p>Conflict in {conflict.conflict.filePath}</p>
-      <button onClick={() => onResolve({ strategy: 'ours' })}>Use ours</button>
-      <button onClick={() => onResolve({ strategy: 'theirs' })}>Use theirs</button>
-      <button onClick={onClose}>Close</button>
+    <div className="approval-overlay" role="alertdialog" aria-modal="true" aria-label="Patch conflict">
+      <div className="approval-dialog patch-conflict-dialog">
+        <div className="approval-header">
+          <h3 className="approval-title">Konflikt patcha</h3>
+          <span className="approval-risk-badge" style={{ borderColor: riskColor, color: riskColor }}>
+            {conflictData.kind}
+          </span>
+        </div>
+        <div className="approval-body">
+          <p className="approval-tool-name">{conflictData.filePath}</p>
+          <p className="approval-description">{conflictData.description}</p>
+          {diffLines.length > 0 && (
+            <pre className="patch-conflict-diff" aria-label="Diff preview">
+              {diffLines.map((line) => {
+                let lineKind = 'header';
+                if (line.prefix === '---') {
+                  lineKind = 'removed';
+                } else if (line.prefix === '+++') {
+                  lineKind = 'added';
+                }
+                const key = `${line.prefix}:${line.text}`;
+                return (
+                  <div key={key} className={`diff-line diff-line--${lineKind}`}>
+                    <span className="diff-prefix">{line.prefix}</span>
+                    <span className="diff-text">{line.text}</span>
+                  </div>
+                );
+              })}
+            </pre>
+          )}
+        </div>
+        <div className="approval-actions">
+          <button className="approval-btn approval-btn--deny" type="button" onClick={() => onResolve('skip')}>
+            Pomiń
+          </button>
+          <button className="approval-btn" type="button" onClick={() => onResolve('edit')}>
+            Edytuj
+          </button>
+          <button className="approval-btn approval-btn--approve" type="button" onClick={() => onResolve('apply')}>
+            Nadpisz
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
