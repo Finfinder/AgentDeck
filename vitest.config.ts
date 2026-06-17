@@ -31,7 +31,10 @@ export default defineConfig({
       exclude: [
         'apps/desktop/src/main/**',
         'apps/desktop/src/preload/**',
-        'packages/**/src/index.ts',
+        'packages/agent-runtime/src/index.ts',
+        'packages/services/src/index.ts',
+        'packages/shared/src/index.ts',
+        'packages/workbench/src/index.ts',
         'packages/workbench/src/main.tsx',
         'tests/**',
         '**/*.test.{ts,tsx}',
