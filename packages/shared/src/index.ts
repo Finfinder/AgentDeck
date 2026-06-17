@@ -41,7 +41,20 @@ export {
 	isConflict,
 	isConflictResolution,
 	isFileHashResult,
-	isSensitivePathCheckResult
+      isSensitivePathCheckResult,
+      // Phase 8
+      isAgentRuntimeResult,
+      isAgentRuntimePermissionScope,
+      isAgentRuntimeWorkerOutput,
+      isAgentRuntimeWorkerState,
+      isAgentRuntimeTaskState,
+      isAgentRuntimeEventEntry,
+      isAgentRuntimeSessionState,
+      isAgentRuntimeStartWorkerOptions,
+      isAgentRuntimeStartSubagentOptions,
+      isAgentRuntimeResumeOptions,
+      isPermissionApprovalInput,
+      isPermissionApprovalResult
 } from './ipc';
 export type { IdentitySession, IdentitySessionWarning } from './ipc';
 export { isIdentitySession, isIdentitySessionWarning, isModelProviderConfig, isTestConnectionResult } from './ipc';
@@ -112,5 +125,37 @@ export type {
 	Conflict,
 	ConflictResolution,
 	FileHashResult,
-	SensitivePathCheckResult
+SensitivePathCheckResult,
+       AgentRuntimeResult,
+       AgentRuntimePermissionScope,
+       AgentRuntimeWorkerInput,
+       AgentRuntimeWorkerOutput,
+       AgentRuntimeWorkerDefinition,
+       AgentRuntimeSessionState,
+       AgentRuntimeWorkerState,
+       AgentRuntimeTaskState,
+       AgentRuntimeEventEntry,
+       AgentRuntimeStartSessionOptions,
+       AgentRuntimeStartWorkerOptions,
+       AgentRuntimeStartSubagentOptions,
+       AgentRuntimeResumeOptions
 } from './ipc';
+export type {
+       PermissionActionKind,
+       PermissionActorKind,
+       PermissionApprovalInput,
+       PermissionApprovalResult,
+       PermissionAuditEntry,
+       PermissionBroker,
+       PermissionBrokerState,
+       PermissionDecision,
+       PermissionDecisionKind,
+       PermissionEvaluation,
+       PermissionGrant,
+       PermissionGrantDuration,
+       PermissionGrantScope,
+       PermissionPrompt,
+       PermissionRequest,
+       PermissionRiskLevel,
+       PermissionRuntimeKind
+} from '@agentdeck/permission-broker';

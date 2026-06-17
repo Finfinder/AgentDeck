@@ -1,32 +1,32 @@
 import { config } from 'dotenv';
 import { app, BrowserWindow, dialog, ipcMain, Menu, globalShortcut, session, shell } from 'electron';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { mkdir, readdir } from 'node:fs/promises';
 
-import { applyWorkspaceEdit, bootstrapDesktopServices, createSettingsService, createStartupErrorState, createWorkspaceService, getDiagnostics, markBufferDirty, readEditorFile, showDiff, createIdentityService, type IdentityService, type SettingsService, type WorkspaceService, writeEditorFile, createModelGateway, createDefaultAdapters, type ModelGateway, PermissionBroker, ConflictBroker, computeFileHash, ToolRouter, checkSensitivePath, getEventLogService, isBinaryFile } from '@agentdeck/services';
-// Use the static method directly
-const classifyOperationKind = ConflictBroker.classifyOperationKind;
+import { applyWorkspaceEdit, bootstrapDesktopServices, createEditorFile, createSettingsService, createStartupErrorState, createWorkspaceService, getDiagnostics, markBufferDirty, readEditorFile, showDiff, createIdentityService, type IdentityService, type SettingsService, type WorkspaceService, writeEditorFile, createModelGateway, createDefaultAdapters, type ModelGateway, type ToolExecutionContext } from '@agentdeck/services';
+import { createPermissionBroker } from '@agentdeck/permission-broker';
+import type { PermissionDecision } from '@agentdeck/permission-broker';
 import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
-  isApprovalDecision,
+  isAgentRuntimeResumeOptions,
+  isAgentRuntimeSessionState,
+  isAgentRuntimeStartSubagentOptions,
+  isAgentRuntimeStartWorkerOptions,
+  isAgentRuntimeTaskState,
+  isAgentRuntimeWorkerState,
   isChatStreamEvent,
   isChatTabState,
-  isDiffInput,
+  isPermissionApprovalInput,
   isThemeSettings,
-  isToolCallRequest,
   isWorkspaceEditInput,
   isWorkspaceOpenRequest,
-  type EventLogFilter,
-  type EventLogEntry,
   type ModelProviderId,
   type SearchQuery,
   type StartupState,
-  type ToolCallRequest,
-  type ToolRiskLevel,
-  type WorkspaceEditInput,
+  type ToolCall,
   type WorkspaceSelection
 } from '@agentdeck/shared';
 
@@ -52,75 +52,7 @@ let startupState: StartupState = {
   message: 'Application services have not been initialized yet.'
 };
 
-// Module-level references set by registerToolRouterIpc.
-// Used by applyWorkspaceEdit IPC handler to route multi-file edits through PermissionBroker.
-
-let permissionBrokerRef: PermissionBroker | null = null;
-
-/** Check operations for sensitive paths. Returns ACCESS_DENIED result or null. */
-function checkSensitivePaths(edit: WorkspaceEditInput): { status: 'error'; code: 'ACCESS_DENIED'; message: string } | null {
-  for (const op of edit.operations) {
-    if (checkSensitivePath(op.filePath).isSensitive) {
-      return { status: 'error', code: 'ACCESS_DENIED', message: `Edycja wrażliwego pliku zabroniona: ${op.filePath}` };
-    }
-  }
-  return null;
-}
-
-/**
- * Route a multi-file workspace edit through the PermissionBroker approval flow,
- * then apply via applyWorkspaceEdit (which handles multiple files natively).
- *
- * Previously this incorrectly routed through ToolRouter with toolName='applyPatch',
- * but toolApplyPatch expects { patchId, patch } args and only handles a single file
- * — causing multi-file edits to always fail with missing-argument errors.
- */
-async function routeMultiFileEdit(
-  edit: WorkspaceEditInput,
-  uniqueFiles: Set<string>,
-  win: BrowserWindow,
-): Promise<{ status: 'ok' } | { status: 'error'; code: string; message: string }> {
-  const broker = permissionBrokerRef;
-  if (!broker) {
-    return { status: 'error', code: 'UNKNOWN', message: 'Permission Broker nie został zainicjalizowany.' };
-  }
-
-  // Use 'writeFile' classification: high risk, requires approval — appropriate for multi-file edits.
-  const callId = `workspace-edit-${Date.now()}-${randomBytes(4).toString('hex')}`;
-  const toolRequest: ToolCallRequest = {
-    callId,
-    toolName: 'writeFile',
-    args: { filePath: Array.from(uniqueFiles), fileCount: uniqueFiles.size },
-  };
-
-  const permResult = await broker.processToolCall(toolRequest);
-
-  if (permResult.status === 'pending-approval') {
-    if (!win.isDestroyed()) {
-      win.webContents.send(IPC_CHANNELS.toolApprovalRequest, permResult);
-    }
-    const kind = classifyOperationKind('multi-file');
-    console.warn(`[main] Multi-file edit (${uniqueFiles.size} files) pending approval, kind: ${kind}`);
-    return { status: 'error', code: 'UNKNOWN', message: 'Oczekuje na zatwierdzenie — edycja wielu plików (multi-file).' };
-  }
-
-  if (permResult.status === 'error') {
-    return { status: 'error', code: (permResult as { code: string }).code ?? 'UNKNOWN', message: permResult.message };
-  }
-
-  // Approved — apply the multi-file workspace edit through the native editor service.
-  try {
-    const result = await applyWorkspaceEdit(edit);
-    if (result.status === 'error') {
-      return { status: 'error', code: result.code, message: result.message };
-    }
-    console.info(`[main] Multi-file edit (${uniqueFiles.size} files) applied after approval.`);
-    return { status: 'ok' };
-  } catch (err) {
-    console.error('[main] Multi-file applyWorkspaceEdit failed:', err);
-    return { status: 'error', code: 'UNKNOWN', message: String(err) };
-  }
-}
+const permissionBroker = createPermissionBroker();
 
 function registerIpcHandlers(settingsService: SettingsService, workspaceService: WorkspaceService, mainWindow: BrowserWindow, identityService?: IdentityService, modelGateway?: ModelGateway): void {
   ipcMain.handle(IPC_CHANNELS.getStartupState, () => startupState);
@@ -166,9 +98,6 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
     if (typeof filePath !== 'string' || typeof content !== 'string') {
       return { status: 'error', code: 'UNKNOWN', message: 'Invalid arguments.' };
     }
-    if (checkSensitivePath(filePath).isSensitive) {
-      return { status: 'error', code: 'ACCESS_DENIED', message: `Zapis na wrażliwej ścieżce zabroniony: ${filePath}` };
-    }
     return writeEditorFile(filePath, content);
   });
 
@@ -182,18 +111,12 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
     if (typeof filePath !== 'string') {
       return { status: 'error', code: 'UNKNOWN', message: 'Invalid file path.' };
     }
-    if (checkSensitivePath(filePath).isSensitive) {
-      return { status: 'error', code: 'ACCESS_DENIED', message: `Usuwanie wrażliwego pliku zabronione: ${filePath}` };
-    }
     return workspaceService.deleteFile(filePath);
   });
 
   ipcMain.handle(IPC_CHANNELS.renameFile, async (_event, oldPath: unknown, newPath: unknown) => {
     if (typeof oldPath !== 'string' || typeof newPath !== 'string') {
       return { status: 'error', code: 'UNKNOWN', message: 'Invalid file paths.' };
-    }
-    if (checkSensitivePath(oldPath).isSensitive || checkSensitivePath(newPath).isSensitive) {
-      return { status: 'error', code: 'ACCESS_DENIED', message: `Zmiana nazwy wrażliwego pliku zabroniona: ${oldPath}` };
     }
     return workspaceService.renameFile(oldPath, newPath);
   });
@@ -215,21 +138,6 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
     if (!isWorkspaceEditInput(edit)) {
       return { status: 'error', code: 'UNKNOWN', message: 'Invalid workspace edit payload.' } as const;
     }
-
-    const sensitiveResult = checkSensitivePaths(edit);
-    if (sensitiveResult) return sensitiveResult;
-
-    const uniqueFiles = new Set(edit.operations.map(op => op.filePath));
-    if (uniqueFiles.size > 1) {
-      return routeMultiFileEdit(edit, uniqueFiles, mainWindow);
-    }
-
-    // Single-file: log binary classification
-    const firstOp = edit.operations[0];
-    if (firstOp && isBinaryFile(firstOp.filePath)) {
-      console.warn(`[main] Binary file edit detected, kind: ${classifyOperationKind('binary')}, file: ${firstOp.filePath}`);
-    }
-
     try {
       return await applyWorkspaceEdit(edit);
     } catch (err) {
@@ -245,24 +153,6 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
     return showDiff(input.original, input.modified);
   });
 
-  // Event Log IPC handlers
-  const eventLogService = getEventLogService();
-
-  ipcMain.handle(IPC_CHANNELS.getEventLog, (_event, filter: EventLogFilter | undefined) => {
-    return eventLogService.query(filter);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.clearEventLog, () => {
-    eventLogService.clear();
-  });
-
-  // Forward event log updates to renderer
-  eventLogService.on('update', (entry: EventLogEntry) => {
-    if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(IPC_CHANNELS.eventLogUpdate, entry);
-    }
-  });
-
   ipcMain.handle(IPC_CHANNELS.toggleDevTools, () => {
     const focused = BrowserWindow.getFocusedWindow();
     if (focused) {
@@ -271,6 +161,22 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
       } else {
         focused.webContents.openDevTools({ mode: 'bottom' });
       }
+    }
+  });
+
+  // Permission Broker IPC handlers
+  ipcMain.handle(IPC_CHANNELS.permissionBrokerGetState, () => permissionBroker.getState());
+  ipcMain.handle(IPC_CHANNELS.permissionBrokerApproveDecision, (_event, input: unknown) => {
+    if (!isPermissionApprovalInput(input)) {
+      return { status: 'error', code: 'INVALID_SCOPE', message: 'Invalid approval input.' };
+    }
+    return permissionBroker.approve(input);
+  });
+
+  // Forward permission decisions to renderer
+  permissionBroker.onDecision((decision: PermissionDecision) => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.permissionBrokerDecisionChanged, decision);
     }
   });
 
@@ -402,6 +308,57 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
     ipcMain.handle(IPC_CHANNELS.chatSetActiveProvider, (_event, tabId: unknown, providerId: unknown) => {
       if (typeof tabId === 'string' && typeof providerId === 'string') modelGateway.setTabActiveProvider(tabId, providerId as ModelProviderId);
     });
+    ipcMain.handle(IPC_CHANNELS.agentRuntimeListSessions, () => modelGateway.listAgentRuntimeSessions());
+    ipcMain.handle(IPC_CHANNELS.agentRuntimeGetSession, (_event, sessionId: unknown) => {
+      if (typeof sessionId !== 'string') return undefined;
+      return modelGateway.getAgentRuntimeSession(sessionId);
+    });
+    ipcMain.handle(IPC_CHANNELS.agentRuntimeListWorkers, (_event, sessionId: unknown) => {
+      if (sessionId !== undefined && typeof sessionId !== 'string') return [];
+      return modelGateway.listAgentRuntimeWorkers(sessionId ?? undefined);
+    });
+    ipcMain.handle(IPC_CHANNELS.agentRuntimeGetWorker, (_event, workerId: unknown) => {
+      if (typeof workerId !== 'string') return undefined;
+      return modelGateway.getAgentRuntimeWorker(workerId);
+    });
+    ipcMain.handle(IPC_CHANNELS.agentRuntimeListTasks, (_event, sessionId: unknown) => {
+      if (sessionId !== undefined && typeof sessionId !== 'string') return [];
+      return modelGateway.listAgentRuntimeTasks(sessionId ?? undefined);
+    });
+    ipcMain.handle(IPC_CHANNELS.agentRuntimeGetTask, (_event, taskId: unknown) => {
+      if (typeof taskId !== 'string') return undefined;
+      return modelGateway.getAgentRuntimeTask(taskId);
+    });
+    ipcMain.handle(IPC_CHANNELS.agentRuntimeStartWorker, (_event, options: unknown) => {
+      if (!isAgentRuntimeStartWorkerOptions(options)) {
+        return { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Invalid runtime worker start options.' };
+      }
+      return modelGateway.startAgentRuntimeWorker(options);
+    });
+    ipcMain.handle(IPC_CHANNELS.agentRuntimeStartSubagent, (_event, options: unknown) => {
+      if (!isAgentRuntimeStartSubagentOptions(options)) {
+        return { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Invalid runtime subagent start options.' };
+      }
+      return modelGateway.startAgentRuntimeSubagent(options);
+    });
+    ipcMain.handle(IPC_CHANNELS.agentRuntimeResumeWorker, (_event, options: unknown) => {
+      if (!isAgentRuntimeResumeOptions(options)) {
+        return { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Invalid runtime worker resume options.' };
+      }
+      return modelGateway.resumeAgentRuntimeWorker(options);
+    });
+    ipcMain.handle(IPC_CHANNELS.agentRuntimeStopWorker, (_event, workerId: unknown) => {
+      if (typeof workerId !== 'string') {
+        return { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Invalid worker id.' };
+      }
+      return modelGateway.stopAgentRuntimeWorker(workerId);
+    });
+    ipcMain.handle(IPC_CHANNELS.agentRuntimeStopSession, (_event, sessionId: unknown) => {
+      if (typeof sessionId !== 'string') {
+        return { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Invalid session id.' };
+      }
+      return modelGateway.stopAgentRuntimeSession(sessionId);
+    });
 
     // Forward Model Gateway events to renderer (validate before sending)
     modelGateway.on('chat-stream', (tabId: string, event: unknown) => {
@@ -414,36 +371,37 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
         mainWindow.webContents.send(IPC_CHANNELS.chatTabsChanged, tabs);
       }
     });
+    modelGateway.on('agent-runtime-event', (event: unknown) => {
+      if (mainWindow.isDestroyed()) return;
+      if (isRecord(event) && typeof event.type === 'string') {
+        const payload = event.payload;
+        if (event.type === 'session-changed' && isAgentRuntimeSessionState(payload)) {
+          mainWindow.webContents.send(IPC_CHANNELS.agentRuntimeSessionChanged, payload);
+        } else if (event.type === 'task-changed' && isAgentRuntimeTaskState(payload)) {
+          mainWindow.webContents.send(IPC_CHANNELS.agentRuntimeTaskChanged, payload);
+        } else if (event.type === 'worker-changed' && isAgentRuntimeWorkerState(payload)) {
+          mainWindow.webContents.send(IPC_CHANNELS.agentRuntimeWorkerChanged, payload);
+        } else if (event.type === 'session-crashed' && isRecord(payload) && isAgentRuntimeSessionState(payload.session)) {
+          const error = payload.error instanceof Error ? { message: payload.error.message } : { message: 'Runtime session crashed.' };
+          mainWindow.webContents.send(IPC_CHANNELS.agentRuntimeSessionCrashed, payload.session, error);
+        }
+      }
+    });
 
     // Model Gateway secure config handlers
     ipcMain.handle(IPC_CHANNELS.modelGatewayGetApiKey, async (_event, providerId: unknown) => {
       if (typeof providerId !== 'string') return null;
-      try {
-        const keytar = await import('keytar');
-        return await keytar.getPassword('agentdeck', `api-key-${providerId}`);
-      } catch {
-        return null;
-      }
+      return await identityService?.getModelApiKey(providerId as ModelProviderId) ?? null;
     });
 
     ipcMain.handle(IPC_CHANNELS.modelGatewaySetApiKey, async (_event, providerId: unknown, apiKey: unknown) => {
       if (typeof providerId !== 'string' || typeof apiKey !== 'string') return;
-      try {
-        const keytar = await import('keytar');
-        await keytar.setPassword('agentdeck', `api-key-${providerId}`, apiKey);
-      } catch {
-        // keytar unavailable — silently fail
-      }
+      await identityService?.setModelApiKey(providerId as ModelProviderId, apiKey);
     });
 
     ipcMain.handle(IPC_CHANNELS.modelGatewayDeleteApiKey, async (_event, providerId: unknown) => {
       if (typeof providerId !== 'string') return;
-      try {
-        const keytar = await import('keytar');
-        await keytar.deletePassword('agentdeck', `api-key-${providerId}`);
-      } catch {
-        // keytar unavailable — silently fail
-      }
+      await identityService?.deleteModelApiKey(providerId as ModelProviderId);
     });
 
     ipcMain.handle(IPC_CHANNELS.modelGatewayTestConnection, async (_event, providerId: unknown, baseUrl: unknown) => {
@@ -481,221 +439,914 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
         const key = await keytar.getPassword('agentdeck', `api-key-${providerId}`);
         hasApiKey = typeof key === 'string' && key.length > 0;
       } catch {
-        // keytar unavailable — hasApiKey stays false
+        // keytar unavailable ÔÇö hasApiKey stays false
       }
       return { baseUrl: config.baseUrl, hasApiKey };
     });
   }
-
-  // Phase 7: Tool Router / Permission Broker / Conflict Broker IPC handlers
-  registerToolRouterIpc(mainWindow, workspaceService, modelGateway);
 }
 
-// ?? Phase 7: Tool Router IPC handlers ??????????????????????????????????????
-
-function registerToolRouterIpc(mainWindow: BrowserWindow, workspaceService: WorkspaceService, modelGateway?: ModelGateway): void {
-  const permissionBroker = new PermissionBroker();
-  const conflictBroker = new ConflictBroker();
-
-  // Lazy-init tool router when workspace is known
-  let toolRouter: ToolRouter | null = null;
-
-  function getToolRouter(): ToolRouter {
-    if (!toolRouter) {
-      const roots = workspaceService.getWorkspaceRoots?.() ?? [];
-      toolRouter = new ToolRouter({
-        workspaceRoots: roots,
-        permissionBroker,
-        conflictBroker
-      });
-      // Wire ToolRouter into ModelGateway so agent tool calls go through approval flow
-      if (modelGateway) {
-        modelGateway.setToolRouter(toolRouter);
+function registerBuiltInTools(modelGateway: ModelGateway): void {
+  modelGateway.registerTool({
+    type: 'function',
+    function: {
+      name: 'read_file',
+      description: 'Reads a UTF-8 text file from the local workspace. Use only after the file is known to exist.',
+      parameters: {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string', description: 'Absolute path to the file to read.' }
+        },
+        required: ['filePath'],
+        additionalProperties: false
       }
-      // Expose at module level so applyWorkspaceEdit handler can route multi-file edits
-      // toolRouterRef assignment removed
-      permissionBrokerRef = permissionBroker;
     }
-    return toolRouter;
+  });
+
+  modelGateway.registerTool({
+    type: 'function',
+    function: {
+      name: 'search_files',
+      description: 'Searches text across workspace roots with include/exclude glob filters.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Case-insensitive text to search for.' },
+          workspaceRoots: { type: 'array', items: { type: 'string' }, description: 'Workspace root paths to search.' },
+          include: { type: 'string', description: 'Optional comma-separated include globs.' },
+          exclude: { type: 'string', description: 'Optional comma-separated exclude globs.' }
+        },
+        required: ['pattern', 'workspaceRoots'],
+        additionalProperties: false
+      }
+    }
+  });
+
+  modelGateway.registerTool({
+    type: 'function',
+    function: {
+      name: 'create_file',
+      description: 'Tworzy nowy plik tekstowy w workspace i zapisuje do niego zawarto┼Ť─ç. U┼╝ywaj tylko dla nowych plik├│w, nie do nadpisywania istniej─ůcych. Je┼Ťli podano tylko nazw─Ö pliku, ┼Ťcie┼╝ka zostanie rozwi─ůzana wzgl─Ödem projektu wskazanego przez inne pliki lub nazw─Ö projektu w rozmowie.',
+      parameters: {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string', description: '┼Ücie┼╝ka nowego pliku. Mo┼╝e by─ç bezwzgl─Ödna, wzgl─Ödna wzgl─Ödem aktywnego workspace albo sama nazwa pliku.' },
+          content: { type: 'string', description: 'Tre┼Ť─ç UTF-8 zapisywana do nowego pliku.' }
+        },
+        required: ['filePath'],
+        additionalProperties: false
+      }
+    }
+  });
+
+  modelGateway.registerTool({
+    type: 'function',
+    function: {
+      name: 'apply_patch',
+      description: 'Applies a text patch to opened editor buffers. The caller must provide a valid workspace edit payload.',
+      parameters: {
+        type: 'object',
+        properties: {
+          operations: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                filePath: { type: 'string' },
+                text: { type: 'string' },
+                range: {
+                  type: 'object',
+                  properties: {
+                    startLine: { type: 'number' },
+                    startCol: { type: 'number' },
+                    endLine: { type: 'number' },
+                    endCol: { type: 'number' }
+                  },
+                  required: ['startLine', 'startCol', 'endLine', 'endCol'],
+                  additionalProperties: false
+                }
+              },
+              required: ['filePath', 'text'],
+              additionalProperties: false
+            }
+          }
+        },
+        required: ['operations'],
+        additionalProperties: false
+      }
+    }
+  });
+
+  modelGateway.registerTool({
+    type: 'function',
+    function: {
+      name: 'show_diff',
+      description: 'Generates a unified diff between original and modified text.',
+      parameters: {
+        type: 'object',
+        properties: {
+          original: { type: 'string', description: 'Original text.' },
+          modified: { type: 'string', description: 'Modified text.' }
+        },
+        required: ['original', 'modified'],
+        additionalProperties: false
+      }
+    }
+  });
+}
+
+function parseToolArguments(toolCall: ToolCall): Record<string, unknown> {
+  try {
+    const value: unknown = JSON.parse(toolCall.function.arguments);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  } catch {
+    return {};
   }
-
-  ipcMain.handle(IPC_CHANNELS.toolCall, async (_event, request: unknown) => {
-    if (!isToolCallRequest(request)) {
-      return { status: 'error', callId: 'unknown', code: 'UNKNOWN', message: 'Invalid tool call request.' };
-    }
-
-    const router = getToolRouter();
-    const response = await router.execute(request);
-
-    // If pending approval, forward to renderer
-    if (response.status === 'pending-approval') {
-      if (!mainWindow.isDestroyed()) {
-        mainWindow.webContents.send(IPC_CHANNELS.toolApprovalRequest, response);
-      }
-    }
-
-    return response;
-  });
-
-  ipcMain.handle(IPC_CHANNELS.toolApprovalResponse, async (_event, decision: unknown) => {
-    if (!isApprovalDecision(decision)) {
-      return { status: 'error', code: 'UNKNOWN', message: 'Invalid approval decision.' };
-    }
-
-    const originalRequest = permissionBroker.submitApproval(decision);
-    if (!originalRequest) {
-      return { status: 'error', code: 'UNKNOWN', message: 'Approval expired or unknown callId.' };
-    }
-
-    // If approved, execute the tool; if denied, return denied response
-    if (decision.approved) {
-      const router = getToolRouter();
-      const response = await router.executeApproved(originalRequest);
-      return response;
-    }
-
-    return {
-      status: 'error' as const,
-      callId: decision.callId,
-      code: 'ACCESS_DENIED' as const,
-      message: 'Narzędzie odrzucone przez użytkownika.'
-    };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.proposePatch, async (_event, patchData: unknown) => {
-    // Validate and create patch proposal
-    if (typeof patchData !== 'object' || patchData === null) {
-      return { status: 'error', code: 'UNKNOWN', message: 'Invalid patch data.' };
-    }
-    const data = patchData as Record<string, unknown>;
-    const operations = Array.isArray(data.operations) ? data.operations : [];
-
-    const { classifyPatchRisk, generatePatchId } = await import('@agentdeck/services');
-    const riskLevel = classifyPatchRisk(operations);
-
-    const patchId = generatePatchId();
-
-    return { status: 'ok', patchId, riskLevel, operations: operations.length };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.applyPatch, async (_event, request: unknown) => {
-    // Validate request shape: { patchId: string, patch: PatchSet data }
-    if (typeof request !== 'object' || request === null) {
-      return { status: 'error', code: 'UNKNOWN', message: 'Invalid applyPatch request.' };
-    }
-    const req = request as Record<string, unknown>;
-    if (typeof req.patchId !== 'string') {
-      return { status: 'error', code: 'UNKNOWN', message: 'Invalid patch ID.' };
-    }
-    if (typeof req.patch !== 'object' || req.patch === null) {
-      return { status: 'error', code: 'UNKNOWN', message: 'Invalid patch data.' };
-    }
-    const patchData = req.patch as Record<string, unknown>;
-
-    // Build a ToolCallRequest so applyPatch goes through PermissionBroker + ConflictBroker
-    const toolRequest: ToolCallRequest = {
-      callId: `apply-patch-${Date.now()}-${randomBytes(4).toString('hex')}`,
-      toolName: 'applyPatch',
-      args: {
-        patchId: req.patchId,
-        patch: {
-          filePath: String(patchData.filePath ?? ''),
-          baseHash: String(patchData.baseHash ?? ''),
-          operations: Array.isArray(patchData.operations) ? patchData.operations : [],
-          author: String(patchData.author ?? 'agent'),
-          riskLevel: patchData.riskLevel as ToolRiskLevel ?? 'medium',
-        }
-      }
-    };
-
-    const router = getToolRouter();
-    const response = await router.execute(toolRequest);
-
-    // If pending approval, forward to renderer
-    if (response.status === 'pending-approval') {
-      if (!mainWindow.isDestroyed()) {
-        mainWindow.webContents.send(IPC_CHANNELS.toolApprovalRequest, response);
-      }
-      // Return a patch-compatible result indicating pending approval
-      return { status: 'error', code: 'UNKNOWN', message: 'Oczekuje na zatwierdzenie (pending-approval).' };
-    }
-
-    if (response.status === 'error') {
-      // If conflict detected, push conflict event to renderer for UI handling
-      if (response.code === 'WRITE_CONFLICT' && response.conflict) {
-        if (!mainWindow.isDestroyed()) {
-          mainWindow.webContents.send(IPC_CHANNELS.conflictDetected, response.conflict);
-        }
-        return { status: 'error', code: 'WRITE_CONFLICT', message: response.message };
-      }
-      return { status: 'error', code: response.code, message: response.message };
-    }
-
-    if (response.status === 'ok') {
-      const result = (response.result as Record<string, unknown> | undefined);
-      return { status: 'ok', patchId: req.patchId, appliedHash: String(result?.appliedHash ?? '') };
-    }
-
-    // Fallback for unexpected statuses
-    return { status: 'error', code: 'UNKNOWN', message: `Unexpected response status: ${response.status}` };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.conflictResolve, (_event, resolution: unknown) => {
-    if (typeof resolution !== 'object' || resolution === null) {
-      return { status: 'error', code: 'UNKNOWN', message: 'Invalid conflict resolution.' };
-    }
-    const res = resolution as Record<string, unknown>;
-    if (typeof res.conflictId !== 'string' || typeof res.action !== 'string') {
-      return { status: 'error', code: 'UNKNOWN', message: 'Invalid conflict resolution fields.' };
-    }
-
-    const { action } = res;
-    if (action === 'apply' || action === 'skip') {
-      const ok = conflictBroker.resolveConflict({ conflictId: res.conflictId, action });
-      return ok
-        ? { status: 'ok' }
-        : { status: 'error', code: 'UNKNOWN', message: `Conflict not found: ${res.conflictId}` };
-    }
-
-    if (action === 'edit') {
-      // For 'edit', the client provides new operations to re-apply
-      const operations = Array.isArray(res.operations) ? res.operations : [];
-      if (operations.length === 0) {
-        return { status: 'error', code: 'UNKNOWN', message: 'Edit action requires operations.' };
-      }
-      // Remove the old conflict and let client re-propose with new operations
-      const ok = conflictBroker.resolveConflict({ conflictId: res.conflictId, action: 'skip' });
-      return ok
-        ? { status: 'ok', message: 'Conflict cleared. Re-propose patch with edited operations.' }
-        : { status: 'error', code: 'UNKNOWN', message: `Conflict not found: ${res.conflictId}` };
-    }
-
-    return { status: 'error', code: 'UNKNOWN', message: `Unknown conflict action: ${action}` };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.checkSensitivePath, (_event, filePath: unknown) => {
-    if (typeof filePath !== 'string') {
-      return { filePath: '', isSensitive: false };
-    }
-    return checkSensitivePath(filePath);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.getFileHash, async (_event, filePath: unknown) => {
-    if (typeof filePath !== 'string') {
-      return { status: 'error', code: 'UNKNOWN', message: 'Invalid file path.' };
-    }
-    const hash = await computeFileHash(filePath);
-    if (hash === null) {
-      return { status: 'error', code: 'FILE_NOT_FOUND', message: `Cannot compute hash for: ${filePath}` };
-    }
-    return { status: 'ok', hash };
-  });
 }
 
 function isSearchQuery(value: unknown): value is SearchQuery {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as Record<string, unknown>;
-  return typeof candidate.pattern === 'string' && Array.isArray(candidate.workspaceRoots);
+  if (!isRecord(value)) return false;
+  return typeof value.pattern === 'string' && Array.isArray(value.workspaceRoots);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function inferCreateFileContent(filePath: string): string {
+  const extension = filePath.split(/[/\\]/).pop()?.split('.').pop()?.toLowerCase() ?? '';
+  if (extension === 'md' || extension === 'markdown') {
+    return `# ${basename(filePath)}\n\nOpis pliku.\n`;
+  }
+  if (extension === 'json') {
+    return '{\n  \n}\n';
+  }
+  if (extension === 'yaml' || extension === 'yml') {
+    return '# Dodaj konfiguracj─Ö YAML.\n';
+  }
+  return '';
+}
+
+const FILE_EXTENSION_ALIASES = [
+  '.md',
+  '.markdown',
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.cjs',
+  '.mjs',
+  '.json',
+  '.jsonc',
+  '.yaml',
+  '.yml',
+  '.py',
+  '.cs',
+  '.csproj',
+  '.sln',
+  '.ps1',
+  '.psm1',
+  '.psd1',
+  '.txt',
+  '.xml',
+  '.html',
+  '.css',
+  '.scss',
+  '.less',
+  '.toml',
+  '.ini',
+  '.cfg',
+  '.env',
+  '.lock'
+] as const;
+
+function hasKnownFileExtension(path: string): boolean {
+  const normalized = path.replaceAll('\\', '/');
+  const fileName = normalized.split('/').pop()?.toLowerCase() ?? normalized.toLowerCase();
+  return FILE_EXTENSION_ALIASES.some(extension => fileName.endsWith(extension));
+}
+
+function collectMessageText(contextMessages: readonly unknown[]): string {
+  return contextMessages
+    .filter((message): message is { content: unknown } => isRecord(message) && typeof message.content === 'string')
+    .map(message => message.content)
+    .join('\n');
+}
+
+function isFileNameToken(candidate: string): boolean {
+  if (!candidate || candidate.includes('/') || candidate.includes('\\')) return false;
+  if (!candidate.includes('.')) return false;
+  if (candidate.startsWith('.') || candidate.endsWith('.')) return false;
+  return hasKnownFileExtension(candidate);
+}
+
+function stripTrailingPunctuation(candidate: string): string {
+  let end = candidate.length;
+  while (end > 0) {
+    const char = candidate[end - 1];
+    if (char !== '.' && char !== ',' && char !== ';' && char !== ':') break;
+    end -= 1;
+  }
+  return candidate.slice(0, end);
+}
+
+function inferFileNameFromMessages(contextMessages: readonly unknown[]): string | null {
+  const joined = collectMessageText(contextMessages);
+  const candidates = extractFileNameCandidates(joined);
+  return candidates.find(candidate => hasKnownFileExtension(candidate)) ?? null;
+}
+
+export function inferTargetFileNameFromMessages(contextMessages: readonly unknown[]): string | null {
+  const joined = collectMessageText(contextMessages);
+  const lower = joined.toLowerCase();
+  if (!hasWriteIntent(lower)) return null;
+
+  const pathCandidates = extractPathCandidates(joined)
+    .filter(candidate => hasKnownFileExtension(candidate));
+
+  for (let index = pathCandidates.length - 1; index >= 0; index -= 1) {
+    const candidate = pathCandidates[index]!;
+    const candidateStart = lower.lastIndexOf(candidate.toLowerCase());
+    if (candidateStart < 0) continue;
+
+    const window = lower.slice(Math.max(0, candidateStart - 120), candidateStart + candidate.length + 40);
+    if (hasTargetWriteMarker(window)) {
+      return candidate;
+    }
+  }
+
+  const nameCandidates = extractFileNameCandidates(joined)
+    .filter(candidate => hasKnownFileExtension(candidate));
+
+  for (let index = nameCandidates.length - 1; index >= 0; index -= 1) {
+    const candidate = nameCandidates[index]!;
+    const candidateStart = lower.lastIndexOf(candidate.toLowerCase());
+    if (candidateStart < 0) continue;
+
+    const window = lower.slice(Math.max(0, candidateStart - 120), candidateStart + candidate.length + 40);
+    if (hasTargetWriteMarker(window)) {
+      return candidate;
+    }
+  }
+
+  return pathCandidates.at(-1) ?? nameCandidates.at(-1) ?? null;
+}
+
+function hasWriteIntent(lowerText: string): boolean {
+  return lowerText.includes('zapisz')
+    || lowerText.includes('zapisuj─Ö')
+    || lowerText.includes('zapisano')
+    || lowerText.includes('docelowa ┼Ťcie┼╝ka')
+    || lowerText.includes('potwierd┼║')
+    || lowerText.includes('potwierdzam');
+}
+
+function hasTargetWriteMarker(text: string): boolean {
+  return text.includes('zapisz do pliku')
+    || text.includes('zapisz do')
+    || text.includes('zapisuj─Ö do')
+    || text.includes('wynik zapisz do')
+    || text.includes('streszczenie zapisz do')
+    || text.includes('podsumowanie zapisz do')
+    || text.includes('rezultat zapisz do')
+    || text.includes('zapisz jako')
+    || text.includes('zapisz pod')
+    || text.includes('docelowa ┼Ťcie┼╝ka')
+    || text.includes('lokalizacj─Ö');
+}
+
+function extractFileNameCandidates(text: string): string[] {
+  const candidates: string[] = [];
+  let tokenStart = -1;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (tokenStart === -1) {
+      if (isFileNameStart(char)) tokenStart = index;
+      continue;
+    }
+
+    if (isFileNameBoundary(char)) {
+      addFileNameCandidate(candidates, text, tokenStart, index);
+      tokenStart = -1;
+    }
+  }
+
+  if (tokenStart !== -1) {
+    addFileNameCandidate(candidates, text, tokenStart, text.length);
+  }
+
+  return candidates;
+}
+
+function addFileNameCandidate(candidates: string[], text: string, start: number, end: number): void {
+  const candidate = stripTrailingPunctuation(text.slice(start, end).trim());
+  if (isFileNameToken(candidate)) candidates.push(candidate);
+}
+
+function isFileNameStart(char: string | undefined): boolean {
+  return char !== undefined && isAsciiLetterOrDigit(char);
+}
+
+function isAsciiLetterOrDigit(char: string): boolean {
+  const code = char.codePointAt(0) ?? 0;
+  return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+function isFileNameBoundary(char: string | undefined): boolean {
+  if (char === undefined) return true;
+  if (isWhitespace(char) || isQuote(char)) return true;
+  return char === '(' || char === ')' || char === '[' || char === ']' || char === '{' || char === '}' || char === ',' || char === ';' || char === ':' || char === '<' || char === '>' || char === '=';
+}
+
+function isWhitespace(char: string): boolean {
+  return char === ' ' || char === '\n' || char === '\r' || char === '\t';
+}
+
+function isQuote(char: string | undefined): boolean {
+  return char === '"' || char === "'" || char === '`';
+}
+
+function inferFilePathFromMessages(contextMessages: readonly unknown[]): string | null {
+  const joined = collectMessageText(contextMessages);
+  const candidates = extractPathCandidates(joined);
+  return candidates.find(candidate => hasKnownFileExtension(candidate)) ?? null;
+}
+
+function extractPathCandidates(text: string): string[] {
+  const candidates: string[] = [];
+  let tokenStart = -1;
+  let quote: string | null = null;
+
+  for (let index = 0; index < text.length; index += 1) {
+    if (tokenStart === -1) {
+      const start = startPathToken(text, index);
+      if (start !== null) {
+        tokenStart = start.start;
+        quote = start.quote;
+      }
+      continue;
+    }
+
+    if (isPathTokenEnd(text, index, quote)) {
+      addPathCandidate(candidates, text, tokenStart, index);
+      tokenStart = -1;
+      quote = null;
+    }
+  }
+
+  if (tokenStart !== -1) {
+    addPathCandidate(candidates, text, tokenStart, text.length);
+  }
+
+  return candidates;
+}
+
+function startPathToken(text: string, index: number): { start: number; quote: string | null } | null {
+  const char = text[index];
+  if (char !== undefined && isQuote(char)) {
+    const nextIndex = index + 1;
+    if (isPathStartAt(text, nextIndex)) return { start: nextIndex, quote: char };
+    return null;
+  }
+
+  if (isPathStartAt(text, index)) return { start: index, quote: null };
+  return null;
+}
+
+function isPathTokenEnd(text: string, index: number, quote: string | null): boolean {
+  const char = text[index];
+  if (quote !== null) return char === quote;
+  if (isWindowsDriveColon(text, index)) return false;
+  return isPathBoundary(char);
+}
+
+function addPathCandidate(candidates: string[], text: string, start: number, end: number): void {
+  const rawCandidate = stripTrailingPunctuation(text.slice(start, end).trim());
+  const candidate = trimPathCandidateToKnownExtension(rawCandidate);
+  if (candidate && isPathToken(candidate)) candidates.push(candidate);
+}
+
+function trimPathCandidateToKnownExtension(candidate: string): string {
+  const normalized = candidate.replaceAll('`', '').trim();
+  const lower = normalized.toLowerCase();
+
+  for (const extension of FILE_EXTENSION_ALIASES) {
+    const index = lower.lastIndexOf(extension);
+    if (index < 0) continue;
+
+    const nextChar = normalized[index + extension.length];
+    if (nextChar !== undefined && isAsciiLetterOrDigit(nextChar)) continue;
+
+    return normalized.slice(0, index + extension.length).trim();
+  }
+
+  return normalized;
+}
+
+function isPathStartAt(text: string, index: number): boolean {
+  const char = text[index];
+  const previous = index > 0 ? text[index - 1] : undefined;
+  const hasWhitespaceOrQuoteBoundary = previous === undefined || isWhitespace(previous) || isQuote(previous);
+
+  if (char === '/' || char === '\\') return hasWhitespaceOrQuoteBoundary;
+  return hasWhitespaceOrQuoteBoundary && isWindowsDriveStartAt(text, index);
+}
+
+function isWindowsDriveStartAt(text: string, index: number): boolean {
+  const char = text[index];
+  const separator = text[index + 2];
+  return char !== undefined
+    && isAsciiLetterOrDigit(char)
+    && text[index + 1] === ':'
+    && (separator === '/' || separator === '\\');
+}
+
+function isWindowsDriveColon(text: string, index: number): boolean {
+  const previous = index > 0 ? text[index - 1] : undefined;
+  const next = text[index + 1];
+  return previous !== undefined && isAsciiLetterOrDigit(previous) && (next === '/' || next === '\\');
+}
+
+function isPathBoundary(char: string | undefined): boolean {
+  if (char === undefined) return true;
+  if (isWhitespace(char)) return true;
+  return char === '(' || char === ')' || char === '[' || char === ']' || char === '{' || char === '}' || char === ',' || char === ';' || char === '<' || char === '>' || char === '=';
+}
+
+function isPathToken(candidate: string): boolean {
+  if (candidate.length === 0) return false;
+  if (!candidate.includes('/') && !candidate.includes('\\')) return false;
+  if (!hasKnownFileExtension(candidate)) return false;
+  return !candidate.includes('<') && !candidate.includes('>') && !candidate.includes('|') && !candidate.includes('*') && !candidate.includes('?');
+}
+
+function inferFileNamesFromMessages(contextMessages: readonly unknown[], limit = 8): string[] {
+  const joined = collectMessageText(contextMessages);
+  const matches = extractFileNameCandidates(joined)
+    .filter(candidate => hasKnownFileExtension(candidate));
+
+  const uniqueNames: string[] = [];
+  for (const candidate of matches) {
+    if (!uniqueNames.some(name => name.toLowerCase() === candidate.toLowerCase())) {
+      uniqueNames.push(candidate);
+    }
+    if (uniqueNames.length >= limit) break;
+  }
+  return uniqueNames;
+}
+
+function inferPrimaryReferencedFileName(contextMessages: readonly unknown[], targetFilePath: string): string | null {
+  const targetBasename = basename(targetFilePath.replaceAll('\\', '/')).toLowerCase();
+  return inferFileNamesFromMessages(contextMessages).find(name => basename(name.replaceAll('\\', '/')).toLowerCase() !== targetBasename) ?? null;
+}
+
+function buildSearchQueryForFileName(fileName: string, workspaceRoots: readonly string[]): SearchQuery {
+  return {
+    pattern: fileName,
+    workspaceRoots: workspaceRoots.length > 0 ? [...workspaceRoots] : ['.'],
+    include: `**/${fileName}`
+  };
+}
+
+async function findFilesByName(fileName: string, workspaceRoots: readonly string[]): Promise<string[]> {
+  const roots = workspaceRoots.length > 0 ? [...workspaceRoots] : ['.'];
+  const skippedDirs = new Set(['.git', 'node_modules', '__pycache__', '.venv', 'venv', '.tox', 'dist', 'build', 'out', '.next', '.nuxt', 'coverage']);
+  const matches: string[] = [];
+  const normalizedFileName = fileName.replaceAll('\\', '/').split('/').pop()?.toLowerCase() ?? fileName.toLowerCase();
+
+  async function scanDir(dir: string): Promise<void> {
+    if (matches.length >= 50) return;
+
+    const dirents = await readdir(dir, { withFileTypes: true }).catch(() => null);
+    if (!dirents) return;
+
+    for (const dirent of dirents) {
+      if (matches.length >= 50) break;
+
+      const fullPath = join(dir, dirent.name);
+      if (dirent.isDirectory()) {
+        if (!skippedDirs.has(dirent.name)) {
+          await scanDir(fullPath);
+        }
+        continue;
+      }
+
+      if (dirent.isFile() && dirent.name.toLowerCase() === normalizedFileName) {
+        matches.push(fullPath);
+      }
+    }
+  }
+
+  for (const root of roots) {
+    await scanDir(root);
+    if (matches.length >= 50) break;
+  }
+
+  return matches;
+}
+
+function resolveCandidateAgainstWorkspaceRoots(candidate: string, workspaceRoots: readonly string[]): string | readonly string[] {
+  const roots = workspaceRoots.length > 0 ? [...workspaceRoots] : ['.'];
+  const candidates = roots.map(root => resolve(root, candidate));
+  const existing = candidates.filter(path => existsSync(path));
+
+  if (existing.length === 1) return existing[0]!;
+  if (existing.length > 1) return existing;
+  return candidates[0] ?? candidate;
+}
+
+function inferProjectNameFromMessages(contextMessages: readonly unknown[]): string | null {
+  const joined = collectMessageText(contextMessages);
+  const markers = ['projekt ', 'projekcie ', 'projektu ', 'project ', 'repo ', 'repozytorium '];
+  const lower = joined.toLowerCase();
+
+  for (const marker of markers) {
+    const markerIndex = lower.indexOf(marker);
+    if (markerIndex === -1) continue;
+
+    const valueStart = markerIndex + marker.length;
+    const value = extractQuotedOrPlainValue(joined, valueStart);
+    if (value) return value;
+  }
+
+  return null;
+}
+
+function extractQuotedOrPlainValue(text: string, startIndex: number): string | null {
+  const valueStart = findNonWhitespace(text, startIndex);
+  if (valueStart === text.length) return null;
+
+  const quote = getQuote(text[valueStart]);
+  if (quote !== null) {
+    const endQuote = text.indexOf(quote, valueStart + 1);
+    const end = endQuote === -1 ? text.length : endQuote;
+    return normalizeProjectName(text.slice(valueStart + 1, end));
+  }
+
+  const end = findPlainValueEnd(text, valueStart);
+  return normalizeProjectName(text.slice(valueStart, end));
+}
+
+function findNonWhitespace(text: string, startIndex: number): number {
+  for (let index = startIndex; index < text.length; index += 1) {
+    const char = text[index];
+    if (char !== undefined && !isWhitespace(char)) return index;
+  }
+  return text.length;
+}
+
+function getQuote(char: string | undefined): string | null {
+  if (char === '"' || char === "'" || char === '`') return char;
+  return null;
+}
+
+function findPlainValueEnd(text: string, startIndex: number): number {
+  for (let index = startIndex; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '\n' || char === '\r' || char === ',' || char === ';' || char === '.' || char === ':') {
+      return index;
+    }
+  }
+  return text.length;
+}
+
+function normalizeProjectName(value: string): string | null {
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > 80) return null;
+
+  for (const char of trimmed) {
+    if (!isProjectNameChar(char)) return null;
+  }
+  return trimmed;
+}
+
+function isProjectNameChar(char: string): boolean {
+  return isAsciiLetterOrDigit(char) || char === '_' || char === ' ' || char === '.' || char === '-';
+}
+
+function preferRootsByProjectName(workspaceRoots: readonly string[], projectName: string | null): readonly string[] {
+  if (!projectName) return workspaceRoots;
+  const normalized = normalizeProjectNameForComparison(projectName);
+  const preferred = workspaceRoots.filter(root => {
+    const base = normalizeProjectNameForComparison(basename(root));
+    return base.includes(normalized) || normalized.includes(base);
+  });
+  return preferred.length > 0 ? preferred : workspaceRoots;
+}
+
+function normalizeProjectNameForComparison(value: string): string {
+  let result = '';
+  for (const char of value) {
+    const lower = char.toLowerCase();
+    if (lower === ' ' || lower === '_' || lower === '-') continue;
+    result += lower;
+  }
+  return result;
+}
+
+function pickBestMatch(matches: readonly string[]): string | null {
+  // Preferuj plik bezpo┼Ťrednio w katalogu g┼é├│wnym projektu (najkr├│tsza ┼Ťcie┼╝ka),
+  // z pomini─Öciem katalog├│w cache/build/test.
+  const noisySegments = ['.pytest_cache', 'node_modules', 'tests', 'test', 'fixtures', 'dist', 'build', 'out', '.venv', 'coverage'];
+  const clean = matches.filter(file => {
+    const normalized = file.replaceAll('\\', '/').toLowerCase();
+    return !noisySegments.some(seg => normalized.includes(`/${seg}/`));
+  });
+  const pool = clean.length > 0 ? clean : [...matches];
+  pool.sort((a, b) => countPathSegments(a) - countPathSegments(b));
+  return pool[0] ?? null;
+}
+
+function countPathSegments(path: string): number {
+  let count = 0;
+  let previousWasSeparator = true;
+
+  for (const char of path) {
+    if (char === '/' || char === '\\') {
+      if (!previousWasSeparator) count += 1;
+      previousWasSeparator = true;
+    } else {
+      previousWasSeparator = false;
+    }
+  }
+
+  return previousWasSeparator ? count : count + 1;
+}
+
+async function resolveReadFilePath(args: Record<string, unknown>, context?: ToolExecutionContext): Promise<string | readonly string[] | null> {
+  const messages = context?.messages ?? [];
+  const workspaceRoots = context?.workspaceRoots ?? [];
+
+  if (typeof args.filePath === 'string') {
+    const filePath = args.filePath.trim();
+    if (!filePath) return null;
+    if (isAbsolute(filePath)) return resolve(filePath);
+    const projectName = inferProjectNameFromMessages(messages);
+    const preferredRoots = preferRootsByProjectName(workspaceRoots, projectName);
+    return resolveCandidateAgainstWorkspaceRoots(filePath, preferredRoots);
+  }
+
+  const fullPath = inferFilePathFromMessages(messages);
+  if (fullPath) {
+    const trimmed = fullPath.trim();
+    if (isAbsolute(trimmed)) return resolve(trimmed);
+    return resolveCandidateAgainstWorkspaceRoots(trimmed, workspaceRoots);
+  }
+
+  const fileName = inferFileNameFromMessages(messages);
+  if (!fileName) return null;
+
+  const projectName = inferProjectNameFromMessages(messages);
+  const preferredRoots = preferRootsByProjectName(workspaceRoots, projectName);
+
+  const matches = await findFilesByName(fileName, preferredRoots);
+  if (matches.length === 1) return matches[0]!;
+  if (matches.length > 1) {
+    const best = pickBestMatch(matches);
+    if (best) return best;
+    return matches;
+  }
+  return null;
+}
+
+async function resolveReadWriteFilePath(filePath: string, context?: ToolExecutionContext): Promise<string | readonly string[] | null> {
+  const workspaceRoots = context?.workspaceRoots ?? [];
+  const messages = context?.messages ?? [];
+  const trimmed = filePath.trim();
+  if (!trimmed) return null;
+  if (isAbsolute(trimmed)) return resolve(trimmed);
+
+  const referencedFilePath = inferFilePathFromMessages(messages);
+  if (referencedFilePath) {
+    const preferredRoots = preferRootsByProjectName([dirname(referencedFilePath)], null);
+    const roots = preferredRoots.length > 0 ? preferredRoots : workspaceRoots;
+    return resolveCandidateAgainstWorkspaceRoots(trimmed, roots);
+  }
+
+  const referencedFileName = inferPrimaryReferencedFileName(messages, trimmed);
+  if (referencedFileName) {
+    const matches = await findFilesByName(referencedFileName, workspaceRoots);
+    const best = pickBestMatch(matches);
+    if (best) {
+      const preferredRoots = preferRootsByProjectName([dirname(best)], null);
+      const roots = preferredRoots.length > 0 ? preferredRoots : workspaceRoots;
+      return resolveCandidateAgainstWorkspaceRoots(trimmed, roots);
+    }
+  }
+
+  return resolveCandidateAgainstWorkspaceRoots(trimmed, workspaceRoots);
+}
+
+function resolveSearchQuery(args: Record<string, unknown>, context?: ToolExecutionContext): SearchQuery | null {
+  const workspaceRoots = context?.workspaceRoots ?? [];
+  const explicitRoots = Array.isArray(args.workspaceRoots) && args.workspaceRoots.length > 0
+    ? args.workspaceRoots.filter((root): root is string => typeof root === 'string')
+    : [];
+
+  let roots: string[];
+  if (explicitRoots.length > 0) {
+    roots = explicitRoots;
+  } else if (workspaceRoots.length > 0) {
+    roots = [...workspaceRoots];
+  } else {
+    roots = ['.'];
+  }
+
+  if (typeof args.pattern === 'string' && args.pattern.trim()) {
+    const pattern = args.pattern.trim();
+    const include = resolveSearchInclude(pattern, args.include);
+    const exclude = typeof args.exclude === 'string' ? args.exclude : undefined;
+    return { pattern, include, exclude, workspaceRoots: roots };
+  }
+
+  const fileName = inferFileNameFromMessages(context?.messages ?? []);
+  if (!fileName) return null;
+  return buildSearchQueryForFileName(fileName, workspaceRoots);
+}
+
+function resolveSearchInclude(pattern: string, include: unknown): string {
+  if (typeof include === 'string' && include.trim()) {
+    return include.trim();
+  }
+
+  if (pattern.includes('/') || pattern.includes('\\')) {
+    return `**/${basename(pattern.replaceAll('\\', '/'))}`;
+  }
+  return `**/${pattern}`;
+}
+
+function isDiffInput(value: unknown): value is { original: string; modified: string } {
+  if (!isRecord(value)) return false;
+  return typeof value.original === 'string' && typeof value.modified === 'string';
+}
+
+function isSingleResolvedPath(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+async function executeReadFileTool(toolCall: ToolCall, context?: ToolExecutionContext): Promise<string> {
+  const args = parseToolArguments(toolCall);
+  const resolvedPath = await resolveReadFilePath(args, context);
+  if (resolvedPath === null) {
+    return JSON.stringify({ error: 'read_file: missing filePath' });
+  }
+  if (Array.isArray(resolvedPath)) {
+    return JSON.stringify({
+      status: 'error',
+      code: 'AMBIGUOUS_FILE',
+      message: `Znaleziono kilka plik├│w o nazwie lub ┼Ťcie┼╝ce pasuj─ůcej do ┼╝─ůdania: ${resolvedPath.join(', ')}`,
+      candidates: resolvedPath
+    });
+  }
+
+  const filePath = resolvedPath as string;
+  const result = await readEditorFile(filePath);
+  if (result.status === 'error') {
+    return JSON.stringify(result);
+  }
+  return JSON.stringify({
+    status: 'ok',
+    filePath,
+    content: result.content,
+    encoding: result.encoding
+  });
+}
+
+async function executeSearchFilesTool(toolCall: ToolCall, context: ToolExecutionContext | undefined, workspaceService: WorkspaceService): Promise<string> {
+  const args = parseToolArguments(toolCall);
+  const query = resolveSearchQuery(args, context);
+  if (!query) {
+    return JSON.stringify({ error: 'search_files: invalid query' });
+  }
+  const result = await workspaceService.searchFiles(query);
+  if (Array.isArray(result)) {
+    if (result.length === 0) {
+      return handleEmptySearchResults(query, context);
+    }
+    return JSON.stringify({
+      status: 'ok',
+      query,
+      results: result.map(item => ({
+        file: item.file,
+        line: item.line,
+        col: item.col,
+        snippet: item.snippet,
+        isSensitive: item.isSensitive
+      }))
+    });
+  }
+  return JSON.stringify(result);
+}
+
+async function handleEmptySearchResults(query: SearchQuery, context: ToolExecutionContext | undefined): Promise<string> {
+  const fileName = inferFileNameFromMessages(context?.messages ?? []);
+  if (!fileName) {
+    return noSearchResultsResponse(query);
+  }
+
+  const projectName = inferProjectNameFromMessages(context?.messages ?? []);
+  const preferredRoots = preferRootsByProjectName(context?.workspaceRoots ?? [], projectName);
+  const matches = await findFilesByName(fileName, preferredRoots);
+  const best = pickBestMatch(matches);
+  if (!best) {
+    return noSearchResultsResponse(query);
+  }
+
+  const fileResult = await readEditorFile(best);
+  if (fileResult.status === 'ok') {
+    return fileSearchFallbackResponse(query, best, fileResult.content, fileResult.encoding);
+  }
+  return fileMatchesWithoutContentResponse(query, matches);
+}
+
+function noSearchResultsResponse(query: SearchQuery): string {
+  return JSON.stringify({
+    status: 'ok',
+    query,
+    results: [],
+    message: 'Nie znaleziono wynik├│w wyszukiwania w aktywnym workspace.'
+  });
+}
+
+function fileSearchFallbackResponse(query: SearchQuery, filePath: string, content: string, encoding: string): string {
+  return JSON.stringify({
+    status: 'ok',
+    query,
+    results: [],
+    file: filePath,
+    content,
+    encoding,
+    message: 'Wyszukiwanie tekstowe nie zwr├│ci┼éo wynik├│w; zwracam zawarto┼Ť─ç najlepiej pasuj─ůcego pliku.'
+  });
+}
+
+function fileMatchesWithoutContentResponse(query: SearchQuery, matches: readonly string[]): string {
+  return JSON.stringify({
+    status: 'ok',
+    query,
+    results: [],
+    files: matches.map(file => ({ file })),
+    message: 'Znaleziono pasuj─ůce pliki, ale nie uda┼éo si─Ö odczyta─ç zawarto┼Ťci.'
+  });
+}
+
+async function executeApplyPatchTool(toolCall: ToolCall): Promise<string> {
+  const args = parseToolArguments(toolCall);
+  if (!isWorkspaceEditInput(args)) {
+    return JSON.stringify({ error: 'apply_patch: invalid patch payload' });
+  }
+  const result = await applyWorkspaceEdit(args);
+  return JSON.stringify(result);
+}
+
+async function executeCreateFileTool(toolCall: ToolCall, context?: ToolExecutionContext): Promise<string> {
+  const args = parseToolArguments(toolCall);
+  const messages = context?.messages ?? [];
+  let filePath = typeof args.filePath === 'string' ? args.filePath : null;
+  if (!filePath) {
+    filePath = inferTargetFileNameFromMessages(messages) ?? inferFileNameFromMessages(messages);
+  }
+  if (!filePath) {
+    return JSON.stringify({ error: 'create_file: missing filePath' });
+  }
+  if (args.content !== undefined && typeof args.content !== 'string') {
+    return JSON.stringify({ error: 'create_file: invalid content - expected string' });
+  }
+  const resolvedPath = await resolveReadWriteFilePath(filePath, context);
+  if (resolvedPath === null) {
+    return JSON.stringify({ error: 'create_file: unable to resolve filePath' });
+  }
+  if (!isSingleResolvedPath(resolvedPath)) {
+    return JSON.stringify({
+      status: 'error',
+      code: 'WRITE_CONFLICT',
+      message: `┼Ücie┼╝ka jest niejednoznaczna: ${resolvedPath.join(', ')}`
+    });
+  }
+  const resolvedFilePath = resolve(resolvedPath);
+  if (existsSync(resolvedFilePath)) {
+    return JSON.stringify({
+      status: 'error',
+      code: 'WRITE_CONFLICT',
+      message: `Plik ju┼╝ istnieje: ${resolvedFilePath}`
+    });
+  }
+  await mkdir(dirname(resolvedFilePath), { recursive: true });
+  const result = await createEditorFile(resolvedFilePath, typeof args.content === 'string' ? args.content : inferCreateFileContent(filePath));
+  if (result.status === 'ok') {
+    return JSON.stringify({ ...result, filePath: resolvedFilePath });
+  }
+  return JSON.stringify(result);
+}
+
+async function executeShowDiffTool(toolCall: ToolCall): Promise<string> {
+  const args = parseToolArguments(toolCall);
+  if (!isDiffInput(args)) {
+    return JSON.stringify({ error: 'show_diff: invalid input' });
+  }
+  const result = showDiff(args.original, args.modified);
+  return JSON.stringify(result);
 }
 
 async function resolveStartupState(): Promise<StartupState> {
@@ -806,9 +1457,69 @@ async function start(): Promise<void> {
       }
     }
   });
-  const modelGateway = createModelGateway();
+  const modelGateway = createModelGateway(
+    async (toolCall: ToolCall, context?: ToolExecutionContext) => {
+      const toolAction = classifyToolAction(toolCall.function.name);
+      const workspaceRoots = workspaceService.getWorkspaceRoots();
+      const permissionRequest = buildPermissionRequest(toolCall, toolAction, workspaceRoots);
+      const evaluation = await permissionBroker.evaluate(permissionRequest);
+
+      if (evaluation.decision === 'deny') {
+        return JSON.stringify({ error: `Permission denied: ${evaluation.reason}` });
+      }
+
+      if (evaluation.decision === 'prompt') {
+        return JSON.stringify({ error: `Permission required: ${evaluation.reason}`, permissionPrompt: true, decisionId: evaluation.decisionId });
+      }
+
+      const startedAt = Date.now();
+      let outcome: 'success' | 'error' = 'success';
+      let result: string;
+      try {
+        switch (toolCall.function.name) {
+          case 'read_file':
+            result = await executeReadFileTool(toolCall, context);
+            break;
+          case 'search_files':
+            result = await executeSearchFilesTool(toolCall, context, workspaceService);
+            break;
+          case 'apply_patch':
+            result = await executeApplyPatchTool(toolCall);
+            break;
+          case 'create_file':
+            result = await executeCreateFileTool(toolCall, context);
+            break;
+          case 'show_diff':
+            result = await executeShowDiffTool(toolCall);
+            break;
+          default:
+            result = JSON.stringify({ error: `Unknown tool: ${toolCall.function.name}` });
+        }
+      } catch (err) {
+        outcome = 'error';
+        result = JSON.stringify({ error: String(err) });
+      }
+
+      const decision = createToolDecision(toolCall, toolAction, evaluation, startedAt);
+      permissionBroker.afterToolCall(permissionRequest, decision, outcome, Date.now() - startedAt);
+      return result;
+    },
+    () => workspaceService.getWorkspaceRoots()
+  );
+
+  registerBuiltInTools(modelGateway);
+
+  const apiKeyProvider = async (providerId: ModelProviderId): Promise<string | null> => {
+    try {
+      const keytar = await import('keytar');
+      return await keytar.getPassword('agentdeck', `api-key-${providerId}`);
+    } catch {
+      return null;
+    }
+  };
+
   // Register default provider adapters
-  for (const adapter of createDefaultAdapters()) {
+  for (const adapter of createDefaultAdapters(apiKeyProvider)) {
     modelGateway.registerAdapter(adapter);
   }
 
@@ -818,7 +1529,7 @@ async function start(): Promise<void> {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const headers = { ...details.responseHeaders };
 
-    // Case-insensitive lookup — Electron/Chromium returns lowercase keys
+    // Case-insensitive lookup ÔÇö Electron/Chromium returns lowercase keys
     const existingKey = Object.keys(headers).find(
       k => k.toLowerCase() === 'content-security-policy'
     );
@@ -890,3 +1601,82 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
+
+// ?? Permission Broker helpers ?????????????????????????????????????????????
+
+type ToolAction = 'read' | 'write' | 'delete' | 'workspaceEdit';
+type ToolRiskLevel = 'safe' | 'low' | 'medium' | 'high' | 'critical';
+type ToolDecision = 'allow' | 'prompt' | 'deny';
+
+function classifyToolAction(toolName: string): ToolAction {
+  switch (toolName) {
+    case 'read_file':
+    case 'search_files':
+    case 'show_diff':
+      return 'read';
+    case 'create_file':
+    case 'apply_patch':
+      return 'write';
+    case 'delete_file':
+      return 'delete';
+    case 'rename_file':
+      return 'workspaceEdit';
+    default:
+      return 'read';
+  }
+}
+
+function buildPermissionRequest(
+  toolCall: ToolCall,
+  action: ToolAction,
+  workspaceRoots: readonly string[]
+) {
+  return {
+    id: `req-${crypto.randomUUID()}`,
+    sessionId: 'main-session',
+    taskId: `task-${toolCall.id}`,
+    workerId: undefined,
+    actorKind: 'agent' as const,
+    kind: action,
+    toolName: toolCall.function.name,
+    target: extractToolTarget(toolCall),
+    metadata: { arguments: toolCall.function.arguments },
+    workspaceRoots,
+    runtimeKind: 'parent' as const
+  };
+}
+
+function extractToolTarget(toolCall: ToolCall): string {
+  try {
+    const args = JSON.parse(toolCall.function.arguments);
+    if (typeof args.filePath === 'string') return args.filePath;
+    if (typeof args.target === 'string') return args.target;
+    return toolCall.function.name;
+  } catch {
+    return toolCall.function.name;
+  }
+}
+
+function createToolDecision(
+  toolCall: ToolCall,
+  action: ToolAction,
+  evaluation: { decision: string; risk: string; reason: string; decisionId?: string | undefined },
+  startedAt: number
+) {
+  return {
+    id: `decision-${startedAt}`,
+    requestId: `req-${startedAt}`,
+    sessionId: 'main-session',
+    taskId: `task-${toolCall.id}`,
+    workerId: undefined,
+    actorKind: 'agent' as const,
+    kind: action,
+    toolName: toolCall.function.name,
+    target: extractToolTarget(toolCall),
+    runtimeKind: 'parent' as const,
+    risk: evaluation.risk as ToolRiskLevel,
+    decision: evaluation.decision as ToolDecision,
+    reason: evaluation.reason,
+    createdAt: startedAt
+  };
+}

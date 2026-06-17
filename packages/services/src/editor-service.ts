@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { open, readFile, writeFile } from 'node:fs/promises';
 
 // Cross-platform utilities that work in both Node and browser environments.
 function pathBasename(p: string): string {
@@ -176,6 +176,29 @@ export async function writeEditorFile(filePath: string, content: string): Promis
     return { status: 'ok' };
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
+    if (err.code === 'EACCES' || err.code === 'EPERM') {
+      return { status: 'error', code: 'ACCESS_DENIED', message: `Access denied: ${filePath}` };
+    }
+    return { status: 'error', code: 'UNKNOWN', message: err.message ?? 'Unknown error' };
+  }
+}
+
+export async function createEditorFile(filePath: string, content: string): Promise<FileWriteResult> {
+  try {
+    const handle = await open(filePath, 'wx');
+    try {
+      await handle.writeFile(content, 'utf8');
+    } finally {
+      await handle.close();
+    }
+    const hash = computeHash(content);
+    editorBuffers.set(filePath, { content, hash, isDirty: false });
+    return { status: 'ok' };
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === 'EEXIST') {
+      return { status: 'error', code: 'WRITE_CONFLICT', message: `File already exists: ${filePath}` };
+    }
     if (err.code === 'EACCES' || err.code === 'EPERM') {
       return { status: 'error', code: 'ACCESS_DENIED', message: `Access denied: ${filePath}` };
     }

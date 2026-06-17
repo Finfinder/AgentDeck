@@ -19,6 +19,7 @@
     "ignoreDeprecations": "6.0",
     "paths": {
       "@agentdeck/agent-runtime": ["packages/agent-runtime/src/index.ts"],
+      "@agentdeck/permission-broker": ["packages/permission-broker/src/index.ts"],
       "@agentdeck/services": ["packages/services/src/index.ts"],
       "@agentdeck/shared": ["packages/shared/src/index.ts"],
       "@agentdeck/workbench": ["packages/workbench/src/index.ts"]

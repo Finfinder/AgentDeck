@@ -1,6 +1,22 @@
 import { EventEmitter } from 'node:events';
 import { randomBytes } from 'node:crypto';
 
+import { createAgentRuntime } from '@agentdeck/agent-runtime';
+import type {
+  AgentRuntime,
+  AgentRuntimeCreateOptions,
+  AgentRuntimeResult,
+  AgentRuntimeSessionState,
+  AgentRuntimeStartWorkerOptions,
+  AgentRuntimeStartSubagentOptions,
+  AgentRuntimeResumeOptions,
+  AgentRuntimeTaskState,
+  AgentRuntimeWorkerDefinition,
+  AgentRuntimeWorkerInput,
+  AgentRuntimeWorkerOutput,
+  AgentRuntimeWorkerState
+} from '@agentdeck/agent-runtime';
+
 import type {
   ChatMessage,
   ChatStreamEvent,
@@ -27,6 +43,11 @@ export interface RetryPolicy {
   readonly jitterFactor: number;
 }
 
+type AgentRuntimeEvent = {
+  type: 'session-changed' | 'task-changed' | 'worker-changed' | 'session-crashed';
+  payload: unknown;
+};
+
 const DEFAULT_RETRY_POLICY: RetryPolicy = {
   maxRetries: 3,
   baseDelayMs: 1000,
@@ -36,6 +57,12 @@ const DEFAULT_RETRY_POLICY: RetryPolicy = {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function createAbortError(): Error {
+  const error = new Error('Aborted');
+  error.name = 'AbortError';
+  return error;
 }
 
 function computeBackoffDelay(attempt: number, policy: RetryPolicy): number {
@@ -76,6 +103,20 @@ export type ToolDefinition = Readonly<{
   }>;
 }>;
 
+export type ToolExecutor = (toolCall: ToolCall, context?: ToolExecutionContext) => Promise<string>;
+
+export type ToolExecutionContext = {
+  messages: readonly ChatMessage[];
+  workspaceRoots: readonly string[];
+};
+
+export type WorkspaceRootProvider = () => readonly string[];
+
+type ToolRegistration = {
+  definition: ToolDefinition;
+  executor?: ToolExecutor;
+};
+
 // ?? In-memory chat tab store ??????????????????????????????????????????????
 
 type ChatTabInternal = {
@@ -85,6 +126,8 @@ type ChatTabInternal = {
   activeModel: string;
   activeProvider: ModelProviderId;
   isStreaming: boolean;
+  runtimeSessionId: string | undefined;
+  runtimeWorkerId: string | undefined;
   error: string | undefined;
   abortController: AbortController | undefined;
 };
@@ -98,6 +141,12 @@ function toChatTabState(tab: ChatTabInternal): ChatTabState {
     activeProvider: tab.activeProvider,
     isStreaming: tab.isStreaming
   };
+  if (tab.runtimeSessionId) {
+    (result as { runtimeSessionId?: string }).runtimeSessionId = tab.runtimeSessionId;
+  }
+  if (tab.runtimeWorkerId) {
+    (result as { runtimeWorkerId?: string }).runtimeWorkerId = tab.runtimeWorkerId;
+  }
   if (tab.error !== undefined) {
     (result as { error?: string }).error = tab.error;
   }
@@ -167,16 +216,46 @@ const DEFAULT_MODEL: ModelInfo = {
 export type ModelGatewayEventMap = {
   'chat-stream': (tabId: string, event: ChatStreamEvent) => void;
   'chat-tabs-changed': (tabs: readonly ChatTabState[]) => void;
+  'agent-runtime-event': (event: AgentRuntimeEvent) => void;
 };
+
+type ChatTabSession = Readonly<{
+  sessionId: string;
+  taskId: string;
+  workerId: string;
+  status: 'idle' | 'running' | 'stopped';
+}>;
 
 export class ModelGateway extends EventEmitter {
   private readonly tabs = new Map<string, ChatTabInternal>();
+  private readonly sessionsByTab = new Map<string, ChatTabSession>();
+  private readonly tabIdsBySessionId = new Map<string, string>();
+  private readonly runtimeResultsByTab = new Map<string, SendMessageResult>();
   private readonly adapters = new Map<ModelProviderId, ModelProviderAdapter>();
-  private readonly tools: ToolDefinition[] = [];
+  private readonly tools: ToolRegistration[] = [];
+  private readonly runtime: AgentRuntime;
   private providers: ModelProviderState[] = [...DEFAULT_PROVIDERS];
   private activeProvider: ModelProviderId = 'ollama';
   private activeModel: string = DEFAULT_MODEL.id;
   private retryPolicy: RetryPolicy = { ...DEFAULT_RETRY_POLICY };
+
+  constructor(
+    private readonly toolExecutor?: ToolExecutor,
+    private readonly workspaceRootProvider?: WorkspaceRootProvider,
+    runtimeOptions?: Omit<AgentRuntimeCreateOptions, 'workerFactory'>
+  ) {
+    super();
+    this.runtime = createAgentRuntime({
+      ...runtimeOptions,
+      workerFactory: workerId => this.createRuntimeWorker(workerId)
+    });
+    this.runtime.on('session-changed', session => this.emitAgentRuntimeEvent('session-changed', session));
+    this.runtime.on('task-changed', task => this.emitAgentRuntimeEvent('task-changed', task));
+    this.runtime.on('worker-changed', worker => this.emitAgentRuntimeEvent('worker-changed', worker));
+    this.runtime.on('session-crashed', (session, error) => this.emitAgentRuntimeEvent('session-crashed', { session, error }));
+  }
+
+  // Phase 7: Tool Router
   private toolRouter: ToolRouter | null = null;
 
   /** Set the ToolRouter instance for executing tool calls through approval flow. */
@@ -196,22 +275,26 @@ export class ModelGateway extends EventEmitter {
 
   // ?? Tool registration ???????????????????????????????????????????????????
 
-  registerTool(tool: ToolDefinition): void {
-    const existing = this.tools.findIndex(t => t.function.name === tool.function.name);
+  registerTool(tool: ToolDefinition, executor?: ToolExecutor): void {
+    const existing = this.tools.findIndex(t => t.definition.function.name === tool.function.name);
+    const registration: ToolRegistration = { definition: tool };
+    if (executor) {
+      registration.executor = executor;
+    }
     if (existing >= 0) {
-      this.tools[existing] = tool;
+      this.tools[existing] = registration;
     } else {
-      this.tools.push(tool);
+      this.tools.push(registration);
     }
   }
 
   unregisterTool(name: string): void {
-    const idx = this.tools.findIndex(t => t.function.name === name);
+    const idx = this.tools.findIndex(t => t.definition.function.name === name);
     if (idx >= 0) this.tools.splice(idx, 1);
   }
 
   getTools(): readonly ToolDefinition[] {
-    return this.tools;
+    return this.tools.map(t => t.definition);
   }
 
   clearTools(): void {
@@ -269,6 +352,10 @@ export class ModelGateway extends EventEmitter {
     const tab = this.tabs.get(tabId);
     if (tab) {
       tab.activeModel = modelId;
+      const session = this.sessionsByTab.get(tabId);
+      if (session) {
+        this.runtime.updateSessionModel(session.sessionId, modelId);
+      }
       this.emitTabsChanged();
     }
   }
@@ -316,9 +403,28 @@ export class ModelGateway extends EventEmitter {
       activeModel: this.activeModel,
       activeProvider: this.activeProvider,
       isStreaming: false,
+      runtimeSessionId: undefined,
+      runtimeWorkerId: undefined,
       error: undefined,
       abortController: undefined
     };
+    const sessionResult = this.runtime.createSession({
+      chatTabId: id,
+      modelId: tab.activeModel,
+      agentName: 'chat-agent',
+      allowedTools: this.getTools().map(tool => tool.function.name)
+    });
+    if (sessionResult.status === 'ok') {
+      const parentTask = sessionResult.value.tasks[0];
+      this.sessionsByTab.set(id, {
+        sessionId: sessionResult.value.id,
+        taskId: parentTask?.id ?? '',
+        workerId: '',
+        status: 'idle'
+      });
+      tab.runtimeSessionId = sessionResult.value.id;
+      this.tabIdsBySessionId.set(sessionResult.value.id, id);
+    }
     this.tabs.set(id, tab);
     this.emitTabsChanged();
     return toChatTabState(tab);
@@ -330,6 +436,14 @@ export class ModelGateway extends EventEmitter {
     // Abort any in-flight streaming
     if (tab.abortController) {
       tab.abortController.abort();
+    }
+    tab.runtimeWorkerId = undefined;
+    const session = this.sessionsByTab.get(tabId);
+    if (session) {
+      this.runtime.stopSession(session.sessionId);
+      this.tabIdsBySessionId.delete(session.sessionId);
+      this.runtimeResultsByTab.delete(tabId);
+      this.sessionsByTab.delete(tabId);
     }
     this.tabs.delete(tabId);
     this.emitTabsChanged();
@@ -345,13 +459,32 @@ export class ModelGateway extends EventEmitter {
   async sendMessage(tabId: string, content: string): Promise<SendMessageResult> {
     const tab = this.tabs.get(tabId);
     if (!tab) {
-      return { status: 'error', code: 'UNKNOWN', message: `Chat tab not found: ${tabId}` };
+      return this.unknownTabError(tabId);
     }
 
     if (tab.isStreaming) {
-      return { status: 'error', code: 'PROVIDER_ERROR', message: 'Already streaming a response.' };
+      return this.alreadyStreamingError();
     }
 
+    this.prepareTabForStreaming(tabId, tab, content);
+
+    const session = this.sessionsByTab.get(tabId);
+    if (session) {
+      return this.sendWithRuntimeWorker(tabId, tab, session, content);
+    }
+
+    return this.sendWithoutRuntimeSession(tabId, tab);
+  }
+
+  private unknownTabError(tabId: string): SendMessageResult {
+    return { status: 'error', code: 'UNKNOWN', message: `Chat tab not found: ${tabId}` };
+  }
+
+  private alreadyStreamingError(): SendMessageResult {
+    return { status: 'error', code: 'PROVIDER_ERROR', message: 'Already streaming a response.' };
+  }
+
+  private prepareTabForStreaming(tabId: string, tab: ChatTabInternal, content: string): void {
     const userMessage: ChatMessage = {
       role: 'user',
       content,
@@ -359,7 +492,6 @@ export class ModelGateway extends EventEmitter {
     };
     tab.messages = [...tab.messages, userMessage];
 
-    // Update title from first user message
     if (tab.messages.filter(m => m.role === 'user').length === 1) {
       tab.title = generateTitle(tab.messages);
     }
@@ -368,28 +500,265 @@ export class ModelGateway extends EventEmitter {
     tab.error = undefined;
     tab.abortController = new AbortController();
     this.emitTabsChanged();
+  }
 
+  private async sendWithRuntimeWorker(
+    tabId: string,
+    tab: ChatTabInternal,
+    session: ChatTabSession,
+    content: string
+  ): Promise<SendMessageResult> {
+    const started = this.startRuntimeWorkerForTab(tabId, tab, session, content);
+    if ('status' in started) {
+      return started;
+    }
+
+    const runResult = this.runtime.runWorker(started.workerId);
+    if (runResult.status === 'error') {
+      return this.failRuntimeWorker(tabId, tab, session, runResult.message);
+    }
+
+    const waitResult = await this.runtime.waitForWorker(started.workerId);
+    return this.finishRuntimeWorker(tabId, tab, session, waitResult);
+  }
+
+  private startRuntimeWorkerForTab(
+    tabId: string,
+    tab: ChatTabInternal,
+    session: ChatTabSession,
+    content: string
+  ): { workerId: string } | SendMessageResult {
+    const startResult = this.runtime.startWorker(this.buildRuntimeStartOptions(tabId, tab, session, content));
+    if (startResult.status === 'error') {
+      return this.failRuntimeWorker(tabId, tab, session, startResult.message);
+    }
+
+    const workerId = startResult.value.id;
+    tab.runtimeWorkerId = workerId;
+    this.sessionsByTab.set(tabId, {
+      ...session,
+      workerId,
+      status: 'running'
+    });
+    return { workerId };
+  }
+
+  private buildRuntimeStartOptions(
+    tabId: string,
+    tab: ChatTabInternal,
+    session: ChatTabSession,
+    content: string
+  ): AgentRuntimeStartWorkerOptions {
+    return {
+      sessionId: session.sessionId,
+      taskId: session.taskId,
+      prompt: content,
+      context: tab.messages.map(message => `${message.role}: ${message.content}`),
+      allowedTools: this.getAllowedToolsForTab(tab) ?? this.getTools().map(tool => tool.function.name)
+    };
+  }
+
+  private failRuntimeWorker(tabId: string, tab: ChatTabInternal, session: ChatTabSession, message: string): SendMessageResult {
+    tab.isStreaming = false;
+    tab.abortController = undefined;
+    tab.runtimeWorkerId = undefined;
+    tab.error = message;
+    this.sessionsByTab.set(tabId, { ...session, status: 'idle', workerId: '' });
+    this.emitTabsChanged();
+    return { status: 'error', code: 'UNKNOWN', message };
+  }
+
+  private finishRuntimeWorker(
+    tabId: string,
+    tab: ChatTabInternal,
+    session: ChatTabSession,
+    waitResult: AgentRuntimeResult<AgentRuntimeWorkerState>
+  ): SendMessageResult {
+    tab.runtimeWorkerId = undefined;
+    this.sessionsByTab.set(tabId, { ...session, status: 'idle', workerId: '' });
+
+    if (waitResult.status === 'error') {
+      return this.failRuntimeWorker(tabId, tab, session, waitResult.message);
+    }
+    if (waitResult.value.status === 'crashed') {
+      return this.failRuntimeWorker(tabId, tab, session, waitResult.value.lastError ?? 'Runtime worker crashed.');
+    }
+
+    const result = this.runtimeResultsByTab.get(tabId);
+    return result ?? { status: 'ok' };
+  }
+
+  private async sendWithoutRuntimeSession(tabId: string, tab: ChatTabInternal): Promise<SendMessageResult> {
     try {
       const result = await this.runChatLoop(tabId, tab);
+      this.runtimeResultsByTab.set(tabId, result);
       return result;
     } catch (err) {
-      tab.isStreaming = false;
-      tab.abortController = undefined;
+      return this.handleSendMessageError(tabId, tab, err);
+    } finally {
+      this.clearRuntimeWorkerFromTab(tabId, tab);
+    }
+  }
 
-      const isAbort = err instanceof Error && err.name === 'AbortError';
-      if (isAbort) {
-        tab.error = 'Streaming cancelled.';
-        this.emit('chat-stream', tabId, { type: 'error', message: tab.error });
-        this.emitTabsChanged();
-        return { status: 'ok' };
+  private handleSendMessageError(tabId: string, tab: ChatTabInternal, err: unknown): SendMessageResult {
+    tab.isStreaming = false;
+    tab.abortController = undefined;
+
+    if (this.isAbortError(err)) {
+      return this.handleAbortError(tabId, tab);
+    }
+
+    const message = this.toErrorMessage(err);
+    const code = classifyError(err);
+    tab.error = message;
+    this.emit('chat-stream', tabId, { type: 'error', message });
+    this.emitTabsChanged();
+    return { status: 'error', code, message };
+  }
+
+  private handleAbortError(tabId: string, tab: ChatTabInternal): SendMessageResult {
+    const session = this.sessionsByTab.get(tabId);
+    if (session?.workerId) {
+      this.runtime.stopWorker(session.workerId);
+      this.sessionsByTab.set(tabId, { ...session, status: 'idle', workerId: '' });
+      tab.runtimeWorkerId = undefined;
+    }
+    tab.error = 'Streaming cancelled.';
+    this.emit('chat-stream', tabId, { type: 'error', message: tab.error });
+    this.emitTabsChanged();
+    return { status: 'ok' };
+  }
+
+  private clearRuntimeWorkerFromTab(tabId: string, tab: ChatTabInternal): void {
+    const session = this.sessionsByTab.get(tabId);
+    if (session?.workerId) {
+      this.sessionsByTab.set(tabId, { ...session, status: 'idle', workerId: '' });
+      tab.runtimeWorkerId = undefined;
+    }
+  }
+
+  private isAbortError(err: unknown): boolean {
+    return err instanceof Error && err.name === 'AbortError';
+  }
+
+  private toErrorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : 'Unknown error';
+  }
+
+  setTabAllowedTools(tabId: string, allowedTools: readonly string[]): void {
+    const session = this.sessionsByTab.get(tabId);
+    if (!session) return;
+    this.runtime.updateSessionAllowedTools(session.sessionId, [...allowedTools]);
+  }
+
+  listAgentRuntimeSessions(): readonly AgentRuntimeSessionState[] {
+    return this.runtime.listSessions().filter(session => session.status !== 'stopped');
+  }
+
+  getAgentRuntimeSession(sessionId: string): AgentRuntimeSessionState | undefined {
+    const session = this.runtime.getSession(sessionId);
+    return session?.status === 'stopped' ? undefined : session;
+  }
+
+  listAgentRuntimeWorkers(sessionId?: string): readonly AgentRuntimeWorkerState[] {
+    return this.runtime.listWorkers(sessionId);
+  }
+
+  getAgentRuntimeWorker(workerId: string): AgentRuntimeWorkerState | undefined {
+    return this.runtime.getWorker(workerId);
+  }
+
+  listAgentRuntimeTasks(sessionId?: string): readonly AgentRuntimeTaskState[] {
+    return this.runtime.listTasks(sessionId);
+  }
+
+  getAgentRuntimeTask(taskId: string): AgentRuntimeTaskState | undefined {
+    return this.runtime.getTask(taskId);
+  }
+
+  startAgentRuntimeWorker(options: AgentRuntimeStartWorkerOptions): AgentRuntimeResult<AgentRuntimeWorkerState> {
+    return this.runtime.startWorker(options);
+  }
+
+  async runtimeWaitForWorker(workerId: string): Promise<AgentRuntimeResult<AgentRuntimeWorkerState>> {
+    return await this.runtime.waitForWorker(workerId);
+  }
+
+  async startAgentRuntimeSubagent(options: AgentRuntimeStartSubagentOptions): Promise<AgentRuntimeResult<AgentRuntimeTaskState>> {
+    const taskResult = this.runtime.startSubagent(options);
+    if (taskResult.status === 'error') {
+      return taskResult;
+    }
+
+    const task = taskResult.value;
+    const workerResult = this.runtime.startWorker({
+      sessionId: options.sessionId,
+      taskId: task.id,
+      prompt: task.prompt,
+      context: task.context,
+      allowedTools: task.permissionScope.allowedTools
+    });
+
+    if (workerResult.status === 'error') {
+      return workerResult;
+    }
+
+    const runResult = this.runtime.runWorker(workerResult.value.id);
+    if (runResult.status === 'error') {
+      return runResult;
+    }
+
+    const waitResult = await this.runtime.waitForWorker(workerResult.value.id);
+    if (waitResult.status === 'error') {
+      return waitResult;
+    }
+
+    const updatedTask = this.runtime.getTask(task.id);
+    if (!updatedTask) {
+      return { status: 'error', code: 'TASK_NOT_FOUND', message: 'Subagent task disappeared after worker completion.' };
+    }
+
+    return { status: 'ok', value: updatedTask };
+  }
+
+  resumeAgentRuntimeWorker(options: AgentRuntimeResumeOptions): AgentRuntimeResult<AgentRuntimeWorkerState> {
+    return this.runtime.resumeWorker(options);
+  }
+
+  stopAgentRuntimeWorker(workerId: string): AgentRuntimeResult<AgentRuntimeWorkerState> {
+    const result = this.runtime.stopWorker(workerId);
+    if (result.status === 'ok') {
+      this.clearWorkerFromTab(workerId);
+    }
+    return result;
+  }
+
+  stopAgentRuntimeSession(sessionId: string): AgentRuntimeResult<readonly AgentRuntimeWorkerState[]> {
+    const result = this.runtime.stopSession(sessionId);
+    if (result.status === 'ok') {
+      const tabId = this.tabIdsBySessionId.get(sessionId);
+      if (tabId) {
+        const tab = this.tabs.get(tabId);
+        if (tab) {
+          tab.runtimeWorkerId = undefined;
+          this.emitTabsChanged();
+        }
       }
+    }
+    return result;
+  }
 
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      const code = classifyError(err);
-      tab.error = message;
-      this.emit('chat-stream', tabId, { type: 'error', message });
-      this.emitTabsChanged();
-      return { status: 'error', code, message };
+  private clearWorkerFromTab(workerId: string): void {
+    for (const [tabId, session] of this.sessionsByTab) {
+      if (session.workerId === workerId) {
+        this.sessionsByTab.set(tabId, { ...session, status: 'idle', workerId: '' });
+        const tab = this.tabs.get(tabId);
+        if (tab) {
+          tab.runtimeWorkerId = undefined;
+        }
+        this.emitTabsChanged();
+        return;
+      }
     }
   }
 
@@ -474,24 +843,138 @@ export class ModelGateway extends EventEmitter {
   private buildAssistantMessage(assistantContent: string, toolCalls: ToolCall[]): ChatMessage {
     const msg: ChatMessage = {
       role: 'assistant',
-      content: assistantContent,
+      content: assistantContent || ' ',
       timestamp: Date.now(),
     };
     if (toolCalls.length > 0) {
-      (msg as { tool_calls?: readonly ToolCall[] }).tool_calls = toolCalls;
+      const normalized = toolCalls.map((tc, index) => ({
+        id: tc.id?.trim() ? tc.id : `call_${Date.now()}_${index}`,
+        type: tc.type,
+        function: {
+          name: tc.function.name,
+          arguments: typeof tc.function.arguments === 'string' && tc.function.arguments.trim()
+            ? tc.function.arguments
+            : '{}'
+        }
+      }));
+      (msg as { tool_calls?: readonly ToolCall[] }).tool_calls = normalized;
     }
     return msg;
   }
 
-  private async processToolCalls(tab: ChatTabInternal, toolCalls: ToolCall[]): Promise<void> {
-    for (const tc of toolCalls) {
-      tab.messages = [...tab.messages, {
-        role: 'tool',
-        content: await this.executeToolCall(tc),
-        timestamp: Date.now(),
-        tool_call_id: tc.id
-      }];
+  private createRuntimeWorker(workerId: string): AgentRuntimeWorkerDefinition {
+    return {
+      id: workerId,
+      run: async (input: AgentRuntimeWorkerInput, signal: AbortSignal): Promise<AgentRuntimeWorkerOutput> => {
+        const tabId = this.tabIdsBySessionId.get(input.sessionId) ?? input.permissionScope.sessionId;
+        const tab = this.tabs.get(tabId);
+        if (!tab) {
+          throw createAbortError();
+        }
+
+        if (signal.aborted) {
+          tab.abortController?.abort();
+          throw createAbortError();
+        }
+        signal.addEventListener('abort', () => tab.abortController?.abort(), { once: true });
+
+        const previousModelId = tab.activeModel;
+        tab.activeModel = input.modelId;
+        try {
+          const toolsUsed = new Set<string>();
+          const result = await this.runChatLoop(tabId, tab, 0, input.permissionScope.allowedTools, toolsUsed);
+          this.runtimeResultsByTab.set(tabId, result);
+
+          if (signal.aborted) {
+            throw createAbortError();
+          }
+
+          const summary = this.createWorkerSummary(result);
+
+          return {
+            summary,
+            references: this.createWorkerReferences(tab.messages),
+            toolsUsed: [...toolsUsed]
+          };
+        } finally {
+          tab.activeModel = previousModelId;
+        }
+      }
+    };
+  }
+
+  private createWorkerSummary(result: SendMessageResult): string {
+    if (result.status === 'ok') {
+      return 'Chat response completed.';
     }
+    return `Chat response failed: ${result.message ?? 'unknown'}`;
+  }
+
+  private createWorkerReferences(messages: readonly ChatMessage[]): string[] {
+    const references = new Set<string>();
+
+    for (const message of messages) {
+      if (message.role === 'tool') {
+        for (const reference of extractReferencesFromToolResult(message.content)) {
+          addReference(references, reference);
+        }
+      }
+    }
+
+    const lastAssistantMessage = [...messages].reverse().find(message => message.role === 'assistant');
+    if (lastAssistantMessage) {
+      collectReferencesFromMarkdownLinks(lastAssistantMessage.content, references);
+    }
+
+    return [...references];
+  }
+
+  private emitAgentRuntimeEvent(type: AgentRuntimeEvent['type'], payload: unknown): void {
+    this.emit('agent-runtime-event', { type, payload });
+  }
+
+  private async processToolCalls(tab: ChatTabInternal, toolCalls: ToolCall[], allowedToolNames?: readonly string[]): Promise<{ finished: boolean; toolsUsed: string[] }> {
+    const allowedToolSet = allowedToolNames === undefined ? undefined : new Set(allowedToolNames);
+    const toolsUsed: string[] = [];
+
+    for (const tc of toolCalls) {
+      if (allowedToolSet !== undefined && !allowedToolSet.has(tc.function.name)) {
+        tab.messages = [...tab.messages, {
+          role: 'tool',
+          content: JSON.stringify({ error: `Tool not allowed: ${tc.function.name}` }),
+          timestamp: Date.now(),
+          tool_call_id: tc.id
+        }];
+        continue;
+      }
+
+      toolsUsed.push(tc.function.name);
+
+      const result = await this.executeToolCall(tc, tab);
+      const parsed = parseToolResult(result);
+      const missingFilePath = isMissingFilePathError(parsed, tc.function.name);
+      const invalidArguments = isInvalidToolArgumentsError(parsed, tc.function.name);
+      const emptyToolResult = typeof result === 'string' && result.trim() === '';
+
+      if (!missingFilePath && !invalidArguments && !emptyToolResult) {
+        tab.messages = [...tab.messages, {
+          role: 'tool',
+          content: result,
+          timestamp: Date.now(),
+          tool_call_id: tc.id
+        }];
+        continue;
+      }
+
+      tab.messages = [...tab.messages, {
+        role: 'assistant',
+        content: formatInvalidToolArgumentsMessage(tc.function.name),
+        timestamp: Date.now()
+      }];
+      return { finished: true, toolsUsed };
+    }
+
+    return { finished: false, toolsUsed };
   }
 
   private emitRetryNotification(tabId: string, attempt: number, maxRetries: number, delay: number): void {
@@ -506,8 +989,10 @@ export class ModelGateway extends EventEmitter {
     tab: ChatTabInternal,
     adapter: ModelProviderAdapter,
     provider: ModelProviderState,
-    tools: readonly ToolDefinition[]
-  ): Promise<{ hasToolCalls: boolean } | { error: { code: string; message: string } }> {
+    tools: readonly ToolDefinition[],
+    allowedToolNames?: readonly string[],
+    toolsUsedCollector?: Set<string>
+  ): Promise<{ hasToolCalls: boolean } | { finishedAfterInvalidTool: boolean } | { error: { code: string; message: string } }> {
     if (tab.abortController?.signal.aborted) {
       return { error: { code: 'NETWORK_ERROR', message: 'Streaming cancelled during retry backoff.' } };
     }
@@ -521,17 +1006,53 @@ export class ModelGateway extends EventEmitter {
       return { error: result.streamError };
     }
 
-    tab.messages = [...tab.messages, this.buildAssistantMessage(result.assistantContent, result.toolCalls)];
+    const assistantMessage = this.buildAssistantMessage(result.assistantContent, result.toolCalls);
+    tab.messages = [...tab.messages, assistantMessage];
 
     if (result.toolCalls.length > 0) {
-      await this.processToolCalls(tab, result.toolCalls);
+      const normalizedToolCalls = assistantMessage.tool_calls ? [...assistantMessage.tool_calls] : result.toolCalls;
+      const processed = await this.processToolCalls(tab, normalizedToolCalls, allowedToolNames);
+      processed.toolsUsed.forEach(toolName => toolsUsedCollector?.add(toolName));
+      if (processed.finished) {
+        return { finishedAfterInvalidTool: true };
+      }
       return { hasToolCalls: true };
     }
 
     return { hasToolCalls: false };
   }
 
-  private async runChatLoop(tabId: string, tab: ChatTabInternal, depth: number = 0): Promise<SendMessageResult> {
+  private resolveToolsForTab(tab: ChatTabInternal, provider: ModelProviderState, allowedToolsOverride?: readonly string[]): readonly ToolDefinition[] {
+    const activeModelInfo = provider.models.find(m => m.id === tab.activeModel);
+    if (activeModelInfo === undefined || activeModelInfo.supportsTools) {
+      return this.resolveToolsByAllowedNames(this.getTools(), allowedToolsOverride ?? this.getAllowedToolsForTab(tab));
+    }
+    return [];
+  }
+
+  private getAllowedToolsForTab(tab: ChatTabInternal): readonly string[] | undefined {
+    const session = this.sessionsByTab.get(tab.id);
+    if (!session) return undefined;
+    const runtimeSession = this.runtime.getSession(session.sessionId);
+    return runtimeSession?.permissionScope.allowedTools;
+  }
+
+  private resolveToolsByAllowedNames(tools: readonly ToolDefinition[], allowedTools: readonly string[] | undefined): readonly ToolDefinition[] {
+    if (allowedTools === undefined) {
+      return tools;
+    }
+
+    const allowedNames = new Set(allowedTools);
+    return tools.filter(tool => allowedNames.has(tool.function.name));
+  }
+
+  private async runChatLoop(
+    tabId: string,
+    tab: ChatTabInternal,
+    depth: number = 0,
+    allowedToolsOverride?: readonly string[],
+    toolsUsedCollector?: Set<string>
+  ): Promise<SendMessageResult> {
     const MAX_TOOL_CALL_DEPTH = 10;
     if (depth >= MAX_TOOL_CALL_DEPTH) {
       return this.failTab(tabId, tab, 'PROVIDER_ERROR', 'Maximum tool call depth exceeded.');
@@ -543,8 +1064,7 @@ export class ModelGateway extends EventEmitter {
     }
 
     const { adapter, provider } = resolved;
-    const activeModelInfo = provider.models.find(m => m.id === tab.activeModel);
-    const tools = activeModelInfo?.supportsTools ? this.getTools() : [];
+    const tools = this.resolveToolsForTab(tab, provider, allowedToolsOverride);
     const policy = this.retryPolicy;
     let lastError: { code: string; message: string } | undefined;
 
@@ -555,18 +1075,24 @@ export class ModelGateway extends EventEmitter {
         await sleep(delay);
       }
 
-      const result = await this.runSingleAttempt(tabId, tab, adapter, provider, tools);
+      const result = await this.runSingleAttempt(tabId, tab, adapter, provider, tools, allowedToolsOverride, toolsUsedCollector);
 
       if ('error' in result) {
         lastError = result.error;
         if (!isRetryableError(result.error.code)) {
           break;
         }
-      } else if (result.hasToolCalls) {
-        return this.runChatLoop(tabId, tab, depth + 1);
-      } else {
+        continue;
+      }
+
+      if ('finishedAfterInvalidTool' in result) {
         return this.finishTab(tabId, tab);
       }
+
+      if (result.hasToolCalls) {
+        return this.runChatLoop(tabId, tab, depth + 1, allowedToolsOverride, toolsUsedCollector);
+      }
+      return this.finishTab(tabId, tab);
     }
 
     if (!lastError) {
@@ -575,51 +1101,41 @@ export class ModelGateway extends EventEmitter {
     return this.failTab(tabId, tab, lastError.code, lastError.message);
   }
 
-  private async executeToolCall(toolCall: ToolCall): Promise<string> {
-    const tool = this.tools.find(t => t.function.name === toolCall.function.name);
-    if (!tool) {
+  private async executeToolCall(toolCall: ToolCall, tab: ChatTabInternal): Promise<string> {
+    const registration = this.tools.find(t => t.definition.function.name === toolCall.function.name);
+    if (!registration) {
       return JSON.stringify({ error: `Tool not found: ${toolCall.function.name}` });
     }
-
-    // If no ToolRouter is configured, return a placeholder
-    if (!this.toolRouter) {
+    if (registration.executor) {
+      return registration.executor(toolCall, this.buildToolExecutionContext(tab));
+    }
+    if (this.toolExecutor) {
+      return this.toolExecutor(toolCall, this.buildToolExecutionContext(tab));
+    }
+    // Phase 7: If ToolRouter is configured, execute through approval flow
+    if (this.toolRouter) {
+      const request: ToolCallRequest = {
+        callId: toolCall.id,
+        toolName: toolCall.function.name as ToolName,
+        args: JSON.parse(toolCall.function.arguments || '{}'),
+      };
+      const response: ToolCallResponse = await this.toolRouter.execute(request);
+      if (response.status === 'ok') {
+        return JSON.stringify(response.result);
+      }
+      if (response.status === 'error') {
+        return JSON.stringify({ error: response.message });
+      }
       return JSON.stringify({ status: 'pending', tool: toolCall.function.name, arguments: toolCall.function.arguments });
     }
+    return JSON.stringify({ status: 'pending', tool: toolCall.function.name, arguments: toolCall.function.arguments });
+  }
 
-    // Parse tool arguments
-    let parsedArgs: Record<string, unknown>;
-    try {
-      parsedArgs = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
-    } catch {
-      parsedArgs = { raw: toolCall.function.arguments };
-    }
-
-    // Build ToolCallRequest and execute through ToolRouter (PermissionBroker + ConflictBroker)
-    const request: ToolCallRequest = {
-      callId: toolCall.id,
-      toolName: toolCall.function.name as ToolName,
-      args: parsedArgs
+  private buildToolExecutionContext(tab: ChatTabInternal): ToolExecutionContext {
+    return {
+      messages: [...tab.messages],
+      workspaceRoots: this.workspaceRootProvider?.() ?? []
     };
-
-    const response: ToolCallResponse = await this.toolRouter.execute(request);
-
-    if (response.status === 'ok') {
-      return JSON.stringify({ status: 'ok', result: response.result });
-    }
-    if (response.status === 'pending-approval') {
-      return JSON.stringify({
-        status: 'pending-approval',
-        callId: response.callId,
-        classification: response.classification,
-        expiresAt: response.expiresAt,
-        message: 'Narzędzie wymaga zatwierdzenia przez użytkownika.'
-      });
-    }
-    if (response.status === 'denied') {
-      return JSON.stringify({ status: 'denied', reason: response.reason });
-    }
-    // error
-    return JSON.stringify({ status: 'error', code: response.code, message: response.message });
   }
 
   stopStreaming(tabId: string): void {
@@ -627,6 +1143,11 @@ export class ModelGateway extends EventEmitter {
     if (!tab?.isStreaming) return;
     if (tab.abortController) {
       tab.abortController.abort();
+    }
+
+    const session = this.sessionsByTab.get(tabId);
+    if (session?.workerId) {
+      this.runtime.stopWorker(session.workerId);
     }
   }
 
@@ -641,11 +1162,124 @@ export class ModelGateway extends EventEmitter {
 
 let gatewayInstance: ModelGateway | null = null;
 
-export function createModelGateway(): ModelGateway {
-  gatewayInstance ??= new ModelGateway();
+export function createModelGateway(toolExecutor?: ToolExecutor, workspaceRootProvider?: WorkspaceRootProvider): ModelGateway {
+  gatewayInstance ??= new ModelGateway(toolExecutor, workspaceRootProvider);
   return gatewayInstance;
 }
 
 export function getModelGateway(): ModelGateway | null {
   return gatewayInstance;
+}
+
+function parseToolResult(result: string): unknown {
+  try {
+    return JSON.parse(result);
+  } catch {
+    return null;
+  }
+}
+
+function isMissingFilePathError(parsed: unknown, toolName: string): boolean {
+  if (!parsed || typeof parsed !== 'object') return false;
+  const candidate = parsed as Record<string, unknown>;
+  return candidate.error === `read_file: missing filePath` || (
+    toolName === 'read_file'
+    && typeof candidate.error === 'string'
+    && candidate.error.includes('missing filePath')
+  );
+}
+
+function isInvalidToolArgumentsError(parsed: unknown, toolName: string): boolean {
+  if (!parsed || typeof parsed !== 'object') return false;
+  const candidate = parsed as Record<string, unknown>;
+  if (typeof candidate.error !== 'string') return false;
+
+  const expectedPrefixes = [
+    'read_file:',
+    'search_files:',
+    'create_file:',
+    'apply_patch:',
+    'show_diff:'
+  ];
+  const errorMessage = candidate.error;
+
+  return toolName !== 'read_file'
+    && expectedPrefixes.some(prefix => errorMessage.startsWith(prefix))
+    && errorMessage.includes('invalid');
+}
+
+function extractReferencesFromToolResult(content: string): string[] {
+  const references: string[] = [];
+  const parsed = parseToolResult(content);
+
+  if (typeof parsed === 'string') {
+    const markdownReferences = new Set<string>();
+    collectReferencesFromMarkdownLinks(parsed, markdownReferences);
+    return [...markdownReferences];
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return references;
+  }
+
+  const candidate = parsed as Record<string, unknown>;
+  collectReferenceFromRecord(references, candidate, 'references');
+  collectReferenceFromRecord(references, candidate, 'path');
+  collectReferenceFromRecord(references, candidate, 'filePath');
+  collectReferenceFromRecord(references, candidate, 'file');
+  collectReferenceFromRecord(references, candidate, 'url');
+
+  return references;
+}
+
+function collectReferenceFromRecord(references: string[], record: Record<string, unknown>, key: string): void {
+  const value = record[key];
+
+  if (typeof value === 'string') {
+    addReference(references, value);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item === 'string') {
+        addReference(references, item);
+      }
+    }
+  }
+}
+
+function addReference(references: string[] | Set<string>, reference: string): void {
+  const normalized = reference.trim();
+  if (!normalized) return;
+
+  if (Array.isArray(references)) {
+    if (!references.includes(normalized)) {
+      references.push(normalized);
+    }
+    return;
+  }
+
+  references.add(normalized);
+}
+
+function collectReferencesFromMarkdownLinks(content: string, references: Set<string>): void {
+  // Guard against excessively long input to prevent potential ReDoS
+  if (content.length > 100_000) return;
+
+  // Use a non-backtracking pattern: negated character classes are deterministic
+  const markdownLinkPattern = /\[([^\]]{1,500})\]\(([^)]{1,2000})\)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = markdownLinkPattern.exec(content)) !== null) {
+    addReference(references, match[2] ?? '');
+  }
+}
+
+function formatInvalidToolArgumentsMessage(toolName: string): string {
+  if (toolName === 'read_file') {
+    return 'Nie mog─Ö wykona─ç narz─Ödzia `read_file`, bo model nie poda┼é wymaganej ┼Ťcie┼╝ki pliku. Popro┼Ť u┼╝ytkownika o dok┼éadn─ů nazw─Ö lub ┼Ťcie┼╝k─Ö pliku.';
+  }
+
+  return `Nie mog─Ö wykona─ç narz─Ödzia \`${toolName}\`, bo model przekaza┼é niepoprawne argumenty. Popro┼Ť u┼╝ytkownika o dok┼éadniejsze dane lub ┼Ťcie┼╝k─Ö pliku.`;
 }

@@ -119,11 +119,11 @@ describe('packages/shared ipc type guards', () => {
     expect(isFsChangeEvent({ kind: 'unknown', path: '/a' })).toBe(false);
   });
 
-  it('validates file write result — ok', () => {
+  it('validates file write result - ok', () => {
     expect(isFileWriteResult({ status: 'ok' })).toBe(true);
   });
 
-  it('validates file write result — WRITE_CONFLICT error', () => {
+  it('validates file write result - WRITE_CONFLICT error', () => {
     expect(isFileWriteResult({
       status: 'error',
       code: 'WRITE_CONFLICT',
@@ -131,7 +131,7 @@ describe('packages/shared ipc type guards', () => {
     })).toBe(true);
   });
 
-  it('validates file write result — ACCESS_DENIED error', () => {
+  it('validates file write result - ACCESS_DENIED error', () => {
     expect(isFileWriteResult({
       status: 'error',
       code: 'ACCESS_DENIED',
@@ -139,7 +139,7 @@ describe('packages/shared ipc type guards', () => {
     })).toBe(true);
   });
 
-  it('validates file write result — UNKNOWN error', () => {
+  it('validates file write result - UNKNOWN error', () => {
     expect(isFileWriteResult({
       status: 'error',
       code: 'UNKNOWN',
@@ -168,7 +168,7 @@ describe('packages/shared ipc type guards', () => {
     expect(isFileWriteResult(42)).toBe(false);
   });
 
-  it('validates file read result — ok', () => {
+  it('validates file read result - ok', () => {
     expect(isFileReadResult({
       status: 'ok',
       content: 'const x = 1;',
@@ -176,7 +176,7 @@ describe('packages/shared ipc type guards', () => {
     })).toBe(true);
   });
 
-  it('validates file read result — error variants', () => {
+  it('validates file read result - error variants', () => {
     expect(isFileReadResult({
       status: 'error',
       code: 'FILE_NOT_FOUND',
@@ -234,11 +234,11 @@ describe('packages/shared ipc type guards', () => {
     })).toBe(false);
   });
 
-  it('validates workspace edit result — ok', () => {
+  it('validates workspace edit result - ok', () => {
     expect(isWorkspaceEditResult({ status: 'ok' })).toBe(true);
   });
 
-  it('validates workspace edit result — error variants', () => {
+  it('validates workspace edit result - error variants', () => {
     expect(isWorkspaceEditResult({
       status: 'error',
       code: 'FILE_NOT_FOUND',
@@ -285,11 +285,11 @@ describe('packages/shared ipc type guards', () => {
     expect(isDiffInput({ original: 'original' })).toBe(false);
   });
 
-  it('validates diff result — ok', () => {
+  it('validates diff result - ok', () => {
     expect(isDiffResult({ status: 'ok', diff: '--- a\n+++ b\n' })).toBe(true);
   });
 
-  it('validates diff result — error', () => {
+  it('validates diff result - error', () => {
     expect(isDiffResult({
       status: 'error',
       code: 'UNKNOWN',

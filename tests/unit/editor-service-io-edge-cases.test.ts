@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   clearBuffers,
   closeBuffer,
+  createEditorFile,
   createEditorTab,
   getBufferDirty,
   getOpenBuffers,
@@ -76,7 +77,7 @@ describe('EditorService I/O edge cases', () => {
 
     it('reads file with unicode content', async () => {
       const filePath = join(tempDir!, 'unicode.ts');
-      const content = '// Komentarz po polsku: ¹æê³óœ¿Ÿ\nconst emoji = "??";';
+      const content = '// Komentarz po polsku: â•£Å Å•â”‚Ë‡Å¥â”Ä\nconst emoji = "??";';
       await writeFile(filePath, content, 'utf8');
 
       const result = await readEditorFile(filePath);
@@ -118,7 +119,7 @@ describe('EditorService I/O edge cases', () => {
       // Modify file on disk externally
       await writeFile(filePath, 'modified externally', 'utf8');
 
-      // Try to write — should detect conflict
+      // Try to write Åš should detect conflict
       const result = await writeEditorFile(filePath, 'my changes');
       expect(result.status).toBe('error');
       if (result.status === 'error') {
@@ -155,6 +156,33 @@ describe('EditorService I/O edge cases', () => {
 
       await writeEditorFile(filePath, 'updated');
       expect(getBufferDirty(filePath)).toBe(false);
+    });
+  });
+
+  describe('createEditorFile', () => {
+    it('creates a new file atomically', async () => {
+      const filePath = join(tempDir!, 'new.ts');
+      const result = await createEditorFile(filePath, 'const created = true;');
+      expect(result.status).toBe('ok');
+
+      const diskContent = await readFile(filePath, 'utf8');
+      expect(diskContent).toBe('const created = true;');
+      expect(getOpenBuffers()).toContain(filePath);
+    });
+
+    it('rejects existing file without overwriting', async () => {
+      const filePath = join(tempDir!, 'existing.ts');
+      await writeFile(filePath, 'old content', 'utf8');
+
+      const result = await createEditorFile(filePath, 'new content');
+      expect(result).toEqual({
+        status: 'error',
+        code: 'WRITE_CONFLICT',
+        message: `File already exists: ${filePath}`
+      });
+
+      const diskContent = await readFile(filePath, 'utf8');
+      expect(diskContent).toBe('old content');
     });
   });
 
@@ -213,9 +241,9 @@ describe('EditorService I/O edge cases', () => {
     });
 
     it('handles Windows-style paths', () => {
-      const tab = createEditorTab('C:\\Users\\Rafal\\app.ts');
+      const tab = createEditorTab(String.raw`C:\Users\Rafal\app.ts`);
       expect(tab.fileName).toBe('app.ts');
-      expect(tab.filePath).toBe('C:\\Users\\Rafal\\app.ts');
+      expect(tab.filePath).toBe(String.raw`C:\Users\Rafal\app.ts`);
     });
 
     it('handles file with multiple dots', () => {
@@ -290,16 +318,16 @@ describe('EditorService I/O edge cases', () => {
       const filePath = join(tempDir!, 'lifecycle.ts');
       await writeFile(filePath, 'const a = 1;', 'utf8');
 
-      // Step 1: Read file — buffer should be clean
+      // Step 1: Read file Åš buffer should be clean
       const readResult = await readEditorFile(filePath);
       expect(readResult.status).toBe('ok');
       expect(getBufferDirty(filePath)).toBe(false);
 
-      // Step 2: User edits — mark buffer dirty
+      // Step 2: User edits Åš mark buffer dirty
       markBufferDirty(filePath);
       expect(getBufferDirty(filePath)).toBe(true);
 
-      // Step 3: User saves — write clears dirty flag
+      // Step 3: User saves Åš write clears dirty flag
       const writeResult = await writeEditorFile(filePath, 'const a = 2;');
       expect(writeResult.status).toBe('ok');
       expect(getBufferDirty(filePath)).toBe(false);
@@ -320,7 +348,7 @@ describe('EditorService I/O edge cases', () => {
       markBufferDirty(filePath);
       expect(getBufferDirty(filePath)).toBe(true);
 
-      // Second edit — still dirty
+      // Second edit Åš still dirty
       markBufferDirty(filePath);
       expect(getBufferDirty(filePath)).toBe(true);
 

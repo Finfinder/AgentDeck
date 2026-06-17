@@ -137,6 +137,39 @@ describe('IdentityService (loopback OAuth)', () => {
     expect(session.profile?.id).toBe(42);
   });
 
+  it('stores and retrieves model provider API key', async () => {
+    const store: Record<string, string> = {};
+    const secureStore = {
+      getPassword: vi.fn(async (s: string, a: string) => store[`${s}:${a}`] ?? null),
+      setPassword: vi.fn(async (s: string, a: string, p: string) => {
+        store[`${s}:${a}`] = p;
+      }),
+      deletePassword: vi.fn(async () => true)
+    };
+
+    const svc = createIdentityService(tmp!, { secureStore, openUrl: vi.fn() });
+
+    await svc.setModelApiKey('openrouter', 'sk-or-test');
+    const retrieved = await svc.getModelApiKey('openrouter');
+
+    expect(retrieved).toBe('sk-or-test');
+    expect(secureStore.setPassword).toHaveBeenCalledWith('agentdeck', 'api-key-openrouter', 'sk-or-test');
+  });
+
+  it('rejects unknown model provider id when storing API key', async () => {
+    const secureStore = {
+      getPassword: vi.fn(async () => null),
+      setPassword: vi.fn(async () => undefined),
+      deletePassword: vi.fn(async () => true)
+    };
+
+    const svc = createIdentityService(tmp!, { secureStore, openUrl: vi.fn() });
+
+    await svc.setModelApiKey('unknown' as never, 'secret');
+
+    expect(secureStore.setPassword).not.toHaveBeenCalled();
+  });
+
   it('getSession returns not logged in when no token in store', async () => {
     const secureStore = {
       getPassword: vi.fn(async () => null),
@@ -320,7 +353,7 @@ describe('IdentityService (loopback OAuth)', () => {
       deletePassword: vi.fn(async () => true)
     };
 
-    // openUrl does nothing — no callback will be received
+    // openUrl does nothing Åš no callback will be received
     const svc = createIdentityService(tmp!, {
       secureStore,
       openUrl: vi.fn(async () => { /* simulate user never completes auth */ })
@@ -725,7 +758,7 @@ describe('IdentityService (loopback OAuth)', () => {
     const parsed = JSON.parse(data) as Record<string, string>;
     expect(parsed['agentdeck:github']).toBe('perm-test-token');
 
-    // Check file permissions (Unix only — on Windows ACLs are used instead)
+    // Check file permissions (Unix only Åš on Windows ACLs are used instead)
     if (process.platform !== 'win32') {
       const fileStat = await stat(storeFile);
       const mode = fileStat.mode & 0o777;
