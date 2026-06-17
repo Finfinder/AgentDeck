@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 
 export type AgentRuntimeTaskStatus = 'pending' | 'running' | 'completed' | 'cancelled' | 'failed';
 
-export type AgentRuntimeWorkerStatus = 'idle' | 'running' | 'stopping' | 'stopped' | 'crashed';
+export type AgentRuntimeWorkerStatus = 'idle' | 'running' | 'retrying' | 'stopping' | 'stopped' | 'crashed';
 
 export type AgentRuntimePermissionScope = Readonly<{
   sessionId: string;
@@ -279,7 +279,7 @@ function isTaskRunning(task: AgentRuntimeTaskState): boolean {
 }
 
 function isWorkerRunning(worker: AgentRuntimeWorkerState): boolean {
-  return worker.status === 'running' || worker.status === 'stopping';
+  return worker.status === 'running' || worker.status === 'retrying' || worker.status === 'stopping';
 }
 
 function cloneOutput(output: AgentRuntimeWorkerOutput): AgentRuntimeWorkerOutput {
@@ -400,7 +400,7 @@ export class AgentRuntime extends EventEmitter {
       sessionId: options.sessionId,
       taskId: options.taskId,
       workerId,
-      type: 'worker-stopped',
+      type: 'worker-started',
       message: 'Worker created.'
     });
     this.emit('worker-changed', this.cloneWorker(worker));
@@ -610,7 +610,26 @@ export class AgentRuntime extends EventEmitter {
       return { status: 'ok', value: this.cloneWorker(worker) };
     }
 
-    if (worker.status === 'stopping') {
+    if (worker.status === 'retrying' || worker.status === 'stopping') {
+      const controller = this.abortControllers.get(workerId);
+      if (controller && !controller.signal.aborted) {
+        controller.abort();
+      }
+
+      if (worker.status === 'retrying') {
+        worker.status = 'stopping';
+        worker.stoppedAt = this.now();
+        this.appendEvent({
+          sessionId: worker.sessionId,
+          taskId: worker.taskId,
+          workerId,
+          type: 'worker-stopped',
+          message: 'Worker stop requested during retry.'
+        });
+        this.emit('worker-changed', this.cloneWorker(worker));
+        this.emit('session-changed', this.getSessionSnapshot(worker.sessionId));
+      }
+
       return { status: 'ok', value: this.cloneWorker(worker) };
     }
 
@@ -862,8 +881,7 @@ export class AgentRuntime extends EventEmitter {
 
       const message = error instanceof Error ? error.message : 'Unknown error';
       worker.lastError = message;
-      worker.status = 'idle';
-      worker.stoppedAt = this.now();
+      worker.status = 'retrying';
       task.status = 'pending';
       task.updatedAt = this.now();
 

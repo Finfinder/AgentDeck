@@ -1257,4 +1257,107 @@ describe('ModelGateway', () => {
       expect(callCount).toBe(3); // Initial + 2 retries
     });
   });
+
+  describe('createRuntimeWorker tab resolution', () => {
+    it('throws a descriptive error when the session has no mapped tab', async () => {
+      const gateway = new ModelGateway();
+      const internal = gateway as unknown as {
+        createRuntimeWorker(workerId: string): {
+          id: string;
+          run(
+            input: {
+              sessionId: string;
+              permissionScope: { sessionId: string };
+            },
+            signal: AbortSignal
+          ): Promise<unknown>;
+        };
+      };
+      const worker = internal.createRuntimeWorker('worker-no-mapping');
+
+      const input = {
+        sessionId: 'orphan-session-id',
+        permissionScope: { sessionId: 'orphan-session-id' }
+      };
+
+      await expect(worker.run(input, new AbortController().signal)).rejects.toThrow(
+        /No tab mapped for session "orphan-session-id"/
+      );
+    });
+
+    it('does not silently coerce a missing session->tab mapping into a tab lookup', async () => {
+      // Regression guard: previously the fallback `?? input.permissionScope.sessionId`
+      // caused `this.tabs.get(input.sessionId)` to always miss (session ids and
+      // tab ids live in different namespaces) and the failure surfaced as a
+      // generic AbortError, hiding the real invariant violation.
+      const gateway = new ModelGateway();
+      const internal = gateway as unknown as {
+        createRuntimeWorker(workerId: string): {
+          id: string;
+          run(
+            input: {
+              sessionId: string;
+              permissionScope: { sessionId: string };
+            },
+            signal: AbortSignal
+          ): Promise<unknown>;
+        };
+      };
+      const worker = internal.createRuntimeWorker('worker-regression');
+
+      const input = {
+        sessionId: 'unmapped-session',
+        permissionScope: { sessionId: 'also-unmapped' }
+      };
+
+      try {
+        await worker.run(input, new AbortController().signal);
+        expect.fail('Expected createRuntimeWorker.run to throw');
+      } catch (err) {
+        // Must be a plain Error with a diagnostic message — NOT an AbortError
+        // whose cause would be opaque.
+        expect(err).toBeInstanceOf(Error);
+        expect((err as Error).name).not.toBe('AbortError');
+        expect((err as Error).message).toContain('No tab mapped for session');
+      }
+    });
+
+    it('throws AbortError when the mapped tab no longer exists (race / close)', async () => {
+      const gateway = new ModelGateway();
+      const internal = gateway as unknown as {
+        createRuntimeWorker(workerId: string): {
+          id: string;
+          run(
+            input: {
+              sessionId: string;
+              permissionScope: { sessionId: string };
+            },
+            signal: AbortSignal
+          ): Promise<unknown>;
+        };
+        tabs: Map<string, unknown>;
+        tabIdsBySessionId: Map<string, string>;
+      };
+
+      // Inject a mapping without a backing tab — simulates the race where the
+      // session->tab mapping is registered but the tab itself was removed.
+      internal.tabIdsBySessionId.set('race-session', 'race-tab');
+      // Ensure no tab exists for 'race-tab'.
+      internal.tabs.delete('race-tab');
+
+      const worker = internal.createRuntimeWorker('worker-race');
+      const input = {
+        sessionId: 'race-session',
+        permissionScope: { sessionId: 'race-session' }
+      };
+
+      try {
+        await worker.run(input, new AbortController().signal);
+        expect.fail('Expected createRuntimeWorker.run to throw');
+      } catch (err) {
+        expect(err).toBeInstanceOf(Error);
+        expect((err as Error).name).toBe('AbortError');
+      }
+    });
+  });
 });

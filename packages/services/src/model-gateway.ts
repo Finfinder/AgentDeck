@@ -866,9 +866,22 @@ export class ModelGateway extends EventEmitter {
     return {
       id: workerId,
       run: async (input: AgentRuntimeWorkerInput, signal: AbortSignal): Promise<AgentRuntimeWorkerOutput> => {
-        const tabId = this.tabIdsBySessionId.get(input.sessionId) ?? input.permissionScope.sessionId;
-        const tab = this.tabs.get(tabId);
+        const mappedTabId = this.tabIdsBySessionId.get(input.sessionId);
+        if (mappedTabId === undefined) {
+          // Invariant violation: the runtime is executing a worker for a
+          // session that has no associated tab. This is a programmer error /
+          // stale-session scenario, not a normal abort. Surface it as a
+          // distinct, descriptive error so the cause is diagnosable instead
+          // of being masked by a generic AbortError.
+          throw new Error(
+            `No tab mapped for session "${input.sessionId}"; cannot run runtime worker.`
+          );
+        }
+        const tab = this.tabs.get(mappedTabId);
         if (!tab) {
+          // The mapping existed but the tab itself was removed (e.g. the tab
+          // was closed between session start and worker run). Treat this as
+          // an abort since the operation can no longer complete.
           throw createAbortError();
         }
 
@@ -882,8 +895,8 @@ export class ModelGateway extends EventEmitter {
         tab.activeModel = input.modelId;
         try {
           const toolsUsed = new Set<string>();
-          const result = await this.runChatLoop(tabId, tab, 0, input.permissionScope.allowedTools, toolsUsed);
-          this.runtimeResultsByTab.set(tabId, result);
+          const result = await this.runChatLoop(mappedTabId, tab, 0, input.permissionScope.allowedTools, toolsUsed);
+          this.runtimeResultsByTab.set(mappedTabId, result);
 
           if (signal.aborted) {
             throw createAbortError();
