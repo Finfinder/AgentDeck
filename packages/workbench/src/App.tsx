@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { DEFAULT_THEME_SETTINGS, isIdentitySession, type IdentitySession, type AgentDeckPreloadApi, type EditorDiagnostic, type FsChangeEvent, type StartupState, type ThemePreference, type ThemeSettings, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection } from '@agentdeck/shared';
+import { DEFAULT_THEME_SETTINGS, isIdentitySession, type AgentDeckPreloadApi, type ApprovalDecision, type Conflict, type EditorDiagnostic, type EventLogEntry, type FsChangeEvent, type IdentitySession, type StartupState, type ThemePreference, type ThemeSettings, type ToolCallResponse, type ToolClassification, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection, type AgentRuntimeEventEntry, type AgentRuntimeSessionState, type AgentRuntimeTaskState, type AgentRuntimeWorkerState, type PermissionApprovalInput, type PermissionDecision } from '@agentdeck/shared';
 
 import { ChatPanel, ChatTabs, useChatStore } from './chat';
 import { EditorSurface } from './editor';
+import { EventLogPanel } from './EventLogPanel';
 import { useEditorStore } from './editor/useEditorStore';
 import { MenuBar } from './MenuBar';
 import { ProblemsPanel } from './ProblemsPanel';
 import { SidebarContent } from './SidebarContent';
+
+type BottomPanelName = 'problems' | 'services' | 'workers' | 'task-activity' | 'output' | 'event-log';
 
 const STARTUP_STATE_READ_ERROR_MESSAGE = 'Unable to read startup state.';
 const THEME_SETTINGS_READ_ERROR_MESSAGE = 'Unable to read theme settings.';
@@ -59,13 +62,41 @@ const DEV_PRELOAD_API: AgentDeckPreloadApi = {
   stopStreaming: async () => undefined,
   onChatStream: () => () => undefined,
   onChatTabsChange: () => () => undefined,
+  onAgentRuntimeSessionChanged: () => () => undefined,
+  onAgentRuntimeTaskChanged: () => () => undefined,
+  onAgentRuntimeWorkerChanged: () => () => undefined,
+  onAgentRuntimeSessionCrashed: () => () => undefined,
+  listAgentRuntimeSessions: async () => [],
+  getAgentRuntimeSession: async () => undefined,
+  listAgentRuntimeWorkers: async () => [],
+  getAgentRuntimeWorker: async () => undefined,
+  listAgentRuntimeTasks: async () => [],
+  getAgentRuntimeTask: async () => undefined,
+  startAgentRuntimeWorker: async () => ({ status: 'error' as const, code: 'UNKNOWN' as const, message: 'Dev mode - no runtime worker.' }),
+  startAgentRuntimeSubagent: async () => ({ status: 'error' as const, code: 'UNKNOWN' as const, message: 'Dev mode - no runtime subagent.' }),
+  resumeAgentRuntimeWorker: async () => ({ status: 'error' as const, code: 'UNKNOWN' as const, message: 'Dev mode - no runtime worker.' }),
+  stopAgentRuntimeWorker: async () => ({ status: 'error' as const, code: 'UNKNOWN' as const, message: 'Dev mode - no runtime worker.' }),
+  stopAgentRuntimeSession: async () => ({ status: 'error' as const, code: 'UNKNOWN' as const, message: 'Dev mode - no runtime session.' }),
+  // Phase 7: Tool Router / Permission Broker / Conflict Broker dev stubs
+  onConflictDetected: () => () => undefined,
+  resolveConflict: async () => undefined,
+  checkSensitivePath: async () => ({ filePath: '', isSensitive: false }),
+  getFileHash: async () => ({ status: 'ok' as const, hash: 'dev-hash' }),
+  // Event Log dev stubs
+  getEventLog: async () => ({ status: 'ok' as const, entries: [] as readonly EventLogEntry[], total: 0 }),
+  onEventLogUpdate: () => () => undefined,
+  clearEventLog: async () => undefined,
   // Model Gateway secure config dev stubs
   getApiKey: async () => null,
   setApiKey: async () => undefined,
   deleteApiKey: async () => undefined,
   testConnection: async () => ({ status: 'error' as const, message: 'Dev mode - no real connection.' }),
   setProviderConfig: async () => undefined,
-  getProviderConfig: async () => ({ baseUrl: '', hasApiKey: false })
+  getProviderConfig: async () => ({ baseUrl: '', hasApiKey: false }),
+  // Permission Broker dev stubs
+  getPermissionBrokerState: async () => ({ decisions: [], prompts: [], grants: [], audit: [] }),
+  approvePermissionDecision: async (input: PermissionApprovalInput) => ({ status: 'ok', decision: { id: 'dev', requestId: 'dev', sessionId: 'dev', taskId: 'dev', actorKind: 'agent', kind: input.decision === 'allow' ? 'write' : 'read', target: 'dev', risk: 'low', decision: input.decision, reason: 'Dev mode.', createdAt: Date.now() } }),
+  onPermissionDecision: () => () => undefined
 };
 
 function getPreloadApi(): AgentDeckPreloadApi {
@@ -76,6 +107,102 @@ function getSidebarLabel(activePanel: 'explorer' | 'search' | 'chat'): string {
   if (activePanel === 'chat') return 'Chat';
   if (activePanel === 'search') return 'Search';
   return 'Explorer';
+}
+
+type RuntimeCrashNotification = Readonly<{
+  sessionId: string;
+  workerId?: string;
+  message: string;
+  timestamp: number;
+}>;
+
+type RuntimeEventTone = 'error' | 'success' | 'info';
+
+function getLatestCrashMessage(session: AgentRuntimeSessionState): string | undefined {
+  const reversedEventLog = [...session.eventLog].reverse();
+  const crashEventMessage = reversedEventLog.find(event => event.type === 'worker-crashed' || event.type === 'task-failed' || event.type === 'session-stopped')?.message;
+
+  return crashEventMessage ?? session.workers.find(worker => worker.status === 'crashed')?.lastError;
+}
+
+function formatRuntimeTimestamp(timestamp: number): string {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return 'Unknown time';
+  return new Date(timestamp).toLocaleString();
+}
+
+function formatRuntimeEventType(type: AgentRuntimeEventEntry['type']): string {
+  switch (type) {
+    case 'session-created': return 'Session created';
+    case 'session-stopped': return 'Session stopped';
+    case 'worker-started': return 'Worker started';
+    case 'worker-stopped': return 'Worker stopped';
+    case 'worker-crashed': return 'Worker crashed';
+    case 'worker-resumed': return 'Worker resumed';
+    case 'task-created': return 'Task created';
+    case 'task-updated': return 'Task updated';
+    case 'task-completed': return 'Task completed';
+    case 'task-failed': return 'Task failed';
+    case 'task-cancelled': return 'Task cancelled';
+  }
+}
+
+function getRuntimeEventTone(event: AgentRuntimeEventEntry): RuntimeEventTone {
+  if (event.type === 'worker-crashed' || event.type === 'task-failed' || event.type === 'session-stopped') return 'error';
+  if (event.type === 'worker-started' || event.type === 'worker-resumed' || event.type === 'task-completed' || event.type === 'session-created') return 'success';
+  return 'info';
+}
+
+function getRuntimeEventSortValue(event: AgentRuntimeEventEntry): number {
+  return event.timestamp;
+}
+
+function mergeRuntimeTaskSnapshots(existing: readonly AgentRuntimeTaskState[], incoming: readonly AgentRuntimeTaskState[]): readonly AgentRuntimeTaskState[] {
+  const byId = new Map<string, AgentRuntimeTaskState>(existing.map(task => [task.id, task]));
+  for (const task of incoming) {
+    byId.set(task.id, task);
+  }
+  return Object.freeze([...byId.values()].sort((a, b) => a.createdAt - b.createdAt));
+}
+
+function formatRuntimeToolsUsed(tools: readonly string[]): string {
+  if (tools.length === 0) return 'Brak narz─Ödzi';
+  return tools.join(', ');
+}
+
+function formatRuntimeReferences(references: readonly string[]): string {
+  if (references.length === 0) return 'Brak referencji';
+  return references.join(', ');
+}
+
+function getRuntimeTaskTitle(task: AgentRuntimeTaskState): string {
+  const kindLabel = task.kind === 'subagent' ? 'subagent' : 'chat';
+  const parentSuffix = task.parentTaskId ? ` ┬Ě parent ${task.parentTaskId}` : '';
+  return `${task.agentName} (${kindLabel}${parentSuffix})`;
+}
+
+function mergeRuntimeEvents(existing: readonly AgentRuntimeEventEntry[], incoming: readonly AgentRuntimeEventEntry[]): readonly AgentRuntimeEventEntry[] {
+  const byId = new Map<string, AgentRuntimeEventEntry>(existing.map(event => [event.id, event]));
+  for (const event of incoming) {
+    if (!byId.has(event.id)) {
+      byId.set(event.id, event);
+    }
+  }
+  return [...byId.values()].sort((a, b) => getRuntimeEventSortValue(b) - getRuntimeEventSortValue(a));
+}
+
+function createRuntimeCrashNotification(session: AgentRuntimeSessionState, message: string): RuntimeCrashNotification {
+  const crashedWorker = session.workers.find(worker => worker.status === 'crashed');
+  const notification: RuntimeCrashNotification = {
+    sessionId: session.id,
+    message,
+    timestamp: Date.now()
+  };
+
+  if (crashedWorker) {
+    return { ...notification, workerId: crashedWorker.id };
+  }
+
+  return notification;
 }
 
 interface IdentityMenuProps {
@@ -144,7 +271,7 @@ function IdentityMenu({ identity, agent, menuRef, isOpen, onToggle, onClose, dev
             onClick={handleCopyCode}
             style={{ fontSize: '12px', padding: '4px 12px' }}
           >
-            {copied ? '✓ Copied!' : '📋 Copy code'}
+            {copied ? 'Ôťô Copied!' : '­čôő Copy code'}
           </button>
         </div>
         <div style={{ padding: '0 12px 12px', fontSize: '12px', color: '#888' }}>
@@ -225,6 +352,242 @@ function IdentityMenu({ identity, agent, menuRef, isOpen, onToggle, onClose, dev
   );
 }
 
+interface RuntimeWorkerRow {
+  readonly session: AgentRuntimeSessionState | undefined;
+  readonly worker: AgentRuntimeWorkerState;
+}
+
+function findSession(sessions: readonly AgentRuntimeSessionState[], sessionId: string): AgentRuntimeSessionState | undefined {
+  return sessions.find(session => session.id === sessionId);
+}
+
+function AgentRuntimeWorkersPanel({ agent, onEventLog }: { readonly agent: AgentDeckPreloadApi; readonly onEventLog: (events: readonly AgentRuntimeEventEntry[]) => void }) {
+  const [sessions, setSessions] = useState<readonly AgentRuntimeSessionState[]>([]);
+  const [workers, setWorkers] = useState<readonly AgentRuntimeWorkerState[]>([]);
+  const [status, setStatus] = useState('No runtime workers.');
+
+  const refreshWorkers = useCallback(async () => {
+    if (typeof agent.listAgentRuntimeWorkers !== 'function' || typeof agent.listAgentRuntimeSessions !== 'function') {
+      setStatus('Agent Runtime worker API is not available.');
+      return;
+    }
+
+    try {
+      const [nextSessions, nextWorkers] = await Promise.all([
+        agent.listAgentRuntimeSessions?.() ?? [],
+        agent.listAgentRuntimeWorkers?.() ?? []
+      ]);
+      setSessions(nextSessions);
+      setWorkers(nextWorkers);
+      onEventLog(nextSessions.flatMap(session => session.eventLog));
+      const workerCount = nextWorkers.length;
+      const workerLabel = workerCount === 1 ? 'runtime worker' : 'runtime workers';
+      setStatus(`${workerCount} ${workerLabel}.`);
+    } catch {
+      setStatus('Unable to refresh runtime workers.');
+    }
+  }, [agent, onEventLog]);
+
+  useEffect(() => {
+    let active = true;
+    if (typeof agent.listAgentRuntimeWorkers !== 'function' || typeof agent.listAgentRuntimeSessions !== 'function') {
+      setStatus('Agent Runtime worker API is not available.');
+      return;
+    }
+
+    refreshWorkers().catch(() => {
+      if (active) setStatus('Unable to refresh runtime workers.');
+    });
+
+    const disposeWorker = agent.onAgentRuntimeWorkerChanged?.(() => {
+      if (active) refreshWorkers().catch(() => setStatus('Unable to refresh runtime workers.'));
+    });
+    const disposeSession = agent.onAgentRuntimeSessionChanged?.(() => {
+      if (active) refreshWorkers().catch(() => setStatus('Unable to refresh runtime workers.'));
+    });
+    const disposeCrash = agent.onAgentRuntimeSessionCrashed?.(() => {
+      if (active) refreshWorkers().catch(() => setStatus('Unable to refresh runtime workers.'));
+    });
+
+    return () => {
+      active = false;
+      disposeWorker?.();
+      disposeSession?.();
+      disposeCrash?.();
+    };
+  }, [agent, refreshWorkers]);
+
+  const handleStopWorker = useCallback(async (workerId: string) => {
+    if (typeof agent.stopAgentRuntimeWorker !== 'function') return;
+    const result = await agent.stopAgentRuntimeWorker(workerId);
+    if (result.status === 'error') {
+      setStatus(`Failed to stop worker: ${result.message}`);
+    }
+    await refreshWorkers();
+  }, [agent, refreshWorkers]);
+
+  const handleStopSession = useCallback(async (sessionId: string) => {
+    if (typeof agent.stopAgentRuntimeSession !== 'function') return;
+    const result = await agent.stopAgentRuntimeSession(sessionId);
+    if (result.status === 'error') {
+      setStatus(`Failed to stop session: ${result.message}`);
+    }
+    await refreshWorkers();
+  }, [agent, refreshWorkers]);
+
+  const rows: RuntimeWorkerRow[] = workers.map(worker => ({
+    session: findSession(sessions, worker.sessionId),
+    worker
+  }));
+
+  return (
+    <section className="runtime-workers-panel" aria-label="Agent Runtime workers">
+      <div className="runtime-workers-header">
+        <div>
+          <p className="section-label">Agent Runtime</p>
+          <h2>Workers</h2>
+        </div>
+        <span className="runtime-workers-status">{status}</span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="workspace-path">No runtime workers are active.</p>
+      ) : (
+        <ul className="runtime-workers-list" aria-label="Runtime worker list">
+          {rows.map(({ session, worker }) => (
+            <li key={worker.id} className="runtime-worker-card">
+              <div className="runtime-worker-main">
+                <strong>{worker.id}</strong>
+                <span className={`runtime-worker-status status-${worker.status}`}>{worker.status}</span>
+                <span className="workspace-path">Session: {session?.id ?? worker.sessionId} ┬Ě {session?.status ?? 'unknown'}</span>
+                <span className="workspace-path">Task: {worker.taskId} ┬Ě Attempt {worker.attempt}</span>
+                {worker.status === 'crashed' && worker.lastError && (
+                  <output className="runtime-worker-error">Crash reason: {worker.lastError}</output>
+                )}
+              </div>
+              <div className="runtime-worker-actions">
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={() => { void handleStopWorker(worker.id); }}
+                  aria-label={`Stop runtime worker ${worker.id}`}
+                  disabled={worker.status === 'stopped' || worker.status === 'crashed'}
+                >
+                  Stop worker
+                </button>
+                {session && (
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    onClick={() => { void handleStopSession(session.id); }}
+                    aria-label={`Stop runtime session ${session.id}`}
+                    disabled={session.status === 'stopped'}
+                  >
+                    Stop session
+                  </button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function AgentRuntimeTasksPanel({ tasks }: { readonly tasks: readonly AgentRuntimeTaskState[] }) {
+  return (
+    <section className="runtime-task-activity-panel" aria-label="Task Activity">
+      <div className="runtime-task-activity-header">
+        <div>
+          <p className="section-label">Agent Runtime</p>
+          <h2>Task Activity</h2>
+        </div>
+        <span className="runtime-task-activity-count">{tasks.length} tasks</span>
+      </div>
+      {tasks.length === 0 ? (
+        <p className="workspace-path">No runtime task activity yet.</p>
+      ) : (
+        <ul className="runtime-task-activity-list" aria-label="Runtime task activity">
+          {tasks.map(task => (
+            <li key={task.id} className="runtime-task-card">
+              <div className="runtime-task-main">
+                <strong>{getRuntimeTaskTitle(task)}</strong>
+                <span className={`runtime-worker-status status-${task.status}`}>{task.status}</span>
+                <span className="workspace-path">Task: {task.id}</span>
+                <span className="workspace-path">Session: {task.sessionId}</span>
+                <span className="workspace-path">Prompt: {task.prompt || 'ÔÇö'}</span>
+                <span className="workspace-path">Tools used: {formatRuntimeToolsUsed(task.toolsUsed)}</span>
+                {task.result && (
+                  <>
+                    <span className="workspace-path">Summary: {task.result.summary}</span>
+                    <span className="workspace-path">References: {formatRuntimeReferences(task.result.references)}</span>
+                    <span className="workspace-path">Worker tools: {formatRuntimeToolsUsed(task.result.toolsUsed)}</span>
+                  </>
+                )}
+                {task.error && <output className="runtime-worker-error">Error: {task.error}</output>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function AgentRuntimeTaskActivityPanel({ agent }: { readonly agent: AgentDeckPreloadApi }) {
+  const [tasks, setTasks] = useState<readonly AgentRuntimeTaskState[]>([]);
+  const [status, setStatus] = useState('No runtime tasks.');
+
+  const refreshTasks = useCallback(async () => {
+    if (typeof agent.listAgentRuntimeTasks !== 'function') {
+      setStatus('Agent Runtime task API is not available.');
+      return;
+    }
+
+    try {
+      const nextTasks = await agent.listAgentRuntimeTasks();
+      setTasks(prev => mergeRuntimeTaskSnapshots(prev, nextTasks));
+      const taskCount = nextTasks.length;
+      const taskLabel = taskCount === 1 ? 'runtime task' : 'runtime tasks';
+      setStatus(`${taskCount} ${taskLabel}.`);
+    } catch {
+      setStatus('Unable to refresh runtime tasks.');
+    }
+  }, [agent]);
+
+  useEffect(() => {
+    let active = true;
+
+    refreshTasks().catch(() => {
+      if (active) setStatus('Unable to refresh runtime tasks.');
+    });
+
+    const disposeTask = agent.onAgentRuntimeTaskChanged?.((task) => {
+      if (active) setTasks(prev => mergeRuntimeTaskSnapshots(prev, [task]));
+    });
+    const disposeSession = agent.onAgentRuntimeSessionChanged?.(() => {
+      if (active) refreshTasks().catch(() => setStatus('Unable to refresh runtime tasks.'));
+    });
+    const disposeWorker = agent.onAgentRuntimeWorkerChanged?.(() => {
+      if (active) refreshTasks().catch(() => setStatus('Unable to refresh runtime tasks.'));
+    });
+
+    return () => {
+      active = false;
+      disposeTask?.();
+      disposeSession?.();
+      disposeWorker?.();
+    };
+  }, [agent, refreshTasks]);
+
+  return (
+    <>
+      <AgentRuntimeTasksPanel tasks={tasks} />
+      <div className="runtime-task-activity-status">{status}</div>
+    </>
+  );
+}
+
 export function App() {
   const agent = useMemo(getPreloadApi, []);
   const [startupState, setStartupState] = useState<StartupState | null>(null);
@@ -239,7 +602,7 @@ export function App() {
   const [workspaceStatus, setWorkspaceStatus] = useState('No workspace opened.');
   const [activePanel, setActivePanel] = useState<'explorer' | 'search' | 'chat'>('explorer');
   const chatStore = useChatStore(agent);
-  const [activeBottomPanel, setActiveBottomPanel] = useState<'problems' | 'services' | 'output'>('problems');
+  const [activeBottomPanel, setActiveBottomPanel] = useState<BottomPanelName>('problems');
   const [externalChanges, setExternalChanges] = useState<ReadonlySet<string>>(new Set());
   const editorStore = useEditorStore();
   const [diagnostics, setDiagnostics] = useState<readonly EditorDiagnostic[]>([]);
@@ -248,6 +611,31 @@ export function App() {
   const [deviceCode, setDeviceCode] = useState<{ userCode: string; verificationUri: string; verificationUriComplete?: string } | null>(null);
   const [identityMenuOpen, setIdentityMenuOpen] = useState(false);
   const identityMenuRef = useRef<HTMLDivElement | null>(null);
+  const [runtimeCrash, setRuntimeCrash] = useState<RuntimeCrashNotification | null>(null);
+  const [runtimeEventLog, setRuntimeEventLog] = useState<readonly AgentRuntimeEventEntry[]>([]);
+  const [permissionPrompts, setPermissionPrompts] = useState<readonly PermissionDecision[]>([]);
+  // ?? Phase 7: Tool approval state ????????????????????????????????????????
+  const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
+  const [pendingPatchConflict, setPendingPatchConflict] = useState<PatchConflict | null>(null);
+  const handleRuntimeCrash = useCallback((session: AgentRuntimeSessionState, error: { message: string }) => {
+    const latestMessage = getLatestCrashMessage(session) ?? error.message;
+
+    setRuntimeCrash(createRuntimeCrashNotification(session, latestMessage));
+    setRuntimeEventLog(prev => mergeRuntimeEvents(prev, session.eventLog));
+  }, []);
+
+  const handleRuntimeSessionChanged = useCallback((session: AgentRuntimeSessionState) => {
+    setRuntimeEventLog(prev => mergeRuntimeEvents(prev, session.eventLog));
+    if (session.status !== 'crashed') return;
+
+    const latestMessage = getLatestCrashMessage(session) ?? 'Runtime session crashed.';
+
+    setRuntimeCrash(createRuntimeCrashNotification(session, latestMessage));
+  }, []);
+
+  const handleRuntimeEventLog = useCallback((events: readonly AgentRuntimeEventEntry[]) => {
+    setRuntimeEventLog(prev => mergeRuntimeEvents(prev, events));
+  }, []);
 
   const allDiagnostics = useMemo(
     () => [...ipcDiagnostics, ...diagnostics],
@@ -270,6 +658,61 @@ export function App() {
   const handleDiagnosticsChange = useCallback((next: readonly EditorDiagnostic[]) => {
     setDiagnostics(next);
   }, []);
+
+  // ?? Phase 7: Tool approval handlers & subscriptions ?????????????????????
+
+  const handleApprovalDecision = useCallback(async (decision: ApprovalDecision) => {
+    setPendingApproval(null);
+    try {
+      const response = await agent.submitApproval?.(decision);
+      if (response?.status === 'error') {
+        console.warn('[App] Approval response error:', response.message);
+      }
+    } catch {
+      // silently ignore — approval may have expired
+    }
+  }, [agent]);
+
+  // Subscribe to tool approval requests from main process
+  useEffect(() => {
+    if (typeof agent.onToolApprovalRequest !== 'function') return;
+
+    const dispose = agent.onToolApprovalRequest((response: ToolCallResponse & { status: 'pending-approval' }) => {
+      setPendingApproval({
+        callId: response.callId,
+        classification: response.classification,
+        expiresAt: response.expiresAt,
+      });
+    });
+
+    return dispose;
+  }, [agent]);
+
+  // Subscribe to patch conflict events from main process
+  useEffect(() => {
+    if (typeof agent.onConflictDetected !== 'function') return;
+
+    const dispose = agent.onConflictDetected((conflict: Conflict) => {
+      setPendingPatchConflict({ conflict, patchId: conflict.patchId });
+    });
+
+    return dispose;
+  }, [agent]);
+
+  const handlePatchConflictResolve = useCallback(async (action: 'apply' | 'skip' | 'edit') => {
+    if (!pendingPatchConflict) return;
+
+    try {
+      const resolution = action === 'edit'
+        ? { conflictId: pendingPatchConflict.conflict.id, action, operations: [] as readonly [] }
+        : { conflictId: pendingPatchConflict.conflict.id, action };
+      await agent.resolveConflict?.(resolution);
+    } catch {
+      // silently ignore — conflict may have expired
+    }
+
+    setPendingPatchConflict(null);
+  }, [agent, pendingPatchConflict]);
 
   // Poll IPC for workspace-level diagnostics (supports E2E mocks and future LSP integration)
   useEffect(() => {
@@ -327,7 +770,7 @@ export function App() {
     if (typeof agent.onDeviceCode === 'function') {
       const dispose = agent.onDeviceCode((data) => {
         if (active && data?.userCode) {
-          // exactOptionalPropertyTypes: true � don't set property if null/undefined
+          // exactOptionalPropertyTypes: true ´┐Ż don't set property if null/undefined
           if (data.verificationUriComplete == null) {
             setDeviceCode({
               userCode: data.userCode,
@@ -416,6 +859,80 @@ export function App() {
     // For Save All, we dispatch a custom event that EditorSurface can intercept.
     globalThis.dispatchEvent(new CustomEvent('agentdeck:save-all'));
   }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const disposeCrash = agent.onAgentRuntimeSessionCrashed?.((session, error) => {
+      if (active) handleRuntimeCrash(session, error);
+    });
+
+    return () => {
+      active = false;
+      disposeCrash?.();
+    };
+  }, [agent, handleRuntimeCrash]);
+
+  useEffect(() => {
+    let active = true;
+
+    const disposeSession = agent.onAgentRuntimeSessionChanged?.((session) => {
+      if (active) handleRuntimeSessionChanged(session);
+    });
+
+    return () => {
+      active = false;
+      disposeSession?.();
+    };
+  }, [agent, handleRuntimeSessionChanged]);
+
+  // Permission Broker: subscribe to decisions
+  useEffect(() => {
+    let active = true;
+    const dispose = agent.onPermissionDecision?.((decision: PermissionDecision) => {
+      if (!active) return;
+      if (decision.decision === 'prompt') {
+        setPermissionPrompts(prev => [...prev, decision]);
+      }
+    });
+    return () => { active = false; dispose?.(); };
+  }, [agent]);
+
+  const handleApprovePermission = useCallback(async (decisionId: string) => {
+    if (typeof agent.approvePermissionDecision !== 'function') {
+      console.warn('[App] approvePermissionDecision unavailable — keeping prompt', decisionId);
+      return;
+    }
+    const input: PermissionApprovalInput = { decisionId, decision: 'allow', duration: 'session' };
+    try {
+      const response = await agent.approvePermissionDecision(input);
+      if (response?.status === 'error') {
+        console.warn('[App] Permission approval rejected:', response.message);
+        return;
+      }
+      setPermissionPrompts(prev => prev.filter(p => p.id !== decisionId));
+    } catch (error) {
+      console.warn('[App] Permission approval failed — keeping prompt', decisionId, error);
+    }
+  }, [agent]);
+
+  const handleDenyPermission = useCallback(async (decisionId: string) => {
+    if (typeof agent.approvePermissionDecision !== 'function') {
+      console.warn('[App] approvePermissionDecision unavailable — keeping prompt', decisionId);
+      return;
+    }
+    const input: PermissionApprovalInput = { decisionId, decision: 'deny', duration: 'once' };
+    try {
+      const response = await agent.approvePermissionDecision(input);
+      if (response?.status === 'error') {
+        console.warn('[App] Permission denial rejected:', response.message);
+        return;
+      }
+      setPermissionPrompts(prev => prev.filter(p => p.id !== decisionId));
+    } catch (error) {
+      console.warn('[App] Permission denial failed — keeping prompt', decisionId, error);
+    }
+  }, [agent]);
 
   useEffect(() => {
     let isActive = true;
@@ -601,8 +1118,17 @@ export function App() {
           <button type="button" role="tab" aria-selected={activeBottomPanel === 'services'} onClick={() => { setActiveBottomPanel('services'); }}>
             Services
           </button>
+          <button type="button" role="tab" aria-selected={activeBottomPanel === 'workers'} onClick={() => { setActiveBottomPanel('workers'); }}>
+            Workers
+          </button>
+          <button type="button" role="tab" aria-selected={activeBottomPanel === 'task-activity'} onClick={() => { setActiveBottomPanel('task-activity'); }}>
+            Task Activity
+          </button>
           <button type="button" role="tab" aria-selected={activeBottomPanel === 'output'} onClick={() => { setActiveBottomPanel('output'); }}>
             Output
+          </button>
+          <button type="button" role="tab" aria-selected={activeBottomPanel === 'event-log'} onClick={() => { setActiveBottomPanel('event-log'); }}>
+            Event Log
           </button>
         </div>
 
@@ -628,8 +1154,91 @@ export function App() {
               ) : null}
             </>
           )}
+          {activeBottomPanel === 'workers' && (
+            <AgentRuntimeWorkersPanel agent={agent} onEventLog={handleRuntimeEventLog} />
+          )}
+          {activeBottomPanel === 'task-activity' && (
+            <AgentRuntimeTaskActivityPanel agent={agent} />
+          )}
+          {(activeBottomPanel === 'workers' || activeBottomPanel === 'task-activity') && runtimeEventLog.length > 0 && (
+            <section className="runtime-event-log">
+              <div className="runtime-event-log-header">
+                <h3 id="runtime-event-log-title">Agent Runtime event log</h3>
+                <span className="runtime-event-log-count">{runtimeEventLog.length} events</span>
+              </div>
+              <ol className="runtime-event-log-list" aria-labelledby="runtime-event-log-title">
+                {runtimeEventLog.slice(0, 12).map(event => (
+                  <li key={event.id} className={`runtime-event-log-entry runtime-event-log-entry--${getRuntimeEventTone(event)}`}>
+                    <span className="runtime-event-log-time" title={formatRuntimeTimestamp(event.timestamp)}>{formatRuntimeTimestamp(event.timestamp)}</span>
+                    <span className="runtime-event-log-type">{formatRuntimeEventType(event.type)}</span>
+                    <span className="runtime-event-log-message">{event.message}</span>
+                    {event.workerId && <span className="runtime-event-log-detail">Worker: {event.workerId}</span>}
+                    {event.taskId && <span className="runtime-event-log-detail">Task: {event.taskId}</span>}
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+          {activeBottomPanel === 'workers' && runtimeCrash && (
+            <div className="runtime-crash-notification" role="alert" aria-label="Agent Runtime worker crashed">
+              <strong>Agent Runtime worker crashed.</strong>
+              <span>{runtimeCrash.message}</span>
+              {runtimeCrash.workerId && <span>Worker: {runtimeCrash.workerId}</span>}
+              <span>Session: {runtimeCrash.sessionId}</span>
+              <span>{formatRuntimeTimestamp(runtimeCrash.timestamp)}</span>
+              <button
+                className="runtime-crash-dismiss"
+                type="button"
+                aria-label="Dismiss crash notification"
+                onClick={() => { setRuntimeCrash(null); }}
+              >
+                ├Ś
+              </button>
+            </div>
+          )}
           {activeBottomPanel === 'output' && (
             <p className="output-empty" aria-live="polite">No output.</p>
+          )}
+          {activeBottomPanel === 'event-log' && (
+            <EventLogPanel agent={agent} theme={themeSettings.theme} />
+          )}
+          {permissionPrompts.length > 0 && activeBottomPanel === 'problems' && (
+            <section className="permission-prompts" aria-label="Permission prompts">
+              <div className="permission-prompts-header">
+                <h3>Permission Requests</h3>
+                <span>{permissionPrompts.length} pending</span>
+              </div>
+              <ul className="permission-prompts-list">
+                {permissionPrompts.map(prompt => (
+                  <li key={prompt.id} className="permission-prompt-card">
+                    <div className="permission-prompt-main">
+                      <strong>{prompt.toolName ?? prompt.kind}</strong>
+                      <span className={`permission-risk permission-risk--${prompt.risk}`}>{prompt.risk}</span>
+                      <span className="permission-prompt-target">{prompt.target}</span>
+                      <span className="permission-prompt-reason">{prompt.reason}</span>
+                    </div>
+                    <div className="permission-prompt-actions">
+                      <button
+                        className="permission-approve-btn"
+                        type="button"
+                        onClick={() => { handleApprovePermission(prompt.id); }}
+                        aria-label={`Allow ${prompt.toolName ?? prompt.kind}`}
+                      >
+                        Allow
+                      </button>
+                      <button
+                        className="permission-deny-btn"
+                        type="button"
+                        onClick={() => { handleDenyPermission(prompt.id); }}
+                        aria-label={`Deny ${prompt.toolName ?? prompt.kind}`}
+                      >
+                        Deny
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
         </div>
       </section>
@@ -707,7 +1316,175 @@ export function App() {
           )}
         </div>
       </footer>
+      {pendingApproval && (
+        <ApprovalDialog
+          approval={pendingApproval}
+          onDecision={handleApprovalDecision}
+        />
+      )}
+      {pendingPatchConflict && (
+        <PatchConflictDialog
+          conflict={pendingPatchConflict}
+          onResolve={handlePatchConflictResolve}
+        />
+      )}
     </main>
+  );
+}
+
+// ?? Phase 7: Tool approval state ????????????????????????????????????????
+
+interface PendingApproval {
+  callId: string;
+  classification: ToolClassification;
+  expiresAt: number;
+}
+
+interface ApprovalDialogProps {
+  approval: PendingApproval;
+  onDecision: (decision: ApprovalDecision) => void;
+}
+
+function ApprovalDialog({ approval, onDecision }: Readonly<ApprovalDialogProps>) {
+  const { classification, callId, expiresAt } = approval;
+  const [remember, setRemember] = useState(false);
+  const timeLeft = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+
+  const handleApprove = useCallback(() => {
+    onDecision({ callId, approved: true, remember });
+  }, [callId, remember, onDecision]);
+
+  const handleDeny = useCallback(() => {
+    onDecision({ callId, approved: false });
+  }, [callId, onDecision]);
+
+  // Risk level badge color
+  let riskColor: string;
+  if (classification.riskLevel === 'critical') {
+    riskColor = 'var(--color-danger)';
+  } else if (classification.riskLevel === 'high') {
+    riskColor = '#ff9f43';
+  } else if (classification.riskLevel === 'medium') {
+    riskColor = 'var(--color-warning)';
+  } else {
+    riskColor = 'var(--color-accent)';
+  }
+
+  return (
+    <div className="approval-overlay" role="alertdialog" aria-modal="true" aria-label="Tool approval request">
+      <div className="approval-dialog">
+        <div className="approval-header">
+          <h3 className="approval-title">Zatwierdź wywołanie narzędzia</h3>
+          <span className="approval-risk-badge" style={{ borderColor: riskColor, color: riskColor }}>
+            {classification.riskLevel}
+          </span>
+        </div>
+        <div className="approval-body">
+          <p className="approval-tool-name">{classification.name}</p>
+          <p className="approval-description">{classification.description}</p>
+          <p className="approval-timer">Pozostało: {timeLeft}s</p>
+          <label className="approval-remember">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            {' '}Zapamiętaj decyzję dla tego narzędzia
+          </label>
+        </div>
+        <div className="approval-actions">
+          <button className="approval-btn approval-btn--deny" type="button" onClick={handleDeny}>
+            Odrzuć
+          </button>
+          <button className="approval-btn approval-btn--approve" type="button" onClick={handleApprove}>
+            Zatwierdź
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ?? Patch Conflict Dialog ???????????????????????????????????????????????
+
+interface PatchConflict {
+  conflict: Conflict;
+  patchId: string;
+}
+
+interface PatchConflictDialogProps {
+  conflict: PatchConflict;
+  onResolve: (action: 'apply' | 'skip' | 'edit') => void;
+}
+
+function PatchConflictDialog({ conflict, onResolve }: Readonly<PatchConflictDialogProps>) {
+  const { conflict: conflictData, patchId } = conflict;
+
+  // Build a simple diff preview from the conflict info
+  const diffLines = conflictData.filePath
+    ? [
+        { prefix: '---', text: `a/${conflictData.filePath}` },
+        { prefix: '+++', text: `b/${conflictData.filePath}` },
+        { prefix: '@@', text: `patch: ${patchId}` },
+      ]
+    : [];
+
+  let riskColor: string;
+  if (conflictData.riskLevel === 'critical') {
+    riskColor = 'var(--color-danger)';
+  } else if (conflictData.riskLevel === 'high') {
+    riskColor = '#ff9f43';
+  } else if (conflictData.riskLevel === 'medium') {
+    riskColor = 'var(--color-warning)';
+  } else {
+    riskColor = 'var(--color-accent)';
+  }
+
+  return (
+    <div className="approval-overlay" role="alertdialog" aria-modal="true" aria-label="Patch conflict">
+      <div className="approval-dialog patch-conflict-dialog">
+        <div className="approval-header">
+          <h3 className="approval-title">Konflikt patcha</h3>
+          <span className="approval-risk-badge" style={{ borderColor: riskColor, color: riskColor }}>
+            {conflictData.kind}
+          </span>
+        </div>
+        <div className="approval-body">
+          <p className="approval-tool-name">{conflictData.filePath}</p>
+          <p className="approval-description">{conflictData.description}</p>
+          {diffLines.length > 0 && (
+            <pre className="patch-conflict-diff" aria-label="Diff preview">
+              {diffLines.map((line) => {
+                let lineKind = 'header';
+                if (line.prefix === '---') {
+                  lineKind = 'removed';
+                } else if (line.prefix === '+++') {
+                  lineKind = 'added';
+                }
+                const key = `${line.prefix}:${line.text}`;
+                return (
+                  <div key={key} className={`diff-line diff-line--${lineKind}`}>
+                    <span className="diff-prefix">{line.prefix}</span>
+                    <span className="diff-text">{line.text}</span>
+                  </div>
+                );
+              })}
+            </pre>
+          )}
+        </div>
+        <div className="approval-actions">
+          <button className="approval-btn approval-btn--deny" type="button" onClick={() => onResolve('skip')}>
+            Pomiń
+          </button>
+          <button className="approval-btn" type="button" onClick={() => onResolve('edit')}>
+            Edytuj
+          </button>
+          <button className="approval-btn approval-btn--approve" type="button" onClick={() => onResolve('apply')}>
+            Nadpisz
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

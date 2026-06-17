@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ModelGateway } from '@agentdeck/services';
 
-describe('ModelGateway — Provider Configuration', () => {
+describe('ModelGateway ÔÇö Provider Configuration', () => {
   describe('setProviderBaseUrl', () => {
     it('updates the base URL for a provider', () => {
       const gateway = new ModelGateway();
@@ -33,10 +33,10 @@ describe('ModelGateway — Provider Configuration', () => {
 
     it('returns updated base URL after setProviderBaseUrl', () => {
       const gateway = new ModelGateway();
-      gateway.setProviderBaseUrl('ollama', 'http://custom:8080');
+      gateway.setProviderBaseUrl('ollama', 'https://custom.example.test:8080');
 
       const config = gateway.getProviderConfig('ollama');
-      expect(config.baseUrl).toBe('http://custom:8080');
+      expect(config.baseUrl).toBe('https://custom.example.test:8080');
     });
 
     it('returns defaults for unknown provider', () => {
@@ -74,7 +74,7 @@ describe('ModelGateway — Provider Configuration', () => {
   describe('getConfig', () => {
     it('returns current providers state', () => {
       const gateway = new ModelGateway();
-      gateway.setProviderBaseUrl('ollama', 'http://custom:8080');
+      gateway.setProviderBaseUrl('ollama', 'https://custom.example.test:8080');
 
       const config = gateway.getConfig();
       expect(config.providers).toHaveLength(4);
