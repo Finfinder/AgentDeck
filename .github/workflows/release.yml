@@ -24,15 +24,17 @@ jobs:
           TAG="${{ github.ref_name }}"
           VERSION="${TAG#v}"
           NOTES=$(awk -v ver="$VERSION" '
-            BEGIN { found=0; buf="" }
+            BEGIN { found=0 }
             /^## \[/ {
-              if (found) { print buf; exit }
+              if (found) { exit }
               if ($0 ~ "\\[" ver "\\]") { found=1; next }
             }
-            found && /^## \[/ { print buf; exit }
-            found { buf = buf $0 "\n" }
-            END { if (found) print buf }
+            found { print }
           ' CHANGELOG.md)
+          if [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+            echo "::error::Brak notek release dla wersji $VERSION w CHANGELOG.md"
+            exit 1
+          fi
           {
             echo "notes<<EOF"
             echo "$NOTES"
