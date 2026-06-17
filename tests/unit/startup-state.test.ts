@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { describeAgentRuntime } from '@agentdeck/agent-runtime';
+import { createAgentRuntime } from '@agentdeck/agent-runtime';
 import { bootstrapDesktopServices, createStartupErrorState } from '@agentdeck/services';
 import { IPC_CHANNELS, isStartupState, isThemeSettings, isWorkspaceOpenRequest, isWorkspaceSelection } from '@agentdeck/shared';
 
@@ -22,11 +22,15 @@ describe('startup IPC contract', () => {
     expect(state.status).toBe('ready');
   });
 
-  it('describes the initial agent runtime capabilities', () => {
-    expect(describeAgentRuntime()).toEqual({
-      status: 'idle',
-      capabilities: ['chat-tabs', 'worker-lifecycle', 'event-log']
+  it('describes the agent runtime capabilities', () => {
+    const runtime = createAgentRuntime({
+      workerFactory: workerId => ({ id: workerId, run: vi.fn() })
     });
+
+    expect(runtime).toBeDefined();
+    expect(runtime.createSession).toBeDefined();
+    expect(runtime.startWorker).toBeDefined();
+    expect(runtime.startSubagent).toBeDefined();
   });
 
   it('throws a controlled error when desktop services fail', async () => {

@@ -1,13 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type {
+  ChatMessage,
   ModelInfo,
   ModelProviderId
 } from '@agentdeck/shared';
 import {
   ModelGateway,
   type ModelProviderAdapter,
-  type ToolDefinition
+  type ToolDefinition,
+  type ToolExecutionContext,
+  type ToolExecutor
 } from '@agentdeck/services';
 
 function createMockAdapter(
@@ -319,7 +322,7 @@ describe('ModelGateway', () => {
         listModels: vi.fn().mockResolvedValue([]),
         chat: vi.fn().mockImplementation(async function* (_baseUrl, _modelId, _messages, signal) {
           yield { type: 'chunk', content: 'Hello' };
-          // Wait for abort signal — never resolves, only rejects on abort
+          // Wait for abort signal ÔÇö never resolves, only rejects on abort
           await new Promise<void>((_resolve, reject) => {
             signal?.addEventListener('abort', () => {
               reject(new Error('Aborted'));
@@ -337,7 +340,7 @@ describe('ModelGateway', () => {
       // Give it a moment to start streaming
       await new Promise(r => setTimeout(r, 50));
 
-      // Stop streaming — this aborts the signal
+      // Stop streaming ÔÇö this aborts the signal
       gateway.stopStreaming(tab.id);
 
       // The sendMessage should complete (the generator is still running but
@@ -576,6 +579,405 @@ describe('ModelGateway', () => {
       await gateway.sendMessage(tab.id, 'hello');
     });
 
+    it('sends tools when active model metadata is missing', async () => {
+      const gateway = new ModelGateway();
+      const adapter: ModelProviderAdapter = {
+        providerId: 'ollama',
+        label: 'Mock',
+        healthCheck: vi.fn().mockResolvedValue(true),
+        listModels: vi.fn().mockResolvedValue([]),
+        chat: vi.fn().mockImplementation(async function* (_baseUrl, _modelId, _messages, _signal, tools) {
+          expect(tools).toHaveLength(1);
+          yield { type: 'chunk', content: 'Hello' };
+        })
+      };
+      gateway.registerAdapter(adapter);
+
+      gateway.registerTool({
+        type: 'function',
+        function: { name: 'get_weather', description: 'Get weather', parameters: {} }
+      });
+
+      gateway.updateProviderStatus('ollama', 'ready', []);
+      gateway.setActiveModel('qwen3.6:latest');
+
+      const tab = gateway.createChatTab();
+      await gateway.sendMessage(tab.id, 'hello');
+    });
+
+    it('executes registered tool and returns result to the model', async () => {
+      const gateway = new ModelGateway();
+      let callCount = 0;
+      const adapter: ModelProviderAdapter = {
+        providerId: 'ollama',
+        label: 'Mock',
+        healthCheck: vi.fn().mockResolvedValue(true),
+        listModels: vi.fn().mockResolvedValue([]),
+        chat: vi.fn().mockImplementation(async function* () {
+          callCount++;
+          if (callCount === 1) {
+            yield {
+              type: 'tool_use',
+              toolCall: {
+                id: 'call_1',
+                type: 'function',
+                function: { name: 'get_weather', arguments: '{"city":"Warsaw"}' }
+              }
+            };
+          } else {
+            yield { type: 'chunk', content: 'Done' };
+          }
+        })
+      };
+      gateway.registerAdapter(adapter);
+      gateway.registerTool(
+        {
+          type: 'function',
+          function: { name: 'get_weather', description: 'Get weather', parameters: {} }
+        },
+        async toolCall => JSON.stringify({ weather: 'sunny', input: toolCall.function.arguments })
+      );
+
+      const tab = gateway.createChatTab();
+      await gateway.sendMessage(tab.id, 'What is the weather?');
+
+      const updatedTab = gateway.getChatTab(tab.id);
+      const toolMsg = updatedTab!.messages.find(m => m.role === 'tool');
+      expect(toolMsg).toBeDefined();
+      expect(toolMsg!.content).toBe(String.raw`{"weather":"sunny","input":"{\"city\":\"Warsaw\"}"}`);
+    });
+
+    it('passes chat history and workspace roots to tool executor', async () => {
+      let capturedContext: ToolExecutionContext | undefined;
+      let callCount = 0;
+      const executor: ToolExecutor = async (_toolCall, context) => {
+        capturedContext = context;
+        return JSON.stringify({ ok: true });
+      };
+      const adapter: ModelProviderAdapter = {
+        providerId: 'ollama',
+        label: 'Mock',
+        healthCheck: vi.fn().mockResolvedValue(true),
+        listModels: vi.fn().mockResolvedValue([]),
+        chat: vi.fn().mockImplementation(async function* () {
+          callCount++;
+          if (callCount === 1) {
+            yield {
+              type: 'tool_use',
+              toolCall: {
+                id: 'call_context',
+                type: 'function',
+                function: { name: 'inspect_context', arguments: '{}' }
+              }
+            };
+          } else {
+            yield { type: 'chunk', content: 'Done' };
+          }
+        })
+      };
+      const gateway = new ModelGateway(undefined, () => ['C:/workspace']);
+      gateway.registerAdapter(adapter);
+      gateway.registerTool(
+        {
+          type: 'function',
+          function: { name: 'inspect_context', description: 'Inspect context', parameters: {} }
+        },
+        executor
+      );
+      gateway.updateProviderStatus('ollama', 'ready', [{ id: 'qwen3.6:latest', name: 'Qwen', provider: 'ollama', contextWindow: 4096, supportsTools: true, supportsStreaming: true, supportsEmbeddings: false }]);
+      gateway.setActiveModel('qwen3.6:latest');
+
+      const tab = gateway.createChatTab();
+      await gateway.sendMessage(tab.id, 'Streszcz plik README.md');
+
+      expect(capturedContext).toBeDefined();
+      expect(capturedContext?.workspaceRoots).toEqual(['C:/workspace']);
+      expect(capturedContext?.messages.some((message: ChatMessage) => message.role === 'user' && message.content === 'Streszcz plik README.md')).toBe(true);
+      expect(capturedContext?.messages.some((message: ChatMessage) => message.role === 'assistant' && Array.isArray(message.tool_calls))).toBe(true);
+    });
+
+    it('does not retry read_file when model omitted filePath', async () => {
+      const gateway = new ModelGateway();
+      const adapter: ModelProviderAdapter = {
+        providerId: 'ollama',
+        label: 'Mock',
+        healthCheck: vi.fn().mockResolvedValue(true),
+        listModels: vi.fn().mockResolvedValue([]),
+        chat: vi.fn().mockImplementation(async function* (_baseUrl, _modelId, _messages, _signal, tools) {
+          expect(tools).toHaveLength(1);
+          yield {
+            type: 'tool_use',
+            toolCall: {
+              id: 'call_missing_file',
+              type: 'function',
+              function: { name: 'read_file', arguments: '{}' }
+            }
+          };
+        })
+      };
+      gateway.registerAdapter(adapter);
+      gateway.registerTool({
+        type: 'function',
+        function: { name: 'read_file', description: 'Reads a file', parameters: {} }
+      }, async () => JSON.stringify({ error: 'read_file: missing filePath' }));
+      gateway.updateProviderStatus('ollama', 'ready', [{ id: 'qwen3.6:latest', name: 'Qwen', provider: 'ollama', contextWindow: 4096, supportsTools: true, supportsStreaming: true, supportsEmbeddings: false }]);
+      gateway.setActiveModel('qwen3.6:latest');
+
+      const tab = gateway.createChatTab();
+      await gateway.sendMessage(tab.id, 'Streszcz Readme.md');
+
+      const updatedTab = gateway.getChatTab(tab.id);
+      expect(updatedTab?.messages.some(m => m.role === 'assistant' && m.content.includes('nie poda┼é wymaganej ┼Ťcie┼╝ki pliku'))).toBe(true);
+      expect(updatedTab?.messages.some(m => m.role === 'tool')).toBe(false);
+    });
+
+    it('prefers workspace root matching project mentioned in read_file context', async () => {
+      const gateway = new ModelGateway(undefined, () => ['C:/agentdeck', 'C:/other']);
+      const adapter: ModelProviderAdapter = {
+        providerId: 'ollama',
+        label: 'Mock',
+        healthCheck: vi.fn().mockResolvedValue(true),
+        listModels: vi.fn().mockResolvedValue([]),
+        chat: vi.fn().mockImplementation(async function* (_baseUrl, _modelId, _messages, _signal, tools) {
+          expect(tools).toHaveLength(1);
+          yield {
+            type: 'tool_use',
+            toolCall: {
+              id: 'call_read_project_file',
+              type: 'function',
+              function: { name: 'read_file', arguments: '{"filePath":"Readme.md"}' }
+            }
+          };
+        })
+      };
+      gateway.registerAdapter(adapter);
+      gateway.registerTool({
+        type: 'function',
+        function: { name: 'read_file', description: 'Reads a file', parameters: {} }
+      }, async (_toolCall, context) => JSON.stringify({
+        status: 'ok',
+        filePath: context?.workspaceRoots[0] === 'C:/agentdeck' ? 'C:/agentdeck/Readme.md' : 'C:/other/Readme.md',
+        content: 'ok'
+      }));
+      gateway.updateProviderStatus('ollama', 'ready', [{ id: 'qwen3.6:latest', name: 'Qwen', provider: 'ollama', contextWindow: 4096, supportsTools: true, supportsStreaming: true, supportsEmbeddings: false }]);
+      gateway.setActiveModel('qwen3.6:latest');
+
+      const tab = gateway.createChatTab();
+      await gateway.sendMessage(tab.id, 'Otw├│rz i przeczytaj a nast─Öpnie stre┼Ť─ç mi plik Readme.md z projektu AgentDeck');
+
+      const updatedTab = gateway.getChatTab(tab.id);
+      expect(updatedTab?.messages.some(m => m.role === 'tool' && m.content.includes('C:/agentdeck/Readme.md'))).toBe(true);
+      expect(updatedTab?.messages.some(m => m.role === 'tool' && m.content.includes('C:/other/Readme.md'))).toBe(false);
+    });
+
+    it('does not retry search_files when model sent invalid query', async () => {
+      const gateway = new ModelGateway();
+      let callCount = 0;
+      const adapter: ModelProviderAdapter = {
+        providerId: 'ollama',
+        label: 'Mock',
+        healthCheck: vi.fn().mockResolvedValue(true),
+        listModels: vi.fn().mockResolvedValue([]),
+        chat: vi.fn().mockImplementation(async function* (_baseUrl, _modelId, _messages, _signal, tools) {
+          callCount++;
+          expect(tools).toHaveLength(2);
+          if (callCount === 1) {
+            yield {
+              type: 'tool_use',
+              toolCall: {
+                id: 'call_invalid_search',
+                type: 'function',
+                function: { name: 'search_files', arguments: '{"pattern":null}' }
+              }
+            };
+          } else {
+            yield { type: 'chunk', content: 'Podaj pe┼én─ů ┼Ťcie┼╝k─Ö pliku albo doprecyzuj, czego mam szuka─ç.' };
+          }
+        })
+      };
+      gateway.registerAdapter(adapter);
+      gateway.registerTool({
+        type: 'function',
+        function: { name: 'read_file', description: 'Reads a file', parameters: {} }
+      }, async () => JSON.stringify({ error: 'read_file: missing filePath' }));
+      gateway.registerTool({
+        type: 'function',
+        function: { name: 'search_files', description: 'Searches files', parameters: {} }
+      }, async () => JSON.stringify({ error: 'search_files: invalid query' }));
+      gateway.updateProviderStatus('ollama', 'ready', [{ id: 'qwen3.6:latest', name: 'Qwen', provider: 'ollama', contextWindow: 4096, supportsTools: true, supportsStreaming: true, supportsEmbeddings: false }]);
+      gateway.setActiveModel('qwen3.6:latest');
+
+      const tab = gateway.createChatTab();
+      await gateway.sendMessage(tab.id, 'Streszcz Readme.md');
+
+      expect(adapter.chat).toHaveBeenCalledTimes(1);
+      const updatedTab = gateway.getChatTab(tab.id);
+      expect(updatedTab?.messages.some(m => m.role === 'assistant' && m.content.includes('niepoprawne argumenty'))).toBe(true);
+      expect(updatedTab?.messages.some(m => m.role === 'tool')).toBe(false);
+    });
+
+    it('does not retry create_file when model sent invalid input', async () => {
+      const gateway = new ModelGateway();
+      const adapter: ModelProviderAdapter = {
+        providerId: 'ollama',
+        label: 'Mock',
+        healthCheck: vi.fn().mockResolvedValue(true),
+        listModels: vi.fn().mockResolvedValue([]),
+        chat: vi.fn().mockImplementation(async function* (_baseUrl, _modelId, _messages, _signal, tools) {
+          expect(tools).toHaveLength(1);
+          yield {
+            type: 'tool_use',
+            toolCall: {
+              id: 'call_invalid_create',
+              type: 'function',
+              function: { name: 'create_file', arguments: '{"filePath":"src/app.ts","content":42}' }
+            }
+          };
+        })
+      };
+      gateway.registerAdapter(adapter);
+      gateway.registerTool({
+        type: 'function',
+        function: { name: 'create_file', description: 'Creates a new file', parameters: {} }
+      }, async () => JSON.stringify({ error: 'create_file: invalid input - expected { filePath: string, content?: string }' }));
+      gateway.updateProviderStatus('ollama', 'ready', [{ id: 'qwen3.6:latest', name: 'Qwen', provider: 'ollama', contextWindow: 4096, supportsTools: true, supportsStreaming: true, supportsEmbeddings: false }]);
+      gateway.setActiveModel('qwen3.6:latest');
+
+      const tab = gateway.createChatTab();
+      await gateway.sendMessage(tab.id, 'Utw├│rz plik src/app.ts');
+
+      expect(adapter.chat).toHaveBeenCalledTimes(1);
+      const updatedTab = gateway.getChatTab(tab.id);
+      expect(updatedTab?.messages.some(m => m.role === 'assistant' && m.content.includes('niepoprawne argumenty'))).toBe(true);
+      expect(updatedTab?.messages.some(m => m.role === 'tool')).toBe(false);
+    });
+
+    it('allows create_file when model omitted empty arguments but target file is in chat context', async () => {
+      const gateway = new ModelGateway();
+      let callCount = 0;
+      const adapter: ModelProviderAdapter = {
+        providerId: 'ollama',
+        label: 'Mock',
+        healthCheck: vi.fn().mockResolvedValue(true),
+        listModels: vi.fn().mockResolvedValue([]),
+        chat: vi.fn().mockImplementation(async function* (_baseUrl, _modelId, _messages, _signal, tools) {
+          callCount += 1;
+          expect(tools).toHaveLength(1);
+          if (callCount === 1) {
+            yield {
+              type: 'tool_use',
+              toolCall: {
+                id: 'call_create_empty_args',
+                type: 'function',
+                function: { name: 'create_file', arguments: '{}' }
+              }
+            };
+            return;
+          }
+          yield { type: 'chunk', content: 'Plik AgentTest.md zosta┼é utworzony.' };
+        })
+      };
+      gateway.registerAdapter(adapter);
+      gateway.registerTool({
+        type: 'function',
+        function: { name: 'create_file', description: 'Creates a new file', parameters: {} }
+      }, async () => JSON.stringify({ status: 'ok', filePath: 'AgentTest.md' }));
+      gateway.updateProviderStatus('ollama', 'ready', [{ id: 'qwen3.6:latest', name: 'Qwen', provider: 'ollama', contextWindow: 4096, supportsTools: true, supportsStreaming: true, supportsEmbeddings: false }]);
+      gateway.setActiveModel('qwen3.6:latest');
+
+      const tab = gateway.createChatTab();
+      await gateway.sendMessage(tab.id, 'Otw├│rz i przeczytaj a nast─Öpnie stre┼Ť─ç mi plik Readme.md z projektu AgentDeck, wynik streszczenia zapisz do pliku AgentTest.md');
+
+      expect(adapter.chat).toHaveBeenCalledTimes(2);
+      const updatedTab = gateway.getChatTab(tab.id);
+      expect(updatedTab?.messages.some(m => m.role === 'tool')).toBe(true);
+      expect(updatedTab?.messages.some(m => m.role === 'assistant' && m.content.includes('AgentTest.md zosta┼é utworzony'))).toBe(true);
+    });
+
+    it('allows create_file when model provides only filePath', async () => {
+      const gateway = new ModelGateway();
+      let callCount = 0;
+      const adapter: ModelProviderAdapter = {
+        providerId: 'ollama',
+        label: 'Mock',
+        healthCheck: vi.fn().mockResolvedValue(true),
+        listModels: vi.fn().mockResolvedValue([]),
+        chat: vi.fn().mockImplementation(async function* (_baseUrl, _modelId, _messages, _signal, tools) {
+          callCount += 1;
+          expect(tools).toHaveLength(1);
+          if (callCount === 1) {
+            yield {
+              type: 'tool_use',
+              toolCall: {
+                id: 'call_create_without_content',
+                type: 'function',
+                function: { name: 'create_file', arguments: '{"filePath":"src/app.ts"}' }
+              }
+            };
+            return;
+          }
+          yield { type: 'chunk', content: 'Plik zosta┼é utworzony.' };
+        })
+      };
+      gateway.registerAdapter(adapter);
+      gateway.registerTool({
+        type: 'function',
+        function: { name: 'create_file', description: 'Creates a new file', parameters: {} }
+      }, async () => JSON.stringify({ status: 'ok', filePath: 'src/app.ts' }));
+      gateway.updateProviderStatus('ollama', 'ready', [{ id: 'qwen3.6:latest', name: 'Qwen', provider: 'ollama', contextWindow: 4096, supportsTools: true, supportsStreaming: true, supportsEmbeddings: false }]);
+      gateway.setActiveModel('qwen3.6:latest');
+
+      const tab = gateway.createChatTab();
+      await gateway.sendMessage(tab.id, 'Utw├│rz plik src/app.ts');
+
+      expect(adapter.chat).toHaveBeenCalledTimes(2);
+      const updatedTab = gateway.getChatTab(tab.id);
+      expect(updatedTab?.messages.some(m => m.role === 'tool')).toBe(true);
+      expect(updatedTab?.messages.some(m => m.role === 'assistant' && m.content.includes('Plik zosta┼é utworzony'))).toBe(true);
+    });
+
+    it('does not send empty tool result to model', async () => {
+      const gateway = new ModelGateway();
+      const adapter: ModelProviderAdapter = {
+        providerId: 'ollama',
+        label: 'Mock',
+        healthCheck: vi.fn().mockResolvedValue(true),
+        listModels: vi.fn().mockResolvedValue([]),
+        chat: vi.fn().mockImplementation(async function* (_baseUrl, _modelId, messages, _signal, tools) {
+          if (tools && tools.length > 0) {
+            yield {
+              type: 'tool_use',
+              toolCall: {
+                id: 'call_empty_tool',
+                type: 'function',
+                function: { name: 'inspect_context', arguments: '{}' }
+              }
+            };
+            return;
+          }
+
+          const lastToolMessage = (messages as readonly ChatMessage[]).findLast(m => m.role === 'tool');
+          expect(lastToolMessage).toBeUndefined();
+          expect((messages as readonly ChatMessage[]).some(m => m.role === 'assistant' && m.content.includes('niepoprawne argumenty'))).toBe(true);
+          yield { type: 'chunk', content: 'Ok' };
+        })
+      };
+      gateway.registerAdapter(adapter);
+      gateway.registerTool({
+        type: 'function',
+        function: { name: 'inspect_context', description: 'Inspect context', parameters: {} }
+      }, async () => '');
+      gateway.updateProviderStatus('ollama', 'ready', [{ id: 'qwen3.6:latest', name: 'Qwen', provider: 'ollama', contextWindow: 4096, supportsTools: true, supportsStreaming: true, supportsEmbeddings: false }]);
+      gateway.setActiveModel('qwen3.6:latest');
+
+      const tab = gateway.createChatTab();
+      await gateway.sendMessage(tab.id, 'Sprawd┼║ kontekst');
+
+      const updatedTab = gateway.getChatTab(tab.id);
+      expect(updatedTab?.messages.some(m => m.role === 'tool' && m.content === '')).toBe(false);
+      expect(updatedTab?.messages.some(m => m.role === 'assistant' && m.content.includes('niepoprawne argumenty'))).toBe(true);
+    });
+
     it('sends tools to model that supports them', async () => {
       const gateway = new ModelGateway();
       const adapter: ModelProviderAdapter = {
@@ -609,7 +1011,7 @@ describe('ModelGateway', () => {
   // ?? Error classification tests ??????????????????????????????????????????
 
   describe('sendMessage error classification', () => {
-    // Disable retries for error classification tests — they test error mapping, not retry behavior
+    // Disable retries for error classification tests ÔÇö they test error mapping, not retry behavior
     let gateway: ModelGateway;
 
     beforeEach(() => {
@@ -853,6 +1255,109 @@ describe('ModelGateway', () => {
 
       expect(result.status).toBe('error');
       expect(callCount).toBe(3); // Initial + 2 retries
+    });
+  });
+
+  describe('createRuntimeWorker tab resolution', () => {
+    it('throws a descriptive error when the session has no mapped tab', async () => {
+      const gateway = new ModelGateway();
+      const internal = gateway as unknown as {
+        createRuntimeWorker(workerId: string): {
+          id: string;
+          run(
+            input: {
+              sessionId: string;
+              permissionScope: { sessionId: string };
+            },
+            signal: AbortSignal
+          ): Promise<unknown>;
+        };
+      };
+      const worker = internal.createRuntimeWorker('worker-no-mapping');
+
+      const input = {
+        sessionId: 'orphan-session-id',
+        permissionScope: { sessionId: 'orphan-session-id' }
+      };
+
+      await expect(worker.run(input, new AbortController().signal)).rejects.toThrow(
+        /No tab mapped for session "orphan-session-id"/
+      );
+    });
+
+    it('does not silently coerce a missing session->tab mapping into a tab lookup', async () => {
+      // Regression guard: previously the fallback `?? input.permissionScope.sessionId`
+      // caused `this.tabs.get(input.sessionId)` to always miss (session ids and
+      // tab ids live in different namespaces) and the failure surfaced as a
+      // generic AbortError, hiding the real invariant violation.
+      const gateway = new ModelGateway();
+      const internal = gateway as unknown as {
+        createRuntimeWorker(workerId: string): {
+          id: string;
+          run(
+            input: {
+              sessionId: string;
+              permissionScope: { sessionId: string };
+            },
+            signal: AbortSignal
+          ): Promise<unknown>;
+        };
+      };
+      const worker = internal.createRuntimeWorker('worker-regression');
+
+      const input = {
+        sessionId: 'unmapped-session',
+        permissionScope: { sessionId: 'also-unmapped' }
+      };
+
+      try {
+        await worker.run(input, new AbortController().signal);
+        expect.fail('Expected createRuntimeWorker.run to throw');
+      } catch (err) {
+        // Must be a plain Error with a diagnostic message — NOT an AbortError
+        // whose cause would be opaque.
+        expect(err).toBeInstanceOf(Error);
+        expect((err as Error).name).not.toBe('AbortError');
+        expect((err as Error).message).toContain('No tab mapped for session');
+      }
+    });
+
+    it('throws AbortError when the mapped tab no longer exists (race / close)', async () => {
+      const gateway = new ModelGateway();
+      const internal = gateway as unknown as {
+        createRuntimeWorker(workerId: string): {
+          id: string;
+          run(
+            input: {
+              sessionId: string;
+              permissionScope: { sessionId: string };
+            },
+            signal: AbortSignal
+          ): Promise<unknown>;
+        };
+        tabs: Map<string, unknown>;
+        tabIdsBySessionId: Map<string, string>;
+      };
+
+      // Inject a mapping without a backing tab — simulates the race where the
+      // session->tab mapping is registered but the tab itself was removed.
+      internal.tabIdsBySessionId.set('race-session', 'race-tab');
+      // Ensure no tab exists for 'race-tab'.
+      internal.tabs.delete('race-tab');
+
+      const worker = internal.createRuntimeWorker('worker-race');
+      const input = {
+        sessionId: 'race-session',
+        permissionScope: { sessionId: 'race-session' }
+      };
+
+      try {
+        await worker.run(input, new AbortController().signal);
+        expect.fail('Expected createRuntimeWorker.run to throw');
+      } catch (err) {
+        expect(err).toBeInstanceOf(Error);
+        expect((err as Error).name).toBe('AbortError');
+      }
     });
   });
 });

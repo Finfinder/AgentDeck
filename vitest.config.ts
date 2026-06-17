@@ -10,6 +10,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@agentdeck/agent-runtime': resolve(rootDir, 'packages/agent-runtime/src/index.ts'),
+      '@agentdeck/permission-broker': resolve(rootDir, 'packages/permission-broker/src/index.ts'),
       '@agentdeck/services': resolve(rootDir, 'packages/services/src/index.ts'),
       '@agentdeck/shared': resolve(rootDir, 'packages/shared/src/index.ts'),
       '@agentdeck/workbench': resolve(rootDir, 'packages/workbench/src/index.ts'),
@@ -24,14 +25,16 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     coverage: {
       provider: 'v8',
-      all: true,
       reportsDirectory: 'coverage',
       reporter: ['text', 'json-summary', 'lcov'],
       include: ['apps/**/*.{ts,tsx}', 'packages/**/*.{ts,tsx}'],
       exclude: [
         'apps/desktop/src/main/**',
         'apps/desktop/src/preload/**',
-        'packages/**/src/index.ts',
+        'packages/agent-runtime/src/index.ts',
+        'packages/services/src/index.ts',
+        'packages/shared/src/index.ts',
+        'packages/workbench/src/index.ts',
         'packages/workbench/src/main.tsx',
         'tests/**',
         '**/*.test.{ts,tsx}',

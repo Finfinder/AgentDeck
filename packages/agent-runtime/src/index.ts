@@ -1,13 +1,21 @@
-export type AgentRuntimeCapability = 'chat-tabs' | 'worker-lifecycle' | 'event-log';
-
-export type AgentRuntimeDescriptor = Readonly<{
-  status: 'idle';
-  capabilities: readonly AgentRuntimeCapability[];
-}>;
-
-export function describeAgentRuntime(): AgentRuntimeDescriptor {
-  return {
-    status: 'idle',
-    capabilities: ['chat-tabs', 'worker-lifecycle', 'event-log']
-  };
-}
+export { AgentRuntime, createAgentRuntime } from './session-broker';
+export type {
+  AgentRuntimeTaskStatus,
+  AgentRuntimeWorkerStatus,
+  AgentRuntimePermissionScope,
+  AgentRuntimeWorkerInput,
+  AgentRuntimeWorkerOutput,
+  AgentRuntimeWorkerDefinition,
+  AgentRuntimeEventMap,
+  AgentRuntimeSessionState,
+  AgentRuntimeWorkerState,
+  AgentRuntimeTaskState,
+  AgentRuntimeEventEntry,
+  PatchSet,
+  AgentRuntimeCreateOptions,
+  AgentRuntimeStartSessionOptions,
+  AgentRuntimeStartWorkerOptions,
+  AgentRuntimeStartSubagentOptions,
+  AgentRuntimeResumeOptions,
+  AgentRuntimeResult
+} from './session-broker';

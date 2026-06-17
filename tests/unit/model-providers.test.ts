@@ -85,6 +85,21 @@ describe('OpenRouterAdapter', () => {
     delete process.env.OPENROUTER_API_KEY;
   });
 
+  it('includes Authorization header from API key provider', async () => {
+    const adapter = new OpenRouterAdapter(async providerId => providerId === 'openrouter' ? 'provider-key' : null);
+    const messages: ChatMessage[] = [{ role: 'user', content: 'hello', timestamp: 1000 }];
+
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      createSSEStream([{ choices: [{ delta: { content: 'Hi' } }] }])
+    );
+
+    await collectStream(adapter.chat('https://openrouter.ai/api/v1', 'gpt-4', messages));
+
+    const callArgs = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const headers = callArgs[1]?.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer provider-key');
+  });
+
   it('lists models from API', async () => {
     const adapter = new OpenRouterAdapter();
     globalThis.fetch = vi.fn().mockResolvedValue(
@@ -383,6 +398,27 @@ describe('Tool calling - OpenAI-compatible adapters', () => {
     expect(body.tools).toHaveLength(1);
     expect(body.tools[0].function.name).toBe('get_weather');
     expect(body.tool_choice).toBe('auto');
+  });
+
+  it('sends assistant tool_calls message with null content', async () => {
+    const adapter = new OpenRouterAdapter();
+    const messages: ChatMessage[] = [
+      { role: 'assistant', content: ' ', timestamp: 1000, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'search_files', arguments: '{"pattern":"Readme.md"}' } }] }
+    ];
+
+    delete process.env.OPENROUTER_API_KEY;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      createSSEStream([{ choices: [{ delta: { content: 'Hi' } }] }])
+    );
+
+    await collectStream(adapter.chat('https://openrouter.ai/api/v1', 'gpt-4', messages));
+
+    const callArgs = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const body = JSON.parse(callArgs[1]!.body as string);
+    expect(body.messages[0].role).toBe('assistant');
+    expect(body.messages[0].content).toBeNull();
+    expect(body.messages[0].tool_calls).toHaveLength(1);
+    expect(body.messages[0].tool_calls[0].function.name).toBe('search_files');
   });
 
   it('does not send tools when not provided', async () => {

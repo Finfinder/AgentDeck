@@ -90,11 +90,12 @@ export function createStartupErrorState(appVersion: string): StartupState {
 
 export { readThemeSettings, writeThemeSettings, DEFAULT_THEME_SETTINGS } from './settings';
 export type { ThemeSettings } from './settings';
-export { createWorkspaceService, isSensitivePath, parseCodeWorkspace, stripJsoncComments, WorkspaceService } from './workspace-service';
+export { createWorkspaceService, isSensitivePath, parseCodeWorkspace, stripJsoncComments, WorkspaceService, deleteFileStandalone, renameFileStandalone, listDirectoryStandalone, searchFilesStandalone, BINARY_EXTS, isBinaryFile as isBinaryFileFromWorkspace } from './workspace-service';
 export {
   applyWorkspaceEdit,
   clearBuffers,
   closeBuffer,
+  createEditorFile,
   createEditorTab,
   createTabId,
   getBufferDirty,
@@ -110,6 +111,32 @@ export { createIdentityService, IdentityService } from './identity-service';
 export type { SecureStore, SecureStoreWarning, IdentityServiceOptions } from './identity-service';
 export type { IdentitySession } from '@agentdeck/shared';
 export { ModelGateway, createModelGateway, getModelGateway } from './model-gateway';
-export type { ModelProviderAdapter, ToolDefinition, RetryPolicy } from './model-gateway';
+export { createAgentRuntime } from '@agentdeck/agent-runtime';
+export type {
+  AgentRuntime,
+  AgentRuntimeEventEntry,
+  AgentRuntimePermissionScope,
+  AgentRuntimeResult,
+  AgentRuntimeSessionState,
+  AgentRuntimeStartSessionOptions,
+  AgentRuntimeStartWorkerOptions,
+  AgentRuntimeStartSubagentOptions,
+  AgentRuntimeResumeOptions,
+  AgentRuntimeTaskState,
+  AgentRuntimeWorkerDefinition,
+  AgentRuntimeWorkerInput,
+  AgentRuntimeWorkerOutput,
+  AgentRuntimeWorkerState
+} from '@agentdeck/agent-runtime';
+export type { ModelProviderAdapter, ToolDefinition, ToolExecutor, ToolExecutionContext, WorkspaceRootProvider, RetryPolicy } from './model-gateway';
 export { OpenRouterAdapter, OllamaAdapter, LmStudioAdapter, OpenAiCompatibleAdapter, createDefaultAdapters, STREAM_HEARTBEAT_TIMEOUT_MS } from './model-providers';
 export { classifyError } from './model-errors';
+// Phase 7: Tool Router / Permission Broker / Conflict Broker
+export { PermissionBroker, checkSensitivePath, escalateRisk, isHighRisk, isBinaryFile } from './permission-broker';
+export type { PermissionBrokerOptions } from './permission-broker';
+export { ConflictBroker, computeFileHash, checkPatchConflict, applyPatchWithConflictCheck, classifyPatchRisk, classifyOperationKind, generatePatchId, tryAutoMerge, rangesOverlap } from './conflict-broker';
+export type { ConflictCheckResult, PatchApplicationResult, AutoMergeResult, LineRange } from './conflict-broker';
+// Event Log
+export { EventLogService, getEventLogService } from './event-log-service';
+export { ToolRouter } from './tool-router';
+export type { ToolRouterOptions } from './tool-router';

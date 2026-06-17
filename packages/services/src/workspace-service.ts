@@ -37,7 +37,7 @@ const SENSITIVE_PATH_PATTERNS: RegExp[] = [
 const SKIP_DIRS = new Set(['.git', 'node_modules', '__pycache__', '.venv', 'venv', '.tox', 'dist', 'build', 'out', '.next', '.nuxt', 'coverage', '.nyc_output']);
 
 // Binary file extensions - skip when searching text.
-const BINARY_EXTS = new Set([
+export const BINARY_EXTS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.svg',
   '.woff', '.woff2', '.ttf', '.eot', '.otf',
   '.pdf', '.zip', '.gz', '.tar', '.7z', '.rar',
@@ -45,6 +45,12 @@ const BINARY_EXTS = new Set([
   '.pth', '.pyc', '.pkl', '.npy', '.npz',
   '.mp3', '.mp4', '.wav', '.ogg', '.webm'
 ]);
+
+/** Check whether a file path has a binary extension. */
+export function isBinaryFile(filePath: string): boolean {
+  const ext = extname(filePath).toLowerCase();
+  return BINARY_EXTS.has(ext);
+}
 
 export function isSensitivePath(filePath: string): boolean {
   const normalized = filePath.replaceAll('\\', '/');
@@ -201,13 +207,74 @@ export function parseCodeWorkspace(text: string, filePath: string): WorkspaceMod
   return { status: 'ok', filePath, kind: 'workspace-file', folders };
 }
 
+// ?? Shared file operation helpers ???????????????????????????????????????
+
+async function performFileDelete(filePath: string): Promise<FileOperationResult> {
+  try {
+    await unlink(filePath);
+    return { status: 'ok' };
+  } catch (err) {
+    const code = isRecord(err) && err.code === 'ENOENT' ? 'FILE_NOT_FOUND' : 'UNKNOWN';
+    return { status: 'error', code, message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function performFileRename(oldPath: string, newPath: string): Promise<FileOperationResult> {
+  try {
+    await rename(oldPath, newPath);
+    return { status: 'ok' };
+  } catch (err) {
+    const code = isRecord(err) && err.code === 'ENOENT' ? 'FILE_NOT_FOUND' : 'UNKNOWN';
+    return { status: 'error', code, message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function performListDirectory(dirPath: string): Promise<DirectoryListing> {
+  try {
+    const dirents = await readdir(dirPath, { withFileTypes: true });
+    const entries: FileEntry[] = dirents.map(d => ({
+      name: d.name,
+      path: join(dirPath, d.name),
+      kind: d.isDirectory() ? 'directory' : 'file',
+      isSensitive: isSensitivePath(join(dirPath, d.name))
+    } satisfies FileEntry));
+    entries.sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    return { path: dirPath, entries };
+  } catch {
+    return { path: dirPath, entries: [] };
+  }
+}
+
+async function performSearchFiles(query: SearchQuery): Promise<readonly SearchResult[]> {
+  const results: SearchResult[] = [];
+  const pattern = query.pattern.toLowerCase();
+  const limits = { maxResults: 50, maxFileSize: 512 * 1024 };
+  const includeRegs = compileGlobPatterns(query.include);
+  const excludeRegs = compileGlobPatterns(query.exclude);
+
+  for (const root of query.workspaceRoots) {
+    if (results.length >= limits.maxResults) break;
+    await searchInDirRecursive(root, pattern, results, limits, { includeRegs, excludeRegs }, root);
+  }
+
+  return results;
+}
+
 export class WorkspaceService extends EventEmitter {
   private readonly recentFilePath: string;
   private activeWatchers: FSWatcher[] = [];
+  private currentFolders: readonly WorkspaceFolder[] = [];
 
   constructor(userDataPath: string) {
     super();
     this.recentFilePath = join(userDataPath, 'recent-workspaces.json');
+  }
+
+  getWorkspaceRoots(): readonly string[] {
+    return this.currentFolders.map(f => f.path);
   }
 
   async openWorkspace(path: string, kind: WorkspaceOpenKind): Promise<WorkspaceModel> {
@@ -225,6 +292,7 @@ export class WorkspaceService extends EventEmitter {
       const model = parseCodeWorkspace(text, path);
 
       if (model.status === 'ok') {
+        this.currentFolders = model.folders;
         this.startWatchers(model.folders.map(f => f.path));
         await this.saveRecentWorkspace({ path, name: basename(path), kind, lastOpened: Date.now() });
       }
@@ -233,6 +301,7 @@ export class WorkspaceService extends EventEmitter {
     }
 
     // Folder workspace
+    this.currentFolders = [{ path }];
     this.startWatchers([path]);
     await this.saveRecentWorkspace({ path, name: basename(path), kind: 'folder', lastOpened: Date.now() });
     return { status: 'ok', filePath: path, kind: 'folder', folders: [{ path }] };
@@ -240,64 +309,23 @@ export class WorkspaceService extends EventEmitter {
 
   closeWorkspace(): void {
     this.stopWatchers();
+    this.currentFolders = [];
   }
 
   async deleteFile(filePath: string): Promise<FileOperationResult> {
-    try {
-      await unlink(filePath);
-      return { status: 'ok' };
-    } catch (err) {
-      const code = isRecord(err) && err.code === 'ENOENT' ? 'FILE_NOT_FOUND' : 'UNKNOWN';
-      return { status: 'error', code, message: err instanceof Error ? err.message : String(err) };
-    }
+    return performFileDelete(filePath);
   }
 
   async renameFile(oldPath: string, newPath: string): Promise<FileOperationResult> {
-    try {
-      await rename(oldPath, newPath);
-      return { status: 'ok' };
-    } catch (err) {
-      const code = isRecord(err) && err.code === 'ENOENT' ? 'FILE_NOT_FOUND' : 'UNKNOWN';
-      return { status: 'error', code, message: err instanceof Error ? err.message : String(err) };
-    }
+    return performFileRename(oldPath, newPath);
   }
 
   async listDirectory(dirPath: string): Promise<DirectoryListing> {
-    try {
-      const dirents = await readdir(dirPath, { withFileTypes: true });
-
-      const entries: FileEntry[] = dirents.map(d => ({
-        name: d.name,
-        path: join(dirPath, d.name),
-        kind: d.isDirectory() ? 'directory' : 'file',
-        isSensitive: isSensitivePath(join(dirPath, d.name))
-      } satisfies FileEntry));
-
-      entries.sort((a, b) => {
-        if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
-
-      return { path: dirPath, entries };
-    } catch {
-      return { path: dirPath, entries: [] };
-    }
+    return performListDirectory(dirPath);
   }
 
   async searchFiles(query: SearchQuery): Promise<readonly SearchResult[]> {
-    const results: SearchResult[] = [];
-    const pattern = query.pattern.toLowerCase();
-
-    const limits = { maxResults: 50, maxFileSize: 512 * 1024 };
-    const includeRegs = compileGlobPatterns(query.include);
-    const excludeRegs = compileGlobPatterns(query.exclude);
-
-    for (const root of query.workspaceRoots) {
-      if (results.length >= limits.maxResults) break;
-      await this.searchInDir(root, pattern, results, limits, includeRegs, excludeRegs, root);
-    }
-
-    return results;
+    return performSearchFiles(query);
   }
 
   async getRecentWorkspaces(): Promise<readonly RecentWorkspace[]> {
@@ -470,3 +498,114 @@ export class WorkspaceService extends EventEmitter {
 export function createWorkspaceService(userDataPath: string): WorkspaceService {
   return new WorkspaceService(userDataPath);
 }
+
+// ?? Standalone file operations for Tool Router ???????????????????????????
+// These delegate to private helpers shared with WorkspaceService class methods.
+
+export async function deleteFileStandalone(filePath: string): Promise<FileOperationResult> {
+  return performFileDelete(filePath);
+}
+
+export async function renameFileStandalone(oldPath: string, newPath: string): Promise<FileOperationResult> {
+  return performFileRename(oldPath, newPath);
+}
+
+export async function listDirectoryStandalone(dirPath: string): Promise<DirectoryListing> {
+  return performListDirectory(dirPath);
+}
+
+export async function searchFilesStandalone(query: SearchQuery): Promise<readonly SearchResult[]> {
+  return performSearchFiles(query);
+}
+
+function shouldSkipFile(relPath: string, ext: string, includeRegs: RegExp[], excludeRegs: RegExp[]): boolean {
+  if (BINARY_EXTS.has(ext)) return true;
+  if (includeRegs.length > 0 && !includeRegs.some(r => r.test(relPath))) return true;
+  return excludeRegs.some(r => r.test(relPath));
+}
+
+function shouldSkipDir(name: string, relPath: string, excludeRegs: RegExp[]): boolean {
+  return SKIP_DIRS.has(name) || excludeRegs.some(r => r.test(relPath));
+}
+
+async function searchInFile(
+  filePath: string,
+  pattern: string,
+  results: SearchResult[],
+  maxResults: number,
+  maxFileSize: number
+): Promise<void> {
+  const fileStat = await stat(filePath);
+  if (fileStat.size > maxFileSize) return;
+
+  const content = await readFile(filePath, 'utf8');
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length && results.length < maxResults; i++) {
+    const line = lines[i]!;
+    const col = line.toLowerCase().indexOf(pattern);
+    if (col === -1) continue;
+
+    results.push({
+      id: `${filePath}:${i + 1}:${col + 1}`,
+      file: filePath,
+      line: i + 1,
+      col: col + 1,
+      snippet: line.trim().slice(0, 120),
+      isSensitive: isSensitivePath(filePath)
+    });
+  }
+}
+
+interface SearchFilters {
+  includeRegs: RegExp[];
+  excludeRegs: RegExp[];
+}
+
+async function processSearchDirent(
+  dirent: { name: string; isDirectory(): boolean; isFile(): boolean },
+  dir: string,
+  pattern: string,
+  results: SearchResult[],
+  limits: { maxResults: number; maxFileSize: number },
+  filters: SearchFilters,
+  workspaceRoot: string
+): Promise<void> {
+  if (results.length >= limits.maxResults) return;
+
+  const fullPath = join(dir, dirent.name);
+  const relPath = relative(workspaceRoot, fullPath).replaceAll('\\', '/');
+
+  if (dirent.isDirectory() && !shouldSkipDir(dirent.name, relPath, filters.excludeRegs)) {
+    await searchInDirRecursive(fullPath, pattern, results, limits, filters, workspaceRoot);
+    return;
+  }
+
+  if (dirent.isFile() && !shouldSkipFile(relPath, extname(dirent.name).toLowerCase(), filters.includeRegs, filters.excludeRegs)) {
+    try {
+      await searchInFile(fullPath, pattern, results, limits.maxResults, limits.maxFileSize);
+    } catch {
+      // Unreadable files are silently skipped
+    }
+  }
+}
+
+async function searchInDirRecursive(
+  dir: string,
+  pattern: string,
+  results: SearchResult[],
+  limits: { maxResults: number; maxFileSize: number },
+  filters: SearchFilters,
+  workspaceRoot: string
+): Promise<void> {
+  if (results.length >= limits.maxResults) return;
+
+  const dirents = await readdir(dir, { withFileTypes: true }).catch(() => null);
+  if (!dirents) return;
+
+  for (const dirent of dirents) {
+    if (results.length >= limits.maxResults) break;
+    await processSearchDirent(dirent, dir, pattern, results, limits, filters, workspaceRoot);
+  }
+}
+
+

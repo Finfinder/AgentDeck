@@ -1,4 +1,4 @@
-# AgentDeck — Agentic Desktop IDE (MVP)
+# AgentDeck ÔÇö Agentic Desktop IDE (MVP)
 
 [![Status](https://img.shields.io/badge/status-MVP%20green)](.) [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE) [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=Finfinder_AgentDeck&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Finfinder_AgentDeck)
 
@@ -188,8 +188,8 @@ AgentDeck ships with four built-in model provider adapters. Each adapter connect
 | Adapter | Provider ID | Base URL (default) | Auth | Required Env Var | Notes |
 |---------|-------------|-------------------|------|-------------------|-------|
 | **OpenRouter** | `openrouter` | `https://openrouter.ai/api/v1` | API Key | `OPENROUTER_API_KEY` | Supports tool calling on models with `tools` in `supported_parameters`. |
-| **Ollama** | `ollama` | `http://localhost:11434` | None | — | Native Ollama format. Supports tool calling on compatible models. |
-| **LM Studio** | `lmstudio` | `http://localhost:1234/v1` | None | — | OpenAI-compatible endpoint. |
+| **Ollama** | `ollama` | `http://localhost:11434` | None | ÔÇö | Native Ollama format. Supports tool calling on compatible models. |
+| **LM Studio** | `lmstudio` | `http://localhost:1234/v1` | None | ÔÇö | OpenAI-compatible endpoint. |
 | **OpenAI Compatible** | `openai-compatible` | _(user-configured)_ | API Key | `OPENAI_API_KEY` | Generic adapter for any OpenAI-compatible API (e.g., vLLM, LiteLLM). |
 
 ### Configuring Adapters
@@ -219,6 +219,18 @@ The retry policy can be customized programmatically:
 modelGateway.setRetryPolicy({ maxRetries: 5, baseDelayMs: 2000 });
 ```
 
+## Built-in Agent Tools
+
+AgentDeck registers a small set of safe local tools for chat-driven workflows:
+
+- `read_file` ÔÇö reads a UTF-8 text file from the workspace.
+- `search_files` ÔÇö searches text across workspace roots with include/exclude glob filters.
+- `create_file` ÔÇö creates a new UTF-8 text file with `wx` semantics, so an existing file is never overwritten.
+- `apply_patch` ÔÇö applies workspace edit operations to opened editor buffers.
+- `show_diff` ÔÇö generates a unified diff between original and modified text.
+
+`create_file` resolves relative paths against the active workspace roots, creates missing parent directories, and rejects ambiguous or existing paths before writing.
+
 ## What this MVP contains (scope)
 
 The AgentDeck MVP targets a vertical slice that validates the agent-first developer experience:
@@ -243,18 +255,18 @@ Suggested repository layout for the AgentDeck monorepo package:
 
 ```text
 AgentDeck/
-├─ package.json              # npm workspaces, dev/build/test scripts
-├─ VERSION                   # current development version
-├─ apps/
-│  └─ desktop/               # Electron main + preload + packaging
-├─ packages/
-│  ├─ workbench/             # React renderer, UI components, Monaco integration
-│  ├─ services/              # Node/TS services: settings, workspace, auth, runtime, model-gateway
-│  ├─ agent-runtime/         # session workers, chat tabs, tool loop
-│  └─ shared/                # shared types, IPC contracts
-├─ tests/                    # unit tests and contract tests
-├─ docs/                     # domain.md and ADRs
-└─ README.md
+ÔöťÔöÇ package.json              # npm workspaces, dev/build/test scripts
+ÔöťÔöÇ VERSION                   # current development version
+ÔöťÔöÇ apps/
+Ôöé  ÔööÔöÇ desktop/               # Electron main + preload + packaging
+ÔöťÔöÇ packages/
+Ôöé  ÔöťÔöÇ workbench/             # React renderer, UI components, Monaco integration
+Ôöé  ÔöťÔöÇ services/              # Node/TS services: settings, workspace, auth, runtime, model-gateway
+Ôöé  ÔöťÔöÇ agent-runtime/         # session workers, chat tabs, tool loop
+Ôöé  ÔööÔöÇ shared/                # shared types, IPC contracts
+ÔöťÔöÇ tests/                    # unit tests and contract tests
+ÔöťÔöÇ docs/                     # domain.md and ADRs
+ÔööÔöÇ README.md
 ```
 
 Future phases add `packages/extension-host`, Monaco editor services, MCP, memory/indexing and compatibility fixtures.
@@ -264,12 +276,12 @@ Future phases add `packages/extension-host`, Monaco editor services, MCP, memory
 High-level containers:
 
 - Workbench Shell (Electron main + React renderer)
-- Workspace Service (Node/TS) — file tree, watchers, `.code-workspace` parser
-- Editor Service (Monaco) — document models and views
-- Agent Runtime — isolated session workers, chat tabs, tool loop
-- Model Gateway — provider adapters
-- MCP Manager — lifecycle & routing for MCP servers
-- Local Store — SQLite + sqlite-vec + Markdown memory
+- Workspace Service (Node/TS) ÔÇö file tree, watchers, `.code-workspace` parser
+- Editor Service (Monaco) ÔÇö document models and views
+- Agent Runtime ÔÇö isolated session workers, chat tabs, tool loop
+- Model Gateway ÔÇö provider adapters
+- MCP Manager ÔÇö lifecycle & routing for MCP servers
+- Local Store ÔÇö SQLite + sqlite-vec + Markdown memory
 
 See `docs/domain.md` for the domain model (ChatTab, AgentDefinition, Worker, AgentTask, PatchSet, Conflict, MemoryEntry, RetrievalQuery, ExtensionManifest, McpServerProfile, IdentitySession).
 
