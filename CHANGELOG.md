@@ -6,6 +6,10 @@ Format zgodny z [Keep a Changelog](https://keepachangelog.com/pl/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Zaktualizowano dompurify z 3.4.8 do 3.4.11 poprzez npm overrides — naprawiono podatność GHSA-vxr8-fq34-vvx9 (Trusted Types policy survives clearConfig).
+
 ### Changed
 
 - Zaktualizowano electron z 42.3.3 do 42.4.0 ÔÇö poprawki bezpiecze┼ästwa (CVE-2026-9115, CVE-2026-9116), naprawa crashu przy webContents.reload(), poprawki win.center() dla frameless windows, aktualizacja Chromium do 148.0.7778.254 i Node.js do v24.16.0.
