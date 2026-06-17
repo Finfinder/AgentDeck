@@ -567,6 +567,13 @@ describe('packages/shared ipc coverage type guards', () => {
     expect(isAgentRuntimeResult({ status: 'error', code: 'INVALID', message: 'bad' })).toBe(false);
     expect(isAgentRuntimeResult({ status: 'unknown' })).toBe(false);
 
+    // Regression: malformed `ok` payloads without `value` must not pass the guard,
+    // regardless of whether a `valueGuard` is supplied.
+    expect(isAgentRuntimeResult({ status: 'ok' })).toBe(false);
+    expect(isAgentRuntimeResult({ status: 'ok' }, (value): value is string => typeof value === 'string')).toBe(false);
+    expect(isAgentRuntimeResult({ status: 'ok', value: null })).toBe(true);
+    expect(isAgentRuntimeResult({ status: 'ok', value: undefined })).toBe(true);
+
     expect(isAgentRuntimePermissionScope(agentRuntimePermissionScope())).toBe(true);
     expect(isAgentRuntimePermissionScope({ ...agentRuntimePermissionScope(), kind: 'subagent' })).toBe(true);
     expect(isAgentRuntimePermissionScope({ ...agentRuntimePermissionScope(), kind: 'invalid' })).toBe(false);

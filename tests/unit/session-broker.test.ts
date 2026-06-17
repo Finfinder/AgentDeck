@@ -83,17 +83,18 @@ function createFailingWorkerMock(message = 'Worker failed') {
 
 function createNeverWorkerMock() {
   let resolveSignal: (signal: AbortSignal) => void;
-  const promise = new Promise<AbortSignal>(resolve => {
+  const signalPromise = new Promise<AbortSignal>(resolve => {
     resolveSignal = resolve;
   });
 
-  const run = vi.fn(async (_input: AgentRuntimeWorkerInput, signal: AbortSignal) => {
+  const run = vi.fn((_input: AgentRuntimeWorkerInput, signal: AbortSignal) => {
     resolveSignal(signal);
-    await promise;
-    return { summary: 'never', references: [], toolsUsed: [] };
+    return new Promise<never>((_, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    });
   });
 
-  return { run, getSignal: () => promise };
+  return { run, getSignal: () => signalPromise };
 }
 
 describe('AgentRuntime Session Broker', () => {

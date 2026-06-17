@@ -1548,6 +1548,7 @@ const AGENT_RUNTIME_SESSION_STATUSES = new Set<string>(['active', 'crashed', 'st
 export function isAgentRuntimeResult<T>(value: unknown, valueGuard?: (value: unknown) => value is T): value is AgentRuntimeResult<T> {
   if (!isRecord(value)) return false;
   if (value.status === 'ok') {
+    if (!('value' in value)) return false;
     return valueGuard === undefined || valueGuard(value.value);
   }
   return (

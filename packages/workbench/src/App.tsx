@@ -899,26 +899,38 @@ export function App() {
   }, [agent]);
 
   const handleApprovePermission = useCallback(async (decisionId: string) => {
+    if (typeof agent.approvePermissionDecision !== 'function') {
+      console.warn('[App] approvePermissionDecision unavailable — keeping prompt', decisionId);
+      return;
+    }
     const input: PermissionApprovalInput = { decisionId, decision: 'allow', duration: 'session' };
     try {
-      if (typeof agent.approvePermissionDecision === 'function') {
-        await agent.approvePermissionDecision(input);
+      const response = await agent.approvePermissionDecision(input);
+      if (response?.status === 'error') {
+        console.warn('[App] Permission approval rejected:', response.message);
+        return;
       }
       setPermissionPrompts(prev => prev.filter(p => p.id !== decisionId));
-    } catch {
-      // ignore
+    } catch (error) {
+      console.warn('[App] Permission approval failed — keeping prompt', decisionId, error);
     }
   }, [agent]);
 
   const handleDenyPermission = useCallback(async (decisionId: string) => {
+    if (typeof agent.approvePermissionDecision !== 'function') {
+      console.warn('[App] approvePermissionDecision unavailable — keeping prompt', decisionId);
+      return;
+    }
     const input: PermissionApprovalInput = { decisionId, decision: 'deny', duration: 'once' };
     try {
-      if (typeof agent.approvePermissionDecision === 'function') {
-        await agent.approvePermissionDecision(input);
+      const response = await agent.approvePermissionDecision(input);
+      if (response?.status === 'error') {
+        console.warn('[App] Permission denial rejected:', response.message);
+        return;
       }
       setPermissionPrompts(prev => prev.filter(p => p.id !== decisionId));
-    } catch {
-      // ignore
+    } catch (error) {
+      console.warn('[App] Permission denial failed — keeping prompt', decisionId, error);
     }
   }, [agent]);
 
