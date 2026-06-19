@@ -1,23 +1,24 @@
 import { readFile } from 'node:fs/promises';
-
 import type {
+  Conflict,
+  MemoryChangeProposal,
+  MemoryEdit,
   PatchSet,
   ToolCallRequest,
   ToolCallResponse
 } from '@agentdeck/shared';
-
 import { checkSensitivePath, isBinaryFile, type PermissionBroker } from './permission-broker';
 import {
   applyPatchWithConflictCheck,
-  ConflictBroker,
+  type ConflictBroker,
+  classifyOperationKind,
   classifyPatchRisk,
   generatePatchId
 } from './conflict-broker';
-// Use the static method directly
-const classifyOperationKind = ConflictBroker.classifyOperationKind;
 import { readEditorFile, writeEditorFile } from './editor-service';
 import type { EventLogService } from './event-log-service';
 import { searchFilesStandalone as workspaceSearch } from './workspace-service';
+import type { MemoryService } from '@agentdeck/memory-service';
 
 // ?? Tool execution context ?????????????????????????????????????????????????
 
@@ -26,6 +27,7 @@ export interface ToolRouterOptions {
   permissionBroker: PermissionBroker;
   conflictBroker: ConflictBroker;
   eventLogService?: EventLogService;
+  memoryService?: MemoryService;
 }
 
 // ?? Tool Router ???????????????????????????????????????????????????????????=
@@ -35,12 +37,14 @@ export class ToolRouter {
   private readonly permissionBroker: PermissionBroker;
   private readonly conflictBroker: ConflictBroker;
   private readonly eventLogService: EventLogService | null;
+  private readonly memoryService: MemoryService | null;
 
   constructor(options: ToolRouterOptions) {
     this.workspaceRoots = options.workspaceRoots;
     this.permissionBroker = options.permissionBroker;
     this.conflictBroker = options.conflictBroker;
     this.eventLogService = options.eventLogService ?? null;
+    this.memoryService = options.memoryService ?? null;
   }
 
   /**
@@ -99,8 +103,7 @@ export class ToolRouter {
    */
   async executeApproved(request: ToolCallRequest): Promise<ToolCallResponse> {
     const filePath = this.extractFilePath(request);
-    const sensitiveCheck = filePath ? checkSensitivePath(filePath) : undefined;
-    return this.runTool(request, sensitiveCheck);
+    return this.runTool(request, filePath ? checkSensitivePath(filePath) : undefined);
   }
 
   // ?? Tool implementations ???????????????????????????????????????????????=
@@ -117,6 +120,10 @@ export class ToolRouter {
           return await this.toolSearchFiles(request);
         case 'listDirectory':
           return await this.toolListDirectory(request);
+        case 'proposeMemoryChange':
+          return await this.toolProposeMemoryChange(request);
+        case 'applyMemoryChange':
+          return await this.toolApplyMemoryChange(request);
         case 'proposePatch':
           return await this.toolProposePatch(request);
         case 'applyPatch':
@@ -139,7 +146,7 @@ export class ToolRouter {
       return {
         status: 'error',
         callId: request.callId,
-        code: 'UNKNOWN',
+        code: 'UNKNOWN' as const,
         message: error instanceof Error ? error.message : 'Unknown error'
       };
     }
@@ -159,7 +166,7 @@ export class ToolRouter {
       return {
         status: 'error',
         callId: request.callId,
-        code: 'UNKNOWN',
+        code: 'UNKNOWN' as const,
         message: result.message
       };
     }
@@ -243,7 +250,7 @@ export class ToolRouter {
       return {
         status: 'error',
         callId: request.callId,
-        code: 'UNKNOWN',
+        code: 'UNKNOWN' as const,
         message: `Cannot read file for patch base: ${filePath}`
       };
     }
@@ -287,7 +294,7 @@ export class ToolRouter {
       }
       diffResult = showDiff(currentContent, modifiedContent);
     } catch {
-      diffResult = { status: 'error', code: 'UNKNOWN', message: 'Failed to generate diff' };
+      diffResult = { status: 'error', code: 'UNKNOWN' as const, message: 'Failed to generate diff' };
     }
 
     // Log patch event with diff to event log
@@ -329,7 +336,7 @@ export class ToolRouter {
       return {
         status: 'error',
         callId: request.callId,
-        code: 'UNKNOWN',
+        code: 'UNKNOWN' as const,
         message: 'Invalid patch data: filePath must be a non-empty string.'
       };
     }
@@ -337,7 +344,7 @@ export class ToolRouter {
       return {
         status: 'error',
         callId: request.callId,
-        code: 'UNKNOWN',
+        code: 'UNKNOWN' as const,
         message: 'Invalid patch data: operations must be an array.'
       };
     }
@@ -414,7 +421,7 @@ export class ToolRouter {
       return {
         status: 'error',
         callId: request.callId,
-        code: 'UNKNOWN',
+        code: 'UNKNOWN' as const,
         message: result.error ?? 'Failed to apply patch'
       };
     }
@@ -460,7 +467,7 @@ export class ToolRouter {
       return {
         status: 'error',
         callId: request.callId,
-        code: result.code,
+        code: result.code as 'UNKNOWN' | 'ACCESS_DENIED' | 'WRITE_CONFLICT' | 'TOOL_NOT_FOUND' | 'TIMEOUT',
         message: result.message
       };
     }
@@ -611,6 +618,137 @@ export class ToolRouter {
     return undefined;
   }
 
+
+  private async toolProposeMemoryChange(request: ToolCallRequest): Promise<ToolCallResponse> {
+    if (!this.memoryService) {
+      return {
+        status: 'error',
+        callId: request.callId,
+        code: 'UNKNOWN' as const,
+        message: 'Memory service nie jest skonfigurowany.'
+      };
+    }
+
+    const scope = request.args['scope'] as string | undefined;
+    const filePath = this.getStringArg(request, 'filePath');
+    const text = this.getStringArg(request, 'text');
+
+    if (!filePath) return this.missingArg(request, 'filePath');
+    if (text === undefined) return this.missingArg(request, 'text');
+
+    const edit: MemoryEdit = { scope: scope as MemoryEdit['scope'], filePath, text };
+    const result = await this.memoryService.proposeEdit(edit);
+
+    if (result.status === 'error') {
+      return {
+        status: 'error',
+        callId: request.callId,
+        code: 'UNKNOWN' as const,
+        message: result.message
+      };
+    }
+
+    if (this.eventLogService && result.proposal.diff) {
+      this.eventLogService.appendPatchEvent({
+        level: 'info',
+        source: 'memory-service',
+        message: 'Propozycja zmiany pamięci: ' + filePath,
+        diff: result.proposal.diff,
+        filePath,
+        patchId: result.proposal.patch.id
+      });
+    }
+
+    return {
+      status: 'ok',
+      callId: request.callId,
+      result: { proposal: result.proposal }
+    };
+  }
+
+  private async toolApplyMemoryChange(
+    request: ToolCallRequest
+  ): Promise<ToolCallResponse> {
+    if (!this.memoryService) {
+      return {
+        status: 'error',
+        callId: request.callId,
+        code: 'UNKNOWN' as const,
+        message: 'Memory service nie jest skonfigurowany.'
+      };
+    }
+
+    const proposalData = request.args['proposal'] as Record<string, unknown> | undefined;
+    if (!proposalData) {
+      return this.missingArg(request, 'proposal');
+    }
+
+    if (typeof proposalData.filePath !== 'string' || proposalData.filePath.length === 0) {
+      return {
+        status: 'error',
+        callId: request.callId,
+        code: 'UNKNOWN' as const,
+        message: 'Invalid proposal data: filePath must be a non-empty string.'
+      };
+    }
+
+    const proposal: MemoryChangeProposal = {
+      scope: proposalData.scope as MemoryChangeProposal['scope'],
+      filePath: proposalData.filePath,
+      patch: proposalData.patch as PatchSet,
+      diff: proposalData.diff as string | undefined
+    };
+
+    const memSensitiveCheck = checkSensitivePath(proposal.filePath);
+    if (memSensitiveCheck.isSensitive) {
+      return {
+        status: 'error',
+        callId: request.callId,
+        code: 'ACCESS_DENIED',
+        message: 'Zapis pamięci na wrażliwej ścieżce zabroniony: ' + proposal.filePath,
+      };
+    }
+
+    const result = await this.memoryService.applyEdit(proposal);
+
+    if (result.status === 'error') {
+      if (result.conflict && this.eventLogService) {
+        this.eventLogService.appendPatchEvent({
+          level: 'warn',
+          source: 'memory-service',
+          message: 'Konflikt pamięci ' + result.conflict.id + ': ' + result.conflict.description,
+          diff: '',
+          filePath: proposal.filePath,
+          patchId: proposal.patch.id
+        });
+      }
+
+      return {
+        status: 'error',
+        callId: request.callId,
+        code: result.code as 'UNKNOWN' | 'ACCESS_DENIED' | 'WRITE_CONFLICT' | 'TOOL_NOT_FOUND' | 'TIMEOUT',
+        message: result.message,
+        conflict: result.conflict as unknown as Conflict
+      };
+    }
+
+    if (this.eventLogService) {
+      this.eventLogService.appendPatchEvent({
+        level: 'info',
+        source: 'memory-service',
+        message: 'Pamięć zapisana' + ('autoMerged' in result && result.autoMerged ? ' (auto-merge)' : '') + ': ' + proposal.filePath,
+        diff: proposal.diff ?? '',
+        filePath: proposal.filePath,
+        patchId: proposal.patch.id
+      });
+    }
+
+    return {
+      status: 'ok',
+      callId: request.callId,
+      result: { entry: result.entry, autoMerged: 'autoMerged' in result ? result.autoMerged : undefined }
+    };
+  }
   private getStringArg(request: ToolCallRequest, name: string): string | undefined {
     const val = request.args[name];
     return typeof val === 'string' ? val : undefined;
@@ -620,7 +758,7 @@ export class ToolRouter {
     return {
       status: 'error',
       callId: request.callId,
-      code: 'UNKNOWN',
+      code: 'UNKNOWN' as const,
       message: `Missing required argument: ${argName}`
     };
   }

@@ -308,7 +308,7 @@ describe('App — deep coverage', () => {
       await act(async () => { render(<App />); });
 
       // Simulate device code event
-      const handler = onDeviceCode.mock.calls[0]![0] as (data: { userCode: string; verificationUri: string; verificationUriComplete?: string }) => void;
+      const handler = onDeviceCode.mock.calls[0]![0];
       await act(async () => {
         handler({ userCode: 'ABCD-1234', verificationUri: 'https://github.com/device' });
       });
@@ -329,7 +329,7 @@ describe('App — deep coverage', () => {
 
       await act(async () => { render(<App />); });
 
-      const handler = onDeviceCode.mock.calls[0]![0] as (data: { userCode: string; verificationUri: string; verificationUriComplete?: string }) => void;
+      const handler = onDeviceCode.mock.calls[0]![0];
       await act(async () => {
         handler({
           userCode: 'WXYZ-5678',
@@ -339,6 +339,7 @@ describe('App — deep coverage', () => {
       });
 
       const identityButton = screen.getByRole('button', { name: 'Not logged in' });
+
       await userEvent.click(identityButton);
 
       expect(screen.getByText('WXYZ-5678')).toBeInTheDocument();
@@ -357,13 +358,13 @@ describe('App — deep coverage', () => {
       await act(async () => { render(<App />); });
 
       // Trigger device code
-      const deviceHandler = onDeviceCode.mock.calls[0]![0] as (data: { userCode: string; verificationUri: string }) => void;
+      const deviceHandler = onDeviceCode.mock.calls[0]![0];
       await act(async () => {
         deviceHandler({ userCode: 'TEST-0000', verificationUri: 'https://github.com/device' });
       });
 
       // Simulate login via identity change
-      const identityHandler = onIdentityChange.mock.calls[0]![0] as (s: unknown) => void;
+      const identityHandler = onIdentityChange.mock.calls[0]![0];
       await act(async () => {
         identityHandler({ isLoggedIn: true, profile: { login: 'testuser' } });
       });
@@ -420,11 +421,12 @@ describe('App — deep coverage', () => {
       await act(async () => { render(<App />); });
 
       // Simulate tool approval request
-      const handler = onToolApprovalRequest.mock.calls[0]![0] as (response: unknown) => void;
+      const handler = onToolApprovalRequest.mock.calls[0]![0];
       await act(async () => {
         handler({
           status: 'pending-approval',
           callId: 'call-1',
+
           classification: {
             name: 'writeFile',
             riskLevel: 'high',
@@ -447,11 +449,12 @@ describe('App — deep coverage', () => {
 
       await act(async () => { render(<App />); });
 
-      const handler = onToolApprovalRequest.mock.calls[0]![0] as (response: unknown) => void;
+      const handler = onToolApprovalRequest.mock.calls[0]![0];
       await act(async () => {
         handler({
           status: 'pending-approval',
           callId: 'call-1',
+
           classification: {
             name: 'writeFile',
             riskLevel: 'high',
@@ -474,11 +477,12 @@ describe('App — deep coverage', () => {
 
       await act(async () => { render(<App />); });
 
-      const handler = onToolApprovalRequest.mock.calls[0]![0] as (response: unknown) => void;
+      const handler = onToolApprovalRequest.mock.calls[0]![0];
       await act(async () => {
         handler({
           status: 'pending-approval',
           callId: 'call-2',
+
           classification: {
             name: 'deleteFile',
             riskLevel: 'critical',
@@ -501,11 +505,12 @@ describe('App — deep coverage', () => {
 
       await act(async () => { render(<App />); });
 
-      const handler = onToolApprovalRequest.mock.calls[0]![0] as (response: unknown) => void;
+      const handler = onToolApprovalRequest.mock.calls[0]![0];
       await act(async () => {
         handler({
           status: 'pending-approval',
           callId: 'call-3',
+
           classification: {
             name: 'writeFile',
             riskLevel: 'high',
@@ -582,10 +587,11 @@ describe('App — deep coverage', () => {
 
       await act(async () => { render(<App />); });
 
-      const handler = onConflictDetected.mock.calls[0]![0] as (conflict: unknown) => void;
+      const handler = onConflictDetected.mock.calls[0]![0];
       await act(async () => {
         handler({
           id: 'conflict-2',
+
           kind: 'hash-mismatch',
           filePath: '/src/main.ts',
           description: 'Hash mismatch',
@@ -606,10 +612,11 @@ describe('App — deep coverage', () => {
 
       await act(async () => { render(<App />); });
 
-      const handler = onConflictDetected.mock.calls[0]![0] as (conflict: unknown) => void;
+      const handler = onConflictDetected.mock.calls[0]![0];
       await act(async () => {
         handler({
           id: 'conflict-3',
+
           kind: 'write-write',
           filePath: '/src/test.ts',
           description: 'Conflict',
@@ -699,11 +706,9 @@ describe('App — deep coverage', () => {
       globalThis.dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true }));
 
       expect(dispatchSpy).toHaveBeenCalled();
+      expect(userEvent).toBeDefined();
       dispatchSpy.mockRestore();
     });
-
-    // Suppress unused variable warning — userEvent.setup() is called in other tests
-    void userEvent;
   });
 
   // ?? Diagnostics polling ??????????????????????????????????????????????
@@ -732,7 +737,7 @@ describe('App — deep coverage', () => {
       await act(async () => { render(<App />); });
 
       // Simulate fs change event
-      const handler = onFsEvent.mock.calls[0]![0] as (event: unknown) => void;
+      const handler = onFsEvent.mock.calls[0]![0];
       await act(async () => {
         handler({ kind: 'change', path: '/workspace/src/app.ts' });
       });

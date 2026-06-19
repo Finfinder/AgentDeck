@@ -22,7 +22,9 @@
       "@agentdeck/permission-broker": ["packages/permission-broker/src/index.ts"],
       "@agentdeck/services": ["packages/services/src/index.ts"],
       "@agentdeck/shared": ["packages/shared/src/index.ts"],
-      "@agentdeck/workbench": ["packages/workbench/src/index.ts"]
+      "@agentdeck/workbench": ["packages/workbench/src/index.ts"],
+      "@agentdeck/memory-service": ["packages/memory-service/src/index.ts"],
+      "@agentdeck/code-indexer": ["packages/code-indexer/src/index.ts"]
     }
   }
 }

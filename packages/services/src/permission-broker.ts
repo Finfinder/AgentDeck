@@ -62,6 +62,18 @@ const TOOL_CLASSIFICATIONS: Record<ToolName, ToolClassification> = {
     riskLevel: 'high',
     requiresApproval: true,
     description: 'Zmiana nazwy lub ścieżki pliku.'
+  },
+  proposeMemoryChange: {
+    name: 'proposeMemoryChange',
+    riskLevel: 'read-only',
+    requiresApproval: false,
+    description: 'Utworzenie propozycji zmiany pliku pamięci (bez zapisu).'
+  },
+  applyMemoryChange: {
+    name: 'applyMemoryChange',
+    riskLevel: 'medium',
+    requiresApproval: true,
+    description: 'Zastosowanie propozycji zmiany pliku pamięci (z zapisem).'
   }
 };
 

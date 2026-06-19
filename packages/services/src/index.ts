@@ -140,3 +140,6 @@ export type { ConflictCheckResult, PatchApplicationResult, AutoMergeResult, Line
 export { EventLogService, getEventLogService } from './event-log-service';
 export { ToolRouter } from './tool-router';
 export type { ToolRouterOptions } from './tool-router';
+
+// Phase 9: Memory Service and Code Indexer
+export { createLocalStore, createMemoryService, createCodeIndexer } from './phase9-exports';

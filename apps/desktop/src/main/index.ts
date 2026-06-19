@@ -8,6 +8,9 @@ import { mkdir, readdir } from 'node:fs/promises';
 import { applyWorkspaceEdit, bootstrapDesktopServices, createEditorFile, createSettingsService, createStartupErrorState, createWorkspaceService, getDiagnostics, markBufferDirty, readEditorFile, showDiff, createIdentityService, type IdentityService, type SettingsService, type WorkspaceService, writeEditorFile, createModelGateway, createDefaultAdapters, type ModelGateway, type ToolExecutionContext } from '@agentdeck/services';
 import { createPermissionBroker } from '@agentdeck/permission-broker';
 import type { PermissionDecision } from '@agentdeck/permission-broker';
+import { createLocalStore, createMemoryService } from '@agentdeck/memory-service';
+import { createCodeIndexer } from '@agentdeck/code-indexer';
+import type Electron from 'electron';
 import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
@@ -20,9 +23,13 @@ import {
   isChatStreamEvent,
   isChatTabState,
   isPermissionApprovalInput,
+  isRetrievalQuery,
   isThemeSettings,
   isWorkspaceEditInput,
   isWorkspaceOpenRequest,
+  isMemoryConflictResolution,
+  type MemoryChangeProposal,
+  type MemoryScope,
   type ModelProviderId,
   type SearchQuery,
   type StartupState,
@@ -1357,6 +1364,116 @@ async function resolveStartupState(): Promise<StartupState> {
   }
 }
 
+function registerPhase9IpcHandlers(
+  localStore: ReturnType<typeof createLocalStore>,
+  memoryService: ReturnType<typeof createMemoryService>,
+  codeIndexer: ReturnType<typeof createCodeIndexer>,
+  getMainWindow: () => Electron.BrowserWindow | null = () => null
+): void {
+  ipcMain.handle(IPC_CHANNELS.listMemories, async (_event, scope: unknown) => {
+    try {
+      const result = await memoryService.list(scope as MemoryScope);
+      return { status: 'ok', entries: result.status === 'ok' ? result.entries : [] };
+    } catch (error) {
+      return { status: 'error', code: 'UNKNOWN', message: String(error) };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.readMemory, async (_event, scope: unknown, filePath: unknown) => {
+    try {
+      if (typeof filePath !== 'string') {
+        return { status: 'error', code: 'INVALID_INPUT', message: 'Invalid filePath.' };
+      }
+      return await memoryService.read(scope as MemoryScope, filePath);
+    } catch (error) {
+      return { status: 'error', code: 'UNKNOWN', message: String(error) };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.proposeMemoryChange, async (_event, edit: unknown) => {
+    try {
+      if (!isRecord(edit) || typeof edit.filePath !== 'string' || typeof edit.text !== 'string') {
+        return { status: 'error', code: 'INVALID_INPUT', message: 'Invalid edit payload.' };
+      }
+      return await memoryService.proposeEdit({
+        scope: edit.scope as MemoryScope,
+        filePath: edit.filePath,
+        text: edit.text
+      });
+    } catch (error) {
+      return { status: 'error', code: 'UNKNOWN', message: String(error) };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.applyMemoryChange, async (_event, proposal: unknown) => {
+    try {
+      if (!isRecord(proposal) || typeof proposal.filePath !== 'string') {
+        return { status: 'error', code: 'INVALID_INPUT', message: 'Invalid proposal payload.' };
+      }
+      const result = await memoryService.applyEdit({
+        scope: proposal.scope as MemoryScope,
+        filePath: proposal.filePath,
+        patch: proposal.patch as MemoryChangeProposal['patch'],
+        diff: proposal.diff as string | undefined
+      });
+      if (result.status === 'error' && result.conflict) {
+        const mw = getMainWindow();
+        if (mw) {
+          mw.webContents.send(IPC_CHANNELS.memoryConflictDetected, result.conflict);
+        }
+      }
+      return result;
+    } catch (error) {
+      return { status: 'error', code: 'UNKNOWN', message: String(error) };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.memoryConflictResolve, async (_event, resolution: unknown) => {
+    try {
+      if (!isMemoryConflictResolution(resolution)) {
+        return { status: 'error', code: 'INVALID_INPUT', message: 'Invalid memory conflict resolution.' };
+      }
+    } catch (error) {
+      console.error('Memory conflict resolution error:', error);
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.indexCodeFile, async (_event, filePath: unknown, scope: unknown) => {
+    try {
+      if (typeof filePath !== 'string') {
+        return { status: 'error', code: 'INVALID_INPUT', message: 'Invalid filePath.' };
+      }
+      const result = await codeIndexer.indexFile(filePath, scope as MemoryScope | undefined);
+      return { status: 'ok', chunks: result.chunks, stored: result.stored };
+    } catch (error) {
+      return { status: 'error', code: 'UNKNOWN', message: String(error) };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.retrieveCode, async (_event, query: unknown) => {
+    try {
+      if (!isRetrievalQuery(query)) {
+        return { status: 'error', code: 'INVALID_INPUT', message: 'Invalid retrieval query.' };
+      }
+      const results = await codeIndexer.retrieve(query);
+      return { status: 'ok', results };
+    } catch (error) {
+      return { status: 'error', code: 'UNKNOWN', message: String(error) };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.rebuildCodeIndex, async (_event, roots: unknown) => {
+    try {
+      const rootArray = Array.isArray(roots) ? roots as string[] : [];
+      const result = await codeIndexer.rebuildIndex(rootArray);
+      return { status: 'ok', chunks: result.chunks, stats: result.stats };
+    } catch (error) {
+      return { status: 'error', code: 'UNKNOWN', message: String(error) };
+    }
+  });
+}
+
+
 function createMainWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 1280,
@@ -1551,6 +1668,18 @@ async function start(): Promise<void> {
   });
 
   const mainWindow = createMainWindow();
+  // Phase 9: Memory Service and Code Indexer
+  const phase9Store = createLocalStore(join(app.getPath('userData'), 'agentdeck-local-store.db'));
+  const phase9Memory = createMemoryService({ author: 'agentdeck', baseDir: join(app.getPath('userData'), 'memories') });
+  const phase9Indexer = createCodeIndexer({
+    store: phase9Store,
+    memoryService: phase9Memory,
+    workspaceRoots: workspaceService.getWorkspaceRoots(),
+    indexVersion: 'phase9-v1'
+  });
+
+  registerPhase9IpcHandlers(phase9Store, phase9Memory, phase9Indexer, () => mainWindow);
+
   registerIpcHandlers(settingsService, workspaceService, mainWindow, identityService, modelGateway);
   registerDevToolsShortcut(mainWindow);
 }

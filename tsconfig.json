@@ -9,6 +9,8 @@
     { "path": "./packages/services/tsconfig.json" },
     { "path": "./packages/shared/tsconfig.json" },
     { "path": "./packages/workbench/tsconfig.json" },
+    { "path": "./packages/memory-service/tsconfig.json" },
+    { "path": "./packages/code-indexer/tsconfig.json" },
     { "path": "./tsconfig.test.json" }
   ]
 }

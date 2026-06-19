@@ -54,7 +54,19 @@ export {
       isAgentRuntimeStartSubagentOptions,
       isAgentRuntimeResumeOptions,
       isPermissionApprovalInput,
-      isPermissionApprovalResult
+      isPermissionApprovalResult,
+      // Phase 9
+      isMemoryEntry,
+      isMemoryChangeProposal,
+      isMemoryApplyResult,
+      isMemoryConflict,
+      isMemoryConflictResolution,
+      isRetrievalQuery,
+      isRetrievalResult,
+      isIndexChunk,
+      isEmbeddingMetadata,
+      isCodeIndexStats,
+      isMemoryScope
 } from './ipc';
 export type { IdentitySession, IdentitySessionWarning } from './ipc';
 export { isIdentitySession, isIdentitySessionWarning, isModelProviderConfig, isTestConnectionResult } from './ipc';
@@ -138,7 +150,27 @@ SensitivePathCheckResult,
        AgentRuntimeStartSessionOptions,
        AgentRuntimeStartWorkerOptions,
        AgentRuntimeStartSubagentOptions,
-       AgentRuntimeResumeOptions
+       AgentRuntimeResumeOptions,
+       // Phase 9
+       MemoryScope,
+       MemorySourceKind,
+       MemoryCreationSource,
+       MemoryEntry,
+       MemoryChangeProposal,
+       RetrievalKind,
+       RetrievalQuery,
+       RetrievalResult,
+       IndexChunk,
+       EmbeddingMetadata,
+       CodeIndexStats,
+       MemoryReadResult,
+       MemoryEdit,
+       MemoryApplyResult,
+       MemoryConflictKind,
+       MemoryConflict,
+       MemoryConflictResolution,
+       IndexFileResult,
+       RebuildIndexResult
 } from './ipc';
 export type {
        PermissionActionKind,

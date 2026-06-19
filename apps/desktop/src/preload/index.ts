@@ -14,6 +14,8 @@ import {
   isFsChangeEvent,
   isIdentitySession,
   isIdentitySessionWarning,
+  isMemoryApplyResult,
+  isMemoryConflict,
   isModelGatewayConfig,
   isModelProviderConfig,
   isSendMessageResult,
@@ -45,6 +47,10 @@ import {
   type PatchSet,
   type Conflict,
   type ConflictResolution,
+  type MemoryApplyResult,
+  type MemoryChangeProposal,
+  type MemoryConflict,
+  type MemoryConflictResolution,
 
   type WorkspaceEditInput,
 } from '@agentdeck/shared';
@@ -310,6 +316,21 @@ const api: AgentDeckPreloadApi = {
     chrome: process.versions.chrome ?? 'unknown',
     electron: process.versions.electron ?? 'unknown',
     node: process.versions.node
+  },
+  // Phase 9: Memory Service — apply + conflict review
+  applyMemoryChange: async (proposal: MemoryChangeProposal): Promise<MemoryApplyResult> => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.applyMemoryChange, proposal);
+    return isMemoryApplyResult(value) ? value : { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Unexpected response.' };
+  },
+  onMemoryConflictDetected: (handler: (conflict: MemoryConflict) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (isMemoryConflict(value)) handler(value);
+    };
+    ipcRenderer.on(IPC_CHANNELS.memoryConflictDetected, listener);
+    return () => { ipcRenderer.removeListener(IPC_CHANNELS.memoryConflictDetected, listener); };
+  },
+  resolveMemoryConflict: async (resolution: MemoryConflictResolution): Promise<void> => {
+    await ipcRenderer.invoke(IPC_CHANNELS.memoryConflictResolve, resolution);
   }
 };
 
