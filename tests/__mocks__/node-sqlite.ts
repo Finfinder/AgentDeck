@@ -149,25 +149,25 @@ function parseWhere(sql: string): string | null {
 
 function parseOrderBy(sql: string): string | null {
   const match = ORDER_PATTERN.exec(sql);
-  return match ? match[1].trim() : null;
+  return match ? match[1]!.trim() : null;
 }
 
 function parseLimit(sql: string): string | null {
   const match = LIMIT_PATTERN.exec(sql);
-  return match ? match[1].trim() : null;
+  return match ? match[1]!.trim() : null;
 }
 
 function parsePrimaryKeyConstraint(trimmed: string, parsed: ParsedCreateTable): boolean {
   // Handle table-level: PRIMARY KEY (col)
   const match = PRIMARY_KEY_PATTERN.exec(trimmed);
   if (match) {
-    parsed.primaryKey = match[1].toLowerCase();
+    parsed.primaryKey = match[1]!.toLowerCase();
     return true;
   }
   // Handle inline: col type primary key
   const inlineMatch = /^(\w+)\s+\w+\s+primary key/i.exec(trimmed);
   if (inlineMatch) {
-    parsed.primaryKey = inlineMatch[1].toLowerCase();
+    parsed.primaryKey = inlineMatch[1]!.toLowerCase();
     return true;
   }
   return false;
@@ -177,7 +177,7 @@ function parseUniqueConstraint(trimmed: string, parsed: ParsedCreateTable): bool
   const match = UNIQUE_PATTERN.exec(trimmed);
   if (!match) return false;
 
-  parsed.uniqueColumns.add(match[1].toLowerCase());
+  parsed.uniqueColumns.add(match[1]!.toLowerCase());
   return true;
 }
 
@@ -271,7 +271,7 @@ function parseUpsertSetClause(sql: string): Record<string, string> | null {
   const match = UPSERT_SET_PATTERN.exec(sql);
   if (!match) return null;
 
-  return match[1].split(',').reduce<Record<string, string>>((result, part) => {
+  return match[1]!.split(',').reduce<Record<string, string>>((result, part) => {
     const kv = SET_ASSIGNMENT_PATTERN.exec(part.trim());
     if (kv) result[kv[1]!.toLowerCase()] = kv[2]!.toLowerCase();
     return result;
