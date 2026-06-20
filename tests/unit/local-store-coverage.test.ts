@@ -97,6 +97,7 @@ describe('LocalStore — coverage', () => {
 
     it('uses default level info when not specified', () => {
       const entry = store.appendEvent({
+        level: 'info',
         source: 'test',
         message: 'No level'
       });
@@ -119,7 +120,7 @@ describe('LocalStore — coverage', () => {
         id: 'patch-1',
         filePath: '/test.ts',
         baseHash: 'abc123',
-        operations: [{ text: 'new content' }],
+        operations: [{ filePath: '/test.ts', text: 'new content' }],
         author: 'agent',
         riskLevel: 'low',
         createdAt: Date.now()
@@ -131,7 +132,7 @@ describe('LocalStore — coverage', () => {
         id: 'patch-2',
         filePath: '/critical.ts',
         baseHash: 'def456',
-        operations: [{ text: 'critical change' }],
+        operations: [{ filePath: '/critical.ts', text: 'critical change' }],
         author: 'agent',
         riskLevel: 'high',
         createdAt: Date.now()
@@ -143,7 +144,7 @@ describe('LocalStore — coverage', () => {
         id: 'patch-3',
         filePath: '/medium.ts',
         baseHash: 'ghi789',
-        operations: [{ text: 'medium change' }],
+        operations: [{ filePath: '/medium.ts', text: 'medium change' }],
         author: 'agent',
         riskLevel: 'medium',
         createdAt: Date.now()

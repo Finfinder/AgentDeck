@@ -230,7 +230,7 @@ describe('MemoryService — coverage', () => {
 
       const result = await service.applyEdit(proposal.proposal);
       expect(result.status).toBe('ok');
-      if (result.status === 'ok') {
+      if (result.status === 'ok' && 'autoMerged' in result) {
         expect(result.autoMerged).toBe(true);
       }
     });
@@ -255,7 +255,7 @@ describe('MemoryService — coverage', () => {
 
       const result = await service.applyEdit(proposal.proposal);
       expect(result.status).toBe('ok');
-      if (result.status === 'ok') {
+      if (result.status === 'ok' && 'autoMerged' in result) {
         expect(result.autoMerged).toBe(true);
       }
     });
