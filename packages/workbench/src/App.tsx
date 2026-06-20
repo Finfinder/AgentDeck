@@ -961,17 +961,6 @@ export function App() {
     }
   }, [agent]);
 
-  // Defensive agent API: when running the Vite dev server in a browser
-  // (not inside Electron) `globalThis.agentDeck` may be undefined. Provide
-  // a minimal dev fallback so the UI doesn't crash during development.
-  const agent = (globalThis as any).agentDeck ?? {
-    getStartupState: async () => ({ status: 'ready', appVersion: '0.1.0', services: [] as any[] }),
-    getThemeSettings: async () => DEFAULT_THEME_SETTINGS,
-    setThemeSettings: async (settings: ThemeSettings) => settings,
-    selectWorkspaceEntry: async () => ({ status: 'cancelled' } as any),
-    versions: { chrome: 'dev', electron: 'dev', node: 'dev' }
-  };
-
   useEffect(() => {
     let isActive = true;
 
