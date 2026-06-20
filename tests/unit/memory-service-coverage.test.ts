@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createMemoryService, MemoryService } from '@agentdeck/memory-service';
+import { createMemoryService } from '@agentdeck/memory-service';
 
 describe('MemoryService — coverage', () => {
   let baseDir: string;

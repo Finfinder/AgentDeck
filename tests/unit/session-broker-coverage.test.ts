@@ -5,9 +5,7 @@ import {
   type AgentRuntimeResult,
   type AgentRuntimeTaskState,
   type AgentRuntimeWorkerDefinition,
-  type AgentRuntimeWorkerInput,
-  type AgentRuntimeWorkerOutput,
-  type AgentRuntimeWorkerState
+  type AgentRuntimeWorkerOutput
 } from '@agentdeck/agent-runtime';
 
 function expectOk<T>(result: AgentRuntimeResult<T>): T {
@@ -685,7 +683,7 @@ describe('AgentRuntime Session Broker — additional coverage', () => {
 
   describe('worker retry with maxRetries', () => {
     it('uses configured maxRetries value', async () => {
-      let now = 1000;
+      const now = 1000;
       const workers = new Map<string, AgentRuntimeWorkerDefinition>();
       const runtime = createAgentRuntime({
         workerFactory: (id: string) => {
