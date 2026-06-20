@@ -678,7 +678,13 @@ export class DatabaseSync {
     const selectInfo = parseSelect(trimmedSql);
     if (!selectInfo) return [];
 
-    return applyLimit(getMatchingRows(selectInfo, args), selectInfo, args).map(row => ({ ...row }));
+    return applyLimit(getMatchingRows(selectInfo, args), selectInfo, args).map(row => {
+      const copy: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(row)) {
+        copy[key] = value === undefined ? null : value;
+      }
+      return copy;
+    });
   }
 
   exec(sql: string): void {
