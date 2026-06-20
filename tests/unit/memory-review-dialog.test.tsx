@@ -6,19 +6,12 @@ import { MemoryReviewDialog } from '../../packages/workbench/src/MemoryReviewDia
 describe('MemoryReviewDialog', () => {
   const baseConflict = {
     id: 'conflict-1',
-    kind: 'write',
+    kind: 'memory-conflict' as const,
+    proposalId: 'patch-1',
     filePath: '/memory/test.md',
     description: 'Plik został zmodyfikowany przez inny proces.',
     riskLevel: 'medium' as const,
-    proposalPatch: {
-      id: 'patch-1',
-      filePath: '/memory/test.md',
-      baseHash: 'abc123',
-      operations: [],
-      author: 'agent',
-      riskLevel: 'low' as const,
-      createdAt: Date.now()
-    }
+    createdAt: Date.now()
   };
 
   it('renders conflict description', () => {
@@ -96,6 +89,6 @@ describe('MemoryReviewDialog', () => {
     render(
       <MemoryReviewDialog conflict={baseConflict} onResolve={vi.fn()} />
     );
-    expect(screen.getByText('write')).toBeDefined();
+    expect(screen.getByText('memory-conflict')).toBeDefined();
   });
 });

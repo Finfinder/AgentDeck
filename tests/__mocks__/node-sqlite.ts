@@ -244,7 +244,7 @@ function parseUpsertSetClause(sql: string): Record<string, string> | null {
 
   return capture(match, 1).split(',').reduce<Record<string, string>>((result, part) => {
     const kv = SET_ASSIGNMENT_PATTERN.exec(part.trim());
-    if (kv) result[kv[1].toLowerCase()] = kv[2].toLowerCase();
+    if (kv) result[kv[1]!.toLowerCase()] = kv[2]!.toLowerCase();
     return result;
   }, {});
 }
@@ -331,19 +331,19 @@ function handleNullOrLike(row: Record<string, unknown>, col: string, args: unkno
 function matchesCondition(row: Record<string, unknown>, condition: string, args: unknown[], argIdx: number): ConditionResult {
   const trimmed = condition.trim();
   const equalMatch = EQUAL_PATTERN.exec(trimmed);
-  if (equalMatch) return handleEqual(row, equalMatch[1], args, argIdx);
+  if (equalMatch) return handleEqual(row, equalMatch[1]!, args, argIdx);
 
   const inMatch = IN_PATTERN.exec(trimmed);
-  if (inMatch) return handleIn(row, inMatch[1], inMatch[2], args, argIdx);
+  if (inMatch) return handleIn(row, inMatch[1]!, inMatch[2]!, args, argIdx);
 
   const nullMatch = IS_NULL_PATTERN.exec(trimmed);
-  if (nullMatch) return handleNull(nullMatch[1], row);
+  if (nullMatch) return handleNull(nullMatch[1]!, row);
 
   const likeMatch = LIKE_PATTERN.exec(trimmed);
-  if (likeMatch) return handleLike(row, likeMatch[1], args, argIdx);
+  if (likeMatch) return handleLike(row, likeMatch[1]!, args, argIdx);
 
   const nullOrLikeMatch = NULL_OR_LIKE_PATTERN.exec(trimmed);
-  if (nullOrLikeMatch) return handleNullOrLike(row, nullOrLikeMatch[1], args, argIdx);
+  if (nullOrLikeMatch) return handleNullOrLike(row, nullOrLikeMatch[1]!, args, argIdx);
 
   if (trimmed.includes('match')) {
     return { matched: true, nextArgIdx: argIdx + 1 };
@@ -445,7 +445,7 @@ function getMatchingRows(selectInfo: ParsedSelect, args: unknown[]): Record<stri
 function querySqliteMaster(selectInfo: ParsedSelect, args: unknown[]): Record<string, unknown>[] {
   const typeMatch = selectInfo.where ? SQLITE_MASTER_TYPE_PATTERN.exec(selectInfo.where) : null;
   const nameMatch = selectInfo.where ? SQLITE_MASTER_NAME_PATTERN.exec(selectInfo.where) : null;
-  const expectedType = typeMatch ? typeMatch[1].toLowerCase() : null;
+  const expectedType = typeMatch ? typeMatch[1]!.toLowerCase() : null;
   const expectedName = nameMatch ? String(args[0]).toLowerCase() : null;
 
   const rows: Record<string, unknown>[] = [

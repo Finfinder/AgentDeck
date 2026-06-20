@@ -23,12 +23,12 @@ vi.spyOn(conflictBrokerModule, 'classifyOperationKind').mockReturnValue('patch-c
 vi.spyOn(conflictBrokerModule, 'generatePatchId').mockReturnValue('patch-test');
 vi.spyOn(conflictBrokerModule, 'classifyPatchRisk').mockReturnValue('low');
 
-vi.spyOn(editorServiceModule, 'readEditorFile').mockResolvedValue({ status: 'ok' as const, content: 'file content' });
+vi.spyOn(editorServiceModule, 'readEditorFile').mockResolvedValue({ status: 'ok' as const, content: 'file content', encoding: 'utf-8' as const });
 vi.spyOn(editorServiceModule, 'writeEditorFile').mockResolvedValue({ status: 'ok' as const });
 vi.spyOn(editorServiceModule, 'showDiff').mockReturnValue({ status: 'ok' as const, diff: '--- old\n+++ new' });
 
-vi.spyOn(workspaceServiceModule, 'searchFilesStandalone').mockResolvedValue(['/workspace/test.ts']);
-vi.spyOn(workspaceServiceModule, 'listDirectoryStandalone').mockResolvedValue({ entries: [{ name: 'test.ts', type: 'file' }] });
+vi.spyOn(workspaceServiceModule, 'searchFilesStandalone').mockResolvedValue([{ id: 'sr-1', file: '/workspace/test.ts', line: 1, col: 0, snippet: 'test', isSensitive: false }]);
+vi.spyOn(workspaceServiceModule, 'listDirectoryStandalone').mockResolvedValue({ path: '/workspace', entries: [{ name: 'test.ts', path: '/workspace/test.ts', kind: 'file' as const, isSensitive: false }] });
 vi.spyOn(workspaceServiceModule, 'deleteFileStandalone').mockResolvedValue({ status: 'ok' as const });
 vi.spyOn(workspaceServiceModule, 'renameFileStandalone').mockResolvedValue({ status: 'ok' as const });
 
@@ -110,7 +110,7 @@ describe('ToolRouter — deep coverage', () => {
     conflictBroker = createMockConflictBroker();
     // Reset all spies to default mock implementations
     (conflictBrokerModule.applyPatchWithConflictCheck as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, appliedHash: 'hash123' });
-    (editorServiceModule.readEditorFile as ReturnType<typeof vi.fn>).mockResolvedValue({ status: 'ok' as const, content: 'file content' });
+    (editorServiceModule.readEditorFile as ReturnType<typeof vi.fn>).mockResolvedValue({ status: 'ok' as const, content: 'file content', encoding: 'utf-8' as const });
     (editorServiceModule.writeEditorFile as ReturnType<typeof vi.fn>).mockResolvedValue({ status: 'ok' as const });
     (workspaceServiceModule.deleteFileStandalone as ReturnType<typeof vi.fn>).mockResolvedValue({ status: 'ok' as const });
     (workspaceServiceModule.renameFileStandalone as ReturnType<typeof vi.fn>).mockResolvedValue({ status: 'ok' as const });
@@ -145,8 +145,8 @@ describe('ToolRouter — deep coverage', () => {
       const result = await router.execute(req);
       expect(result.status).toBe('ok');
       if (result.status === 'ok') {
-        expect(result.result.content).toBe('file content');
-        expect(result.result.truncated).toBe(false);
+        expect((result.result as { content: string; truncated: boolean }).content).toBe('file content');
+        expect((result.result as { content: string; truncated: boolean }).truncated).toBe(false);
       }
     });
 
@@ -172,8 +172,8 @@ describe('ToolRouter — deep coverage', () => {
       const result = await router.execute(req);
       expect(result.status).toBe('ok');
       if (result.status === 'ok') {
-        expect(result.result.truncated).toBe(true);
-        expect(result.result.totalSize).toBe(2_000_000);
+        expect((result.result as { truncated: boolean; totalSize: number }).truncated).toBe(true);
+        expect((result.result as { truncated: boolean; totalSize: number }).totalSize).toBe(2_000_000);
       }
     });
 
@@ -197,7 +197,7 @@ describe('ToolRouter — deep coverage', () => {
       const result = await router.execute(req);
       expect(result.status).toBe('ok');
       if (result.status === 'ok') {
-        expect(result.result.results).toEqual(['/workspace/test.ts']);
+        expect((result.result as { results: string[] }).results).toEqual(['/workspace/test.ts']);
       }
     });
 
@@ -223,7 +223,7 @@ describe('ToolRouter — deep coverage', () => {
       const result = await router.execute(req);
       expect(result.status).toBe('ok');
       if (result.status === 'ok') {
-        expect(result.result.entries).toEqual([{ name: 'test.ts', type: 'file' }]);
+        expect((result.result as { entries: Array<{ name: string; path: string; kind: 'file' | 'directory'; isSensitive: boolean }> }).entries).toEqual([{ name: 'test.ts', path: '/workspace/test.ts', kind: 'file', isSensitive: false }]);
       }
     });
 
@@ -242,8 +242,8 @@ describe('ToolRouter — deep coverage', () => {
       const result = await router.execute(req);
       expect(result.status).toBe('ok');
       if (result.status === 'ok') {
-        expect(result.result.filePath).toBe('/workspace/test.ts');
-        expect(result.result.bytesWritten).toBe(11);
+        expect((result.result as { filePath: string; bytesWritten: number }).filePath).toBe('/workspace/test.ts');
+        expect((result.result as { filePath: string; bytesWritten: number }).bytesWritten).toBe(11);
       }
     });
 
@@ -282,7 +282,7 @@ describe('ToolRouter — deep coverage', () => {
       const result = await router.execute(req);
       expect(result.status).toBe('ok');
       if (result.status === 'ok') {
-        expect(result.result.deleted).toBe(true);
+        expect((result.result as { filePath: string; deleted: boolean }).deleted).toBe(true);
       }
     });
 
@@ -314,8 +314,8 @@ describe('ToolRouter — deep coverage', () => {
       const result = await router.execute(req);
       expect(result.status).toBe('ok');
       if (result.status === 'ok') {
-        expect(result.result.oldPath).toBe('/workspace/old.ts');
-        expect(result.result.newPath).toBe('/workspace/new.ts');
+        expect((result.result as { oldPath: string; newPath: string }).oldPath).toBe('/workspace/old.ts');
+        expect((result.result as { oldPath: string; newPath: string }).newPath).toBe('/workspace/new.ts');
       }
     });
 
@@ -421,8 +421,8 @@ describe('ToolRouter — deep coverage', () => {
       const result = await router.execute(req);
       expect(result.status).toBe('ok');
       if (result.status === 'ok') {
-        expect(result.result.patchId).toBe('p1');
-        expect(result.result.appliedHash).toBe('hash123');
+        expect((result.result as { patchId: string; appliedHash: string }).patchId).toBe('p1');
+        expect((result.result as { patchId: string; appliedHash: string }).appliedHash).toBe('hash123');
       }
     });
 
