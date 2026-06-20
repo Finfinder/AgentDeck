@@ -197,7 +197,7 @@ describe('ToolRouter — deep coverage', () => {
       const result = await router.execute(req);
       expect(result.status).toBe('ok');
       if (result.status === 'ok') {
-        expect((result.result as { results: string[] }).results).toEqual(['/workspace/test.ts']);
+        expect((result.result as { results: Array<{ file: string }> }).results.map(r => r.file)).toEqual(['/workspace/test.ts']);
       }
     });
 

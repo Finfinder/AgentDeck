@@ -67,7 +67,7 @@ const CREATE_TABLE_PATTERN = /create table\s+(?:if not exists\s+)?(\w+)\s*\((.+)
 const PRIMARY_KEY_PATTERN = /primary key\s*\((\w+)\)/i;
 const UNIQUE_PATTERN = /unique\s*\((\w+)\)/i;
 const COLUMN_NAME_PATTERN = /^(\w+)\s+/;
-const CREATE_TRIGGER_PATTERN = /create trigger\s+(?:if not exists\s+)?(\w+)\s+.+\s+(before\s+(?:update|delete))\s+on\s+(\w+)\s+begin\s+select\s+raise\(abort,\s*'([^']+)'/is;
+const CREATE_TRIGGER_PATTERN = /create trigger\s+[\s\S]*?(\w+)\s+(before\s+(?:update|delete))\s+on\s+(\w+)\s+begin\s+select\s+raise\(abort,\s*'([^']+)'/is;
 const CREATE_INDEX_PATTERN = /create index(?:\s+if not exists)?\s+(\w+)\s+on\s+(\w+)/i;
 const INSERT_PATTERN = /insert\s+(?:or\s+(?:replace|ignore)\s+)?into\s+(\w+)\s*\(([^)]+)\)\s*values\s*\(([^)]+)\)/is;
 const UPSERT_PATTERN = /insert\s+into\s+(\w+)\s*\(([^)]+)\)\s*values\s*\(([^)]+)\)\s+on\s+conflict/is;
@@ -148,26 +148,36 @@ function parseWhere(sql: string): string | null {
 }
 
 function parseOrderBy(sql: string): string | null {
-  const match = expectMatch(sql, ORDER_PATTERN);
-  return capture(match, 1).trim();
+  const match = ORDER_PATTERN.exec(sql);
+  return match ? match[1].trim() : null;
 }
 
 function parseLimit(sql: string): string | null {
-  const match = expectMatch(sql, LIMIT_PATTERN);
-  return capture(match, 1).trim();
+  const match = LIMIT_PATTERN.exec(sql);
+  return match ? match[1].trim() : null;
 }
 
 function parsePrimaryKeyConstraint(trimmed: string, parsed: ParsedCreateTable): boolean {
-  const match = expectMatch(trimmed, PRIMARY_KEY_PATTERN);
-
-  parsed.primaryKey = capture(match, 1).toLowerCase();
-  return true;
+  // Handle table-level: PRIMARY KEY (col)
+  const match = PRIMARY_KEY_PATTERN.exec(trimmed);
+  if (match) {
+    parsed.primaryKey = match[1].toLowerCase();
+    return true;
+  }
+  // Handle inline: col type primary key
+  const inlineMatch = /^(\w+)\s+\w+\s+primary key/i.exec(trimmed);
+  if (inlineMatch) {
+    parsed.primaryKey = inlineMatch[1].toLowerCase();
+    return true;
+  }
+  return false;
 }
 
 function parseUniqueConstraint(trimmed: string, parsed: ParsedCreateTable): boolean {
-  const match = expectMatch(trimmed, UNIQUE_PATTERN);
+  const match = UNIQUE_PATTERN.exec(trimmed);
+  if (!match) return false;
 
-  parsed.uniqueColumns.add(capture(match, 1).toLowerCase());
+  parsed.uniqueColumns.add(match[1].toLowerCase());
   return true;
 }
 
@@ -181,6 +191,24 @@ function parseColumnDefinition(trimmed: string, parsed: ParsedCreateTable): void
   if (lowered.includes(' primary key')) parsed.primaryKey = colName;
 }
 
+function splitColumns(body: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of body) {
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) {
+      parts.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.length > 0) parts.push(current);
+  return parts;
+}
+
 function parseCreateTable(sql: string): ParsedCreateTable | null {
   const match = expectMatch(sql, CREATE_TABLE_PATTERN);
 
@@ -191,7 +219,7 @@ function parseCreateTable(sql: string): ParsedCreateTable | null {
     uniqueColumns: new Set<string>()
   };
 
-  for (const part of capture(match, 2).split(',')) {
+  for (const part of splitColumns(capture(match, 2))) {
     const trimmed = part.trim();
     if (parsePrimaryKeyConstraint(trimmed, parsed)) continue;
     if (parseUniqueConstraint(trimmed, parsed)) continue;
@@ -240,9 +268,10 @@ function parseUpsertInsert(sql: string, args: unknown[]): ParsedInsert | null {
 }
 
 function parseUpsertSetClause(sql: string): Record<string, string> | null {
-  const match = expectMatch(sql, UPSERT_SET_PATTERN);
+  const match = UPSERT_SET_PATTERN.exec(sql);
+  if (!match) return null;
 
-  return capture(match, 1).split(',').reduce<Record<string, string>>((result, part) => {
+  return match[1].split(',').reduce<Record<string, string>>((result, part) => {
     const kv = SET_ASSIGNMENT_PATTERN.exec(part.trim());
     if (kv) result[kv[1]!.toLowerCase()] = kv[2]!.toLowerCase();
     return result;
@@ -284,7 +313,7 @@ function parseUpdate(sql: string, args: unknown[]): ParsedUpdate | null {
 
   const setClause: Record<string, unknown> = {};
   let argIdx = 0;
-  for (const part of capture(match, 2).split(',')) {
+  for (const part of splitColumns(capture(match, 2))) {
     const kv = expectMatch(part.trim(), UPDATE_ASSIGNMENT_PATTERN);
     if (kv) {
       setClause[capture(kv, 1).toLowerCase()] = args[argIdx];
@@ -485,6 +514,35 @@ function applyLimit(rows: Record<string, unknown>[], selectInfo: ParsedSelect, a
   return rows.slice(0, limitVal);
 }
 
+function splitStatements(sql: string): string[] {
+  const statements: string[] = [];
+  let current = '';
+  let inString = false;
+  let stringChar = '';
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (inString) {
+      current += ch;
+      if (ch === stringChar && sql[i - 1] !== '\\') inString = false;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      inString = true;
+      stringChar = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === ';') {
+      statements.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim().length > 0) statements.push(current);
+  return statements;
+}
+
 export class DatabaseSync {
   private _isOpen = true;
   loadExtension(name: string, entrypoint?: string): void {
@@ -639,18 +697,18 @@ export class DatabaseSync {
       return;
     }
 
-    if (loweredSql.startsWith('create table')) {
-      this.createTable(trimmedSql);
-      return;
-    }
+    for (const statement of splitStatements(trimmedSql)) {
+      const trimmed = statement.trim();
+      if (!trimmed) continue;
+      const lowered = normalizeSql(trimmed);
 
-    if (loweredSql.startsWith('create index')) {
-      this.createIndex(trimmedSql);
-      return;
-    }
-
-    if (loweredSql.startsWith('create trigger')) {
-      this.createTrigger(trimmedSql);
+      if (lowered === 'begin' || lowered === 'commit' || lowered === 'rollback') continue;
+      if (lowered.startsWith('create table')) { this.createTable(trimmed); continue; }
+      if (lowered.startsWith('create index')) { this.createIndex(trimmed); continue; }
+      if (lowered.startsWith('create trigger')) { this.createTrigger(trimmed); continue; }
+      if (lowered.startsWith('insert')) { this.insertRow(trimmed, []); continue; }
+      if (lowered.startsWith('update')) { this.updateRows(trimmed, []); continue; }
+      if (lowered.startsWith('delete')) { this.deleteRows(trimmed, []); continue; }
     }
   }
 
