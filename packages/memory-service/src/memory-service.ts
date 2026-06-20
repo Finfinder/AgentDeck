@@ -283,11 +283,13 @@ function memoryId(scope: MemoryScope, filePath: string): string {
 }
 
 function extractMarkdownTitle(content: string): string {
+  // Safe: bounded quantifier {1,120} and single character class [^\n\r#] — no backtracking risk
   const match = /^#{1,6}\s+([^\n\r#]{1,120})/m.exec(content);
   return match?.[1]?.trim() ?? 'Untitled memory';
 }
 
 function extractMarkdownTags(content: string): string[] {
+  // Safe: bounded quantifier {1,120} and single character class [^\n\r;] — no backtracking risk
   const match = /(?:^|\n)\s*tags\s*:\s*([^\n\r;]{1,120})/i.exec(content);
   if (!match?.[1]) return [];
   return match[1]
