@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 import type {
@@ -24,7 +24,7 @@ function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
 
 export function generatePatchId(): string {
   const ts = Date.now().toString(36);
-  const rand = Math.random().toString(36).slice(2, 10);
+  const rand = randomBytes(4).toString('hex');
   return `patch-${ts}-${rand}`;
 }
 

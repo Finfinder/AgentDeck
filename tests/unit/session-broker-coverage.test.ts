@@ -5,7 +5,8 @@ import {
   type AgentRuntimeResult,
   type AgentRuntimeTaskState,
   type AgentRuntimeWorkerDefinition,
-  type AgentRuntimeWorkerOutput
+  type AgentRuntimeWorkerOutput,
+  type AgentRuntimeWorkerInput
 } from '@agentdeck/agent-runtime';
 
 function expectOk<T>(result: AgentRuntimeResult<T>): T {
@@ -787,6 +788,185 @@ describe('AgentRuntime Session Broker — additional coverage', () => {
       runtime.stopSession(s1.id);
       expect(runtime.getSession(s1.id)?.eventLog.some(e => e.type === 'session-stopped')).toBe(true);
       expect(runtime.getSession(s2.id)?.eventLog.some(e => e.type === 'session-stopped')).toBe(false);
+    });
+  });
+
+  describe('stopWorker with retrying worker', () => {
+    it('aborts controller and sets stopping status for retrying worker', async () => {
+      const { runtime, registerWorker } = createRuntime();
+      const session = expectOk(runtime.createSession({
+        chatTabId: 'tab-1',
+        modelId: 'model-1',
+        agentName: 'agent'
+      }));
+      const worker = expectOk(runtime.startWorker({
+        sessionId: session.id,
+        taskId: firstTask(session).id,
+        prompt: 'test'
+      }));
+
+      // Create a worker that fails first then would retry
+      let callCount = 0;
+      const run = vi.fn().mockImplementation((_input: AgentRuntimeWorkerInput, signal: AbortSignal) => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.reject(new Error('Transient failure'));
+        }
+        // Second call: hang until aborted
+        return new Promise<never>((_, reject) => {
+          signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        });
+      });
+      registerWorker(worker.id, run);
+
+      expectOk(runtime.runWorker(worker.id));
+      await vi.waitFor(() => {
+        expect(runtime.getWorker(worker.id)?.status).toBe('retrying');
+      });
+
+      // Now stop the retrying worker
+      const result = runtime.stopWorker(worker.id);
+      expectOk(result);
+      expect(runtime.getWorker(worker.id)?.status).toBe('stopping');
+    });
+  });
+
+  describe('executeWorker signal abort paths', () => {
+    it('cancels worker when signal is aborted during execution', async () => {
+      const { runtime, registerWorker } = createRuntime();
+      const session = expectOk(runtime.createSession({
+        chatTabId: 'tab-1',
+        modelId: 'model-1',
+        agentName: 'agent'
+      }));
+      const worker = expectOk(runtime.startWorker({
+        sessionId: session.id,
+        taskId: firstTask(session).id,
+        prompt: 'test'
+      }));
+
+      let resolveRun: (value: AgentRuntimeWorkerOutput) => void;
+      const run = vi.fn().mockImplementation(() => {
+        return new Promise<AgentRuntimeWorkerOutput>((resolve) => {
+          resolveRun = resolve;
+        });
+      });
+      registerWorker(worker.id, run);
+
+      expectOk(runtime.runWorker(worker.id));
+
+      // Abort the worker
+      runtime.stopWorker(worker.id);
+
+      // Resolve the worker after abort
+      resolveRun!({ summary: 'done', references: [], toolsUsed: [] });
+
+      await vi.waitFor(() => {
+        expect(runtime.getTask(firstTask(session).id)?.status).toBe('cancelled');
+      });
+    });
+  });
+
+  describe('sanitizeEventMessage comprehensive coverage', () => {
+    it('redacts JWT tokens in event messages', async () => {
+      const { runtime, registerWorker } = createRuntime();
+      const session = expectOk(runtime.createSession({
+        chatTabId: 'tab-1',
+        modelId: 'model-1',
+        agentName: 'agent'
+      }));
+      const worker = expectOk(runtime.startWorker({
+        sessionId: session.id,
+        taskId: firstTask(session).id,
+        prompt: 'test'
+      }));
+      const jwtToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
+      registerWorker(worker.id, createFailingWorkerMock(`JWT leaked: ${jwtToken}`));
+
+      expectOk(runtime.runWorker(worker.id));
+      await vi.waitFor(() => {
+        expect(runtime.getWorker(worker.id)?.status).toBe('crashed');
+      });
+
+      const updated = runtime.getSession(session.id);
+      const text = JSON.stringify(updated?.eventLog);
+      expect(text).not.toContain(jwtToken);
+      expect(text).toContain('[REDACTED]');
+    });
+
+    it('redacts GitHub tokens in event messages', async () => {
+      const { runtime, registerWorker } = createRuntime();
+      const session = expectOk(runtime.createSession({
+        chatTabId: 'tab-1',
+        modelId: 'model-1',
+        agentName: 'agent'
+      }));
+      const worker = expectOk(runtime.startWorker({
+        sessionId: session.id,
+        taskId: firstTask(session).id,
+        prompt: 'test'
+      }));
+      const githubToken = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123456789';
+      registerWorker(worker.id, createFailingWorkerMock(`GitHub token: ${githubToken}`));
+
+      expectOk(runtime.runWorker(worker.id));
+      await vi.waitFor(() => {
+        expect(runtime.getWorker(worker.id)?.status).toBe('crashed');
+      });
+
+      const updated = runtime.getSession(session.id);
+      const text = JSON.stringify(updated?.eventLog);
+      expect(text).not.toContain(githubToken);
+      expect(text).toContain('[REDACTED]');
+    });
+
+    it('redacts private key markers in event messages', async () => {
+      const { runtime, registerWorker } = createRuntime();
+      const session = expectOk(runtime.createSession({
+        chatTabId: 'tab-1',
+        modelId: 'model-1',
+        agentName: 'agent'
+      }));
+      const worker = expectOk(runtime.startWorker({
+        sessionId: session.id,
+        taskId: firstTask(session).id,
+        prompt: 'test'
+      }));
+      registerWorker(worker.id, createFailingWorkerMock('Key: -----BEGIN RSA PRIVATE KEY-----'));
+
+      expectOk(runtime.runWorker(worker.id));
+      await vi.waitFor(() => {
+        expect(runtime.getWorker(worker.id)?.status).toBe('crashed');
+      });
+
+      const updated = runtime.getSession(session.id);
+      const text = JSON.stringify(updated?.eventLog);
+      expect(text).not.toContain('-----BEGIN RSA PRIVATE KEY-----');
+      expect(text).toContain('[REDACTED]');
+    });
+
+    it('preserves key name when redacting key-value secrets', async () => {
+      const { runtime, registerWorker } = createRuntime();
+      const session = expectOk(runtime.createSession({
+        chatTabId: 'tab-1',
+        modelId: 'model-1',
+        agentName: 'agent'
+      }));
+      const worker = expectOk(runtime.startWorker({
+        sessionId: session.id,
+        taskId: firstTask(session).id,
+        prompt: 'test'
+      }));
+      registerWorker(worker.id, createFailingWorkerMock('password=supersecret123'));
+
+      expectOk(runtime.runWorker(worker.id));
+      await vi.waitFor(() => {
+        expect(runtime.getWorker(worker.id)?.status).toBe('crashed');
+      });
+
+      const updated = runtime.getSession(session.id);
+      const crashEvent = updated?.eventLog.find(e => e.type === 'worker-crashed');
+      expect(crashEvent?.message).toContain('password=[REDACTED]');
     });
   });
 });

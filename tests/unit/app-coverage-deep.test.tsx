@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '@agentdeck/workbench';
-import type { AgentDeckPreloadApi } from '@agentdeck/shared';
+import type { AgentDeckPreloadApi, AgentRuntimeSessionState } from '@agentdeck/shared';
 
 import { createMockAgent } from './mock-agent';
 
@@ -847,6 +847,343 @@ describe('App — deep coverage', () => {
       await user.click(screen.getByRole('button', { name: 'Chat' }));
 
       expect(screen.getByText('Create a new chat tab to start a conversation with an AI model.')).toBeInTheDocument();
+    });
+  });
+
+  // ?? Memory conflict dialog ??????????????????????????????????????????
+  describe('memory conflict dialog', () => {
+    it('shows memory conflict dialog when memory conflict detected', async () => {
+      const onMemoryConflictDetected = vi.fn().mockReturnValue(() => undefined);
+      setAgentDeck(mockPreloadApi({ onMemoryConflictDetected }));
+
+      await act(async () => { render(<App />); });
+
+      await act(async () => {
+        const handler = onMemoryConflictDetected.mock.calls[0]![0] as (conflict: unknown) => void;
+        handler({
+          id: 'mem-conflict-1',
+          filePath: 'src/config.ts',
+          sessionId: 'session-1',
+          conflictType: 'write-write',
+          description: 'Memory file was modified externally',
+          riskLevel: 'medium',
+          suggestedAction: 'review',
+          originalText: 'original',
+          newText: 'modified'
+        });
+      });
+
+      // MemoryReviewDialog should be rendered
+      expect(screen.getByText('Memory file was modified externally')).toBeInTheDocument();
+    });
+
+    it('resolves memory conflict with skip', async () => {
+      const onMemoryConflictDetected = vi.fn().mockReturnValue(() => undefined);
+      const resolveMemoryConflict = vi.fn().mockResolvedValue(undefined);
+      setAgentDeck(mockPreloadApi({ onMemoryConflictDetected, resolveMemoryConflict }));
+
+      await act(async () => { render(<App />); });
+
+      await act(async () => {
+        const handler = onMemoryConflictDetected.mock.calls[0]![0] as (conflict: unknown) => void;
+        handler({
+          id: 'mem-conflict-2',
+          filePath: 'src/config.ts',
+          sessionId: 'session-1',
+          conflictType: 'write-write',
+          description: 'Memory conflict',
+          riskLevel: 'medium',
+          suggestedAction: 'review',
+          originalText: 'original',
+          newText: 'modified'
+        });
+      });
+
+      const skipBtn = screen.getByRole('button', { name: 'Pomiń' });
+      await userEvent.click(skipBtn);
+
+      expect(resolveMemoryConflict).toHaveBeenCalledWith(expect.objectContaining({
+        conflictId: 'mem-conflict-2',
+        action: 'skip'
+      }));
+    });
+
+    it('resolves memory conflict with edit', async () => {
+      const onMemoryConflictDetected = vi.fn().mockReturnValue(() => undefined);
+      const resolveMemoryConflict = vi.fn().mockResolvedValue(undefined);
+      setAgentDeck(mockPreloadApi({ onMemoryConflictDetected, resolveMemoryConflict }));
+
+      await act(async () => { render(<App />); });
+
+      await act(async () => {
+        const handler = onMemoryConflictDetected.mock.calls[0]![0] as (conflict: unknown) => void;
+        handler({
+          id: 'mem-conflict-3',
+          filePath: 'src/config.ts',
+          sessionId: 'session-1',
+          conflictType: 'write-write',
+          description: 'Memory conflict',
+          riskLevel: 'medium',
+          suggestedAction: 'review',
+          originalText: 'original',
+          newText: 'modified'
+        });
+      });
+
+      const editBtn = screen.getByRole('button', { name: 'Edytuj' });
+      await userEvent.click(editBtn);
+
+      expect(resolveMemoryConflict).toHaveBeenCalledWith(expect.objectContaining({
+        conflictId: 'mem-conflict-3',
+        action: 'edit'
+      }));
+    });
+  });
+
+  // ?? Event log panel ?????????????????????????????????????????????????
+  describe('event log panel', () => {
+    it('renders event log panel', async () => {
+      const user = userEvent.setup();
+      const getEventLog = vi.fn().mockResolvedValue({
+        status: 'ok',
+        entries: [
+          { id: 'evt-1', timestamp: 1000, level: 'info', source: 'tool-router', message: 'Patch applied' },
+          { id: 'evt-2', timestamp: 2000, level: 'error', source: 'editor', message: 'File not found' }
+        ],
+        total: 2
+      });
+      const onEventLogUpdate = vi.fn().mockReturnValue(() => undefined);
+      const clearEventLog = vi.fn().mockResolvedValue(undefined);
+
+      setAgentDeck(mockPreloadApi({
+        getEventLog,
+        onEventLogUpdate,
+        clearEventLog
+      }));
+
+      await act(async () => { render(<App />); });
+
+      await user.click(screen.getByRole('tab', { name: 'Event Log' }));
+
+      // Event log panel renders the EventLogPanel component
+      expect(screen.getByText('Patch applied')).toBeInTheDocument();
+    });
+  });
+
+  // ?? Worker stop and session stop integration ?????????????????????????
+  describe('worker and session stop', () => {
+    it('stops worker via button click', async () => {
+      const stopWorkerMock = vi.fn().mockResolvedValue({ status: 'ok' });
+      const onAgentRuntimeWorkerChanged = vi.fn().mockReturnValue(() => undefined);
+      const onAgentRuntimeSessionChanged = vi.fn().mockReturnValue(() => undefined);
+
+      setAgentDeck(mockPreloadApi({
+        listAgentRuntimeSessions: vi.fn().mockResolvedValue([]),
+        listAgentRuntimeWorkers: vi.fn().mockResolvedValue([
+          { id: 'worker-1', sessionId: 'session-1', taskId: 'task-1', status: 'running', attempt: 1, maxRetries: 3 }
+        ]),
+        onAgentRuntimeWorkerChanged,
+        onAgentRuntimeSessionChanged,
+        onAgentRuntimeSessionCrashed: vi.fn().mockReturnValue(() => undefined),
+        stopAgentRuntimeWorker: stopWorkerMock
+      }));
+
+      const user = userEvent.setup();
+      await act(async () => { render(<App />); });
+
+      await user.click(screen.getByRole('tab', { name: 'Workers' }));
+
+      const stopBtn = await screen.findByRole('button', { name: 'Stop runtime worker worker-1' });
+      await userEvent.click(stopBtn);
+
+      expect(stopWorkerMock).toHaveBeenCalledWith('worker-1');
+    });
+
+    it('stops session via button click', async () => {
+      const stopSessionMock = vi.fn().mockResolvedValue({ status: 'ok' });
+      const onAgentRuntimeWorkerChanged = vi.fn().mockReturnValue(() => undefined);
+      const onAgentRuntimeSessionChanged = vi.fn().mockReturnValue(() => undefined);
+
+      setAgentDeck(mockPreloadApi({
+        listAgentRuntimeSessions: vi.fn().mockResolvedValue([
+          { id: 'session-1', chatTabId: 'tab-1', modelId: 'default', agentName: 'agent', status: 'active', permissionScope: { sessionId: 'session-1', taskId: 'task-1', kind: 'parent', allowedTools: [] }, context: [], eventLog: [], workers: [{ id: 'worker-1', sessionId: 'session-1', taskId: 'task-1', status: 'running', attempt: 1, maxRetries: 3 }], tasks: [] }
+        ]),
+        listAgentRuntimeWorkers: vi.fn().mockResolvedValue([
+          { id: 'worker-1', sessionId: 'session-1', taskId: 'task-1', status: 'running', attempt: 1, maxRetries: 3 }
+        ]),
+        onAgentRuntimeWorkerChanged,
+        onAgentRuntimeSessionChanged,
+        onAgentRuntimeSessionCrashed: vi.fn().mockReturnValue(() => undefined),
+        stopAgentRuntimeSession: stopSessionMock
+      }));
+
+      const user = userEvent.setup();
+      await act(async () => { render(<App />); });
+
+      await user.click(screen.getByRole('tab', { name: 'Workers' }));
+
+      const stopBtn = await screen.findByRole('button', { name: 'Stop runtime session session-1' });
+      await userEvent.click(stopBtn);
+
+      expect(stopSessionMock).toHaveBeenCalledWith('session-1');
+    });
+  });
+
+  // ?? Runtime task activity panel ?????????????????????????????????????
+  describe('runtime task activity panel', () => {
+    it('renders task with result and references', async () => {
+      const onAgentRuntimeTaskChanged = vi.fn().mockReturnValue(() => undefined);
+      const onAgentRuntimeSessionChanged = vi.fn().mockReturnValue(() => undefined);
+      const onAgentRuntimeWorkerChanged = vi.fn().mockReturnValue(() => undefined);
+
+      setAgentDeck(mockPreloadApi({
+        listAgentRuntimeTasks: vi.fn().mockResolvedValue([
+          {
+            id: 'task-1',
+            sessionId: 'session-1',
+            kind: 'chat',
+            agentName: 'TestAgent',
+            modelId: 'default',
+            prompt: 'Hello world',
+            status: 'completed',
+            permissionScope: { sessionId: 'session-1', taskId: 'task-1', kind: 'parent', allowedTools: [] },
+            context: [],
+            toolsUsed: ['read_file', 'write_file'],
+            result: {
+              summary: 'Task completed successfully',
+              references: ['src/app.ts', 'src/utils.ts'],
+              toolsUsed: ['read_file']
+            },
+            createdAt: Date.now() - 5000,
+            updatedAt: Date.now()
+          }
+        ]),
+        onAgentRuntimeTaskChanged,
+        onAgentRuntimeSessionChanged,
+        onAgentRuntimeWorkerChanged
+      }));
+
+      const user = userEvent.setup();
+      await act(async () => { render(<App />); });
+
+      await user.click(screen.getByRole('tab', { name: 'Task Activity' }));
+
+      expect(await screen.findByText('TestAgent (chat)')).toBeInTheDocument();
+      // Summary text may be split across elements, use findByText with exact: false
+      expect(await screen.findByText(/Task completed successfully/)).toBeInTheDocument();
+      expect(screen.getByText(/src\/app\.ts, src\/utils\.ts/)).toBeInTheDocument();
+    });
+
+    it('renders subagent task', async () => {
+      const onAgentRuntimeTaskChanged = vi.fn().mockReturnValue(() => undefined);
+      const onAgentRuntimeSessionChanged = vi.fn().mockReturnValue(() => undefined);
+      const onAgentRuntimeWorkerChanged = vi.fn().mockReturnValue(() => undefined);
+
+      setAgentDeck(mockPreloadApi({
+        listAgentRuntimeTasks: vi.fn().mockResolvedValue([
+          {
+            id: 'subtask-1',
+            sessionId: 'session-1',
+            parentTaskId: 'parent-task-1',
+            kind: 'subagent',
+            agentName: 'SubAgent',
+            modelId: 'default',
+            prompt: 'Review code',
+            status: 'running',
+            permissionScope: { sessionId: 'session-1', taskId: 'subtask-1', kind: 'subagent', allowedTools: [] },
+            context: [],
+            toolsUsed: [],
+            createdAt: Date.now() - 5000,
+            updatedAt: Date.now()
+          }
+        ]),
+        onAgentRuntimeTaskChanged,
+        onAgentRuntimeSessionChanged,
+        onAgentRuntimeWorkerChanged
+      }));
+
+      const user = userEvent.setup();
+      await act(async () => { render(<App />); });
+
+      await user.click(screen.getByRole('tab', { name: 'Task Activity' }));
+
+      // Check that subagent task is rendered
+      expect(await screen.findByText(/SubAgent/)).toBeInTheDocument();
+      expect(screen.getByText('running')).toBeInTheDocument();
+    });
+
+    it('renders task with error', async () => {
+      const onAgentRuntimeTaskChanged = vi.fn().mockReturnValue(() => undefined);
+      const onAgentRuntimeSessionChanged = vi.fn().mockReturnValue(() => undefined);
+      const onAgentRuntimeWorkerChanged = vi.fn().mockReturnValue(() => undefined);
+
+      setAgentDeck(mockPreloadApi({
+        listAgentRuntimeTasks: vi.fn().mockResolvedValue([
+          {
+            id: 'task-1',
+            sessionId: 'session-1',
+            kind: 'chat',
+            agentName: 'TestAgent',
+            modelId: 'default',
+            prompt: 'Hello',
+            status: 'failed',
+            permissionScope: { sessionId: 'session-1', taskId: 'task-1', kind: 'parent', allowedTools: [] },
+            context: [],
+            toolsUsed: [],
+            error: 'Connection timeout',
+            createdAt: Date.now() - 5000,
+            updatedAt: Date.now()
+          }
+        ]),
+        onAgentRuntimeTaskChanged,
+        onAgentRuntimeSessionChanged,
+        onAgentRuntimeWorkerChanged
+      }));
+
+      const user = userEvent.setup();
+      await act(async () => { render(<App />); });
+
+      await user.click(screen.getByRole('tab', { name: 'Task Activity' }));
+
+      expect(await screen.findByText('Error: Connection timeout')).toBeInTheDocument();
+    });
+  });
+
+  // ?? Runtime event log in task activity ???????????????????????????????
+  describe('runtime event log', () => {
+    it('shows events from workers panel in task activity', async () => {
+      const onSessionChanged = vi.fn().mockReturnValue(() => undefined);
+      setAgentDeck(mockPreloadApi({
+        onAgentRuntimeSessionChanged: onSessionChanged,
+        onAgentRuntimeSessionCrashed: vi.fn().mockReturnValue(() => undefined)
+      }));
+
+      const user = userEvent.setup();
+      await act(async () => { render(<App />); });
+
+      await user.click(screen.getByRole('tab', { name: 'Task Activity' }));
+
+      await act(async () => {
+        const handler = onSessionChanged.mock.calls[0]![0] as (s: AgentRuntimeSessionState) => void;
+        handler({
+          id: 'session-1',
+          chatTabId: 'tab-1',
+          modelId: 'default',
+          agentName: 'agent',
+          status: 'active',
+          permissionScope: { sessionId: 'session-1', taskId: 'task-1', kind: 'parent', allowedTools: [] },
+          context: [],
+          eventLog: [
+            { id: 'evt-1', sessionId: 'session-1', taskId: 'task-1', workerId: 'worker-1', type: 'worker-started', message: 'Worker started', timestamp: Date.now() }
+          ],
+          workers: [],
+          tasks: []
+        });
+      });
+
+      // Use getAllByText since the event message appears in both the event log and the status
+      const elements = await screen.findAllByText('Worker started');
+      expect(elements.length).toBeGreaterThanOrEqual(1);
     });
   });
 });
