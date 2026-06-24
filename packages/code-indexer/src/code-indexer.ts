@@ -336,5 +336,7 @@ function sha256(value: string): string {
 }
 
 export function relativePath(root: string, filePath: string): string {
-  return relative(root, filePath).replaceAll('\\', '/');
+  const rootNorm = root.replaceAll('\\', '/');
+  const fileNorm = filePath.replaceAll('\\', '/');
+  return relative(rootNorm, fileNorm).replaceAll('\\', '/');
 }

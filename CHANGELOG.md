@@ -5,6 +5,10 @@ Wszystkie istotne zmiany w projektu s─ů dokumentowane w tym pliku.
 Format zgodny z [Keep a Changelog](https://keepachangelog.com/pl/1.0.0/).
 
 ## [Unreleased]
+### Fixed
+
+- Naprawiono `relativePath` w code-indexer — obsługa Windows-style backslash paths (normalizacja przed `path.relative`).
+
 ### Added
 
 - Dodano 105 testów jednostkowych dla code-indexer (chunking, code-indexer, utils, index) — pokrycie testami wzrosło do >80% dla wszystkich modułów code-indexer.
