@@ -8,6 +8,7 @@ Format zgodny z [Keep a Changelog](https://keepachangelog.com/pl/1.0.0/).
 ### Fixed
 
 - Naprawiono `relativePath` w code-indexer — obsługa Windows-style backslash paths (normalizacja przed `path.relative`).
+- Naprawiono podwójny flag `i` w regex `extractMarkdownTags` w memory-service (TS1500).
 
 ### Added
 
