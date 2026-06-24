@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { DEFAULT_THEME_SETTINGS, isIdentitySession, type AgentDeckPreloadApi, type ApprovalDecision, type Conflict, type EditorDiagnostic, type EventLogEntry, type FsChangeEvent, type IdentitySession, type MemoryConflict, type MemoryConflictResolution, type StartupState, type ThemePreference, type ThemeSettings, type ToolCallResponse, type ToolClassification, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection, type AgentRuntimeEventEntry, type AgentRuntimeSessionState, type AgentRuntimeTaskState, type AgentRuntimeWorkerState, type PermissionApprovalInput, type PermissionDecision } from '@agentdeck/shared';
+import { DEFAULT_THEME_SETTINGS, isIdentitySession, type AgentDeckPreloadApi, type ApprovalDecision, type Conflict, type EditorDiagnostic, type EventLogEntry, type FsChangeEvent, type IdentitySession, type MemoryConflict, type StartupState, type ThemePreference, type ThemeSettings, type ToolCallResponse, type ToolClassification, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection, type AgentRuntimeEventEntry, type AgentRuntimeSessionState, type AgentRuntimeTaskState, type AgentRuntimeWorkerState, type PermissionApprovalInput, type PermissionDecision } from '@agentdeck/shared';
 
 import { ChatPanel, ChatTabs, useChatStore } from './chat';
 import { EditorSurface } from './editor';

@@ -4,7 +4,7 @@ import { existsSync, unlinkSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createLocalStore, float32ToUint8, lexicalEmbedding, redactedEventMessage } from '@agentdeck/memory-service';
-// @ts-ignore - _resetMockDb is exported from node:sqlite mock (see vitest.config.ts alias)
+// @ts-expect-error - _resetMockDb is exported from node:sqlite mock (see vitest.config.ts alias)
 import { _resetMockDb } from 'node:sqlite';
 
 function tempDbPath(): string {
