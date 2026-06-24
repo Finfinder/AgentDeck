@@ -5,7 +5,21 @@ Wszystkie istotne zmiany w projektu s─ů dokumentowane w tym pliku.
 Format zgodny z [Keep a Changelog](https://keepachangelog.com/pl/1.0.0/).
 
 ## [Unreleased]
+### Added
 
+- Dodano 105 testów jednostkowych dla code-indexer (chunking, code-indexer, utils, index) — pokrycie testami wzrosło do >80% dla wszystkich modułów code-indexer.
+- Dodano 171 testów jednostkowych dla session-broker, local-store, memory-service, tool-router i ipc type guards — pokrycie testami wzrosło do >80% dla wszystkich wymienionych modułów.
+- Dodano testy error paths dla AgentRuntime (createSession, startWorker, runWorker, stopWorker, resumeWorker, stopSession, startSubagent, updateSessionModel, updateSessionAllowedTools, waitForWorker).
+- Dodano testy dla LocalStore (appendEvent, appendPatch, upsertMemory, upsertChunk, deleteChunksForFile, getStats, getStoredIndexInfo, isStale, deleteAllChunks, redactedEventMessage).
+- Dodano testy dla MemoryService (read, list, proposeEdit, applyEdit, write, describeEntry, generateDiff, riskLevel).
+- Dodano testy dla ToolRouter z memory service integration i event logging.
+- Dodano exhaustive testy dla IPC type guards (permission, identity, editor, file operation, tool, patch, conflict, agent runtime).
+- Naprawiono mock node-sqlite — normalizacja undefined do null w readAll.
+- Dodano pakiet `@agentdeck/memory-service` — zarządzanie pamięcią agenta z listowaniem, odczytem, propozycjami edycji, rozwiązywaniem konfliktów i redakcją.
+- Dodano pakiet `@agentdeck/code-indexer` — indeksowanie kodu z chunkingiem, wykrywaniem języka, budowaniem indeksem i retrievalem.
+- Dodano IPC handlery Phase 9 (listMemories, readMemory, proposeMemoryChange, applyMemoryChange, memoryConflictResolve, indexCodeFile, retrieveCode, rebuildCodeIndex).
+- Dodano `MemoryReviewDialog` do przeglądania i zarządzania plikami pamięci.
+- Dodano 17 testów jednostkowych dla memory-service, code-indexer, redaction, local-store i MemoryReviewDialog.
 ### Fixed
 
 - Zaktualizowano dompurify z 3.4.8 do 3.4.11 poprzez npm overrides — naprawiono podatność GHSA-vxr8-fq34-vvx9 (Trusted Types policy survives clearConfig).

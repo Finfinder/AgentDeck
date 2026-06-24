@@ -14,6 +14,14 @@ import {
   isFsChangeEvent,
   isIdentitySession,
   isIdentitySessionWarning,
+  isIndexFileResult,
+  isMemoryApplyResult,
+  isMemoryChangeProposal,
+  isMemoryConflict,
+  isMemoryEntry,
+  isMemoryReadResult,
+  isRebuildIndexResult,
+  isRetrievalResult,
   isModelGatewayConfig,
   isModelProviderConfig,
   isSendMessageResult,
@@ -45,6 +53,14 @@ import {
   type PatchSet,
   type Conflict,
   type ConflictResolution,
+  type MemoryApplyResult,
+  type MemoryChangeProposal,
+  type MemoryConflict,
+  type MemoryEdit,
+  type MemoryConflictResolution,
+  type MemoryScope,
+  type RetrievalQuery,
+  type RetrievalResult,
 
   type WorkspaceEditInput,
 } from '@agentdeck/shared';
@@ -310,6 +326,52 @@ const api: AgentDeckPreloadApi = {
     chrome: process.versions.chrome ?? 'unknown',
     electron: process.versions.electron ?? 'unknown',
     node: process.versions.node
+  },
+  // Phase 9: Memory Service and Code Indexer
+  listMemories: async (scope?: MemoryScope) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.listMemories, scope);
+    return Array.isArray(value) ? value.filter(isMemoryEntry) : [];
+  },
+  readMemory: async (scope: MemoryScope, filePath: string) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.readMemory, scope, filePath);
+    return isMemoryReadResult(value) ? value : { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Unexpected response from main process.' };
+  },
+  proposeMemoryChange: async (edit: MemoryEdit) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.proposeMemoryChange, edit);
+    if (isMemoryChangeProposal(value)) return value;
+    return { scope: edit.scope, filePath: edit.filePath, patch: { id: 'error', filePath: edit.filePath, baseHash: '', operations: [], author: 'system', riskLevel: 'low' as const, createdAt: 0 } };
+  },
+  applyMemoryChange: async (proposal: MemoryChangeProposal): Promise<MemoryApplyResult> => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.applyMemoryChange, proposal);
+    return isMemoryApplyResult(value) ? value : { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Unexpected response.' };
+  },
+  onMemoryConflictDetected: (handler: (conflict: MemoryConflict) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (isMemoryConflict(value)) handler(value);
+    };
+    ipcRenderer.on(IPC_CHANNELS.memoryConflictDetected, listener);
+    return () => { ipcRenderer.removeListener(IPC_CHANNELS.memoryConflictDetected, listener); };
+  },
+  resolveMemoryConflict: async (resolution: MemoryConflictResolution): Promise<void> => {
+    await ipcRenderer.invoke(IPC_CHANNELS.memoryConflictResolve, resolution);
+  },
+  indexCodeFile: async (filePath: string, scope?: MemoryScope) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.indexCodeFile, filePath, scope);
+    if (isIndexFileResult(value)) {
+      if (value.status === 'ok') {
+        return { status: 'ok', chunks: value.chunks, stored: value.stored };
+      }
+      return { status: 'error', code: value.code, message: value.message };
+    }
+    return { status: 'error', code: 'UNKNOWN', message: 'Unexpected response from main process.' };
+  },
+  retrieveCode: async (query: RetrievalQuery) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.retrieveCode, query);
+    return Array.isArray(value) ? value.filter(isRetrievalResult) as readonly RetrievalResult[] : [];
+  },
+  rebuildCodeIndex: async (roots?: readonly string[]) => {
+    const value: unknown = await ipcRenderer.invoke(IPC_CHANNELS.rebuildCodeIndex, roots);
+    return isRebuildIndexResult(value) ? value : { chunks: [], stats: { chunks: 0, files: 0, languages: {}, indexVersion: 'phase9-v1' } };
   }
 };
 

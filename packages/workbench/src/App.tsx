@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { DEFAULT_THEME_SETTINGS, isIdentitySession, type AgentDeckPreloadApi, type ApprovalDecision, type Conflict, type EditorDiagnostic, type EventLogEntry, type FsChangeEvent, type IdentitySession, type StartupState, type ThemePreference, type ThemeSettings, type ToolCallResponse, type ToolClassification, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection, type AgentRuntimeEventEntry, type AgentRuntimeSessionState, type AgentRuntimeTaskState, type AgentRuntimeWorkerState, type PermissionApprovalInput, type PermissionDecision } from '@agentdeck/shared';
+import { DEFAULT_THEME_SETTINGS, isIdentitySession, type AgentDeckPreloadApi, type ApprovalDecision, type Conflict, type EditorDiagnostic, type EventLogEntry, type FsChangeEvent, type IdentitySession, type MemoryConflict, type StartupState, type ThemePreference, type ThemeSettings, type ToolCallResponse, type ToolClassification, type WorkspaceModel, type WorkspaceOpenKind, type WorkspaceSelection, type AgentRuntimeEventEntry, type AgentRuntimeSessionState, type AgentRuntimeTaskState, type AgentRuntimeWorkerState, type PermissionApprovalInput, type PermissionDecision } from '@agentdeck/shared';
 
 import { ChatPanel, ChatTabs, useChatStore } from './chat';
 import { EditorSurface } from './editor';
@@ -9,6 +9,7 @@ import { useEditorStore } from './editor/useEditorStore';
 import { MenuBar } from './MenuBar';
 import { ProblemsPanel } from './ProblemsPanel';
 import { SidebarContent } from './SidebarContent';
+import { MemoryReviewDialog } from './MemoryReviewDialog';
 
 type BottomPanelName = 'problems' | 'services' | 'workers' | 'task-activity' | 'output' | 'event-log';
 
@@ -617,6 +618,7 @@ export function App() {
   // ?? Phase 7: Tool approval state ????????????????????????????????????????
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [pendingPatchConflict, setPendingPatchConflict] = useState<PatchConflict | null>(null);
+  const [pendingMemoryConflict, setPendingMemoryConflict] = useState<MemoryConflict | null>(null);
   const handleRuntimeCrash = useCallback((session: AgentRuntimeSessionState, error: { message: string }) => {
     const latestMessage = getLatestCrashMessage(session) ?? error.message;
 
@@ -713,6 +715,32 @@ export function App() {
 
     setPendingPatchConflict(null);
   }, [agent, pendingPatchConflict]);
+
+  // Subscribe to memory conflict events from main process
+  useEffect(() => {
+    if (typeof agent.onMemoryConflictDetected !== 'function') return;
+
+    const dispose = agent.onMemoryConflictDetected((conflict: MemoryConflict) => {
+      setPendingMemoryConflict(conflict);
+    });
+
+    return dispose;
+  }, [agent]);
+
+  const handleMemoryConflictResolve = useCallback(async (action: 'apply' | 'skip' | 'edit') => {
+    if (!pendingMemoryConflict) return;
+
+    try {
+      const resolution = action === 'edit'
+        ? { conflictId: pendingMemoryConflict.id, action, text: '' }
+        : { conflictId: pendingMemoryConflict.id, action };
+      await agent.resolveMemoryConflict?.(resolution);
+    } catch {
+      // silently ignore — conflict may have expired
+    }
+
+    setPendingMemoryConflict(null);
+  }, [agent, pendingMemoryConflict]);
 
   // Poll IPC for workspace-level diagnostics (supports E2E mocks and future LSP integration)
   useEffect(() => {
@@ -1326,6 +1354,12 @@ export function App() {
         <PatchConflictDialog
           conflict={pendingPatchConflict}
           onResolve={handlePatchConflictResolve}
+        />
+      )}
+      {pendingMemoryConflict && (
+        <MemoryReviewDialog
+          conflict={pendingMemoryConflict}
+          onResolve={handleMemoryConflictResolve}
         />
       )}
     </main>

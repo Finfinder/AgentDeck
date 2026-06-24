@@ -7,7 +7,11 @@ import { mkdir, readdir } from 'node:fs/promises';
 
 import { applyWorkspaceEdit, bootstrapDesktopServices, createEditorFile, createSettingsService, createStartupErrorState, createWorkspaceService, getDiagnostics, markBufferDirty, readEditorFile, showDiff, createIdentityService, type IdentityService, type SettingsService, type WorkspaceService, writeEditorFile, createModelGateway, createDefaultAdapters, type ModelGateway, type ToolExecutionContext } from '@agentdeck/services';
 import { createPermissionBroker } from '@agentdeck/permission-broker';
+import { checkSensitivePath } from '@agentdeck/services';
 import type { PermissionDecision } from '@agentdeck/permission-broker';
+import { createLocalStore, createMemoryService } from '@agentdeck/memory-service';
+import { createCodeIndexer } from '@agentdeck/code-indexer';
+import type Electron from 'electron';
 import {
   DEFAULT_THEME_SETTINGS,
   IPC_CHANNELS,
@@ -20,9 +24,14 @@ import {
   isChatStreamEvent,
   isChatTabState,
   isPermissionApprovalInput,
+  isRetrievalQuery,
   isThemeSettings,
   isWorkspaceEditInput,
   isWorkspaceOpenRequest,
+  isMemoryConflictResolution,
+  isMemoryScope,
+  type MemoryChangeProposal,
+  type MemoryScope,
   type ModelProviderId,
   type SearchQuery,
   type StartupState,
@@ -64,18 +73,18 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
 
   ipcMain.handle(IPC_CHANNELS.openWorkspace, (_event, path: unknown, kind: unknown) => {
     if (typeof path !== 'string' || (kind !== 'folder' && kind !== 'workspace-file')) {
-      return { status: 'error', code: 'INVALID_JSONC', message: 'Invalid workspace open request.' };
+      throw new Error('Invalid workspace open request.');
     }
     return workspaceService.openWorkspace(path, kind);
   });
 
   ipcMain.handle(IPC_CHANNELS.listDirectory, (_event, path: unknown) => {
-    if (typeof path !== 'string') return { path: '', entries: [] };
+    if (typeof path !== 'string') throw new Error('Invalid path.');
     return workspaceService.listDirectory(path);
   });
 
   ipcMain.handle(IPC_CHANNELS.searchFiles, (_event, value: unknown) => {
-    if (!isSearchQuery(value)) return [];
+    if (!isSearchQuery(value)) throw new Error('Invalid search query.');
     return workspaceService.searchFiles(value);
   });
 
@@ -89,14 +98,14 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
 
   ipcMain.handle(IPC_CHANNELS.readFile, async (_event, filePath: unknown) => {
     if (typeof filePath !== 'string') {
-      return { status: 'error', code: 'UNKNOWN', message: 'Invalid file path.' };
+      throw new Error('Invalid file path.');
     }
     return readEditorFile(filePath);
   });
 
   ipcMain.handle(IPC_CHANNELS.writeFile, async (_event, filePath: unknown, content: unknown) => {
     if (typeof filePath !== 'string' || typeof content !== 'string') {
-      return { status: 'error', code: 'UNKNOWN', message: 'Invalid arguments.' };
+      throw new Error('Invalid arguments.');
     }
     return writeEditorFile(filePath, content);
   });
@@ -109,14 +118,14 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
 
   ipcMain.handle(IPC_CHANNELS.deleteFile, async (_event, filePath: unknown) => {
     if (typeof filePath !== 'string') {
-      return { status: 'error', code: 'UNKNOWN', message: 'Invalid file path.' };
+      throw new Error('Invalid file path.');
     }
     return workspaceService.deleteFile(filePath);
   });
 
   ipcMain.handle(IPC_CHANNELS.renameFile, async (_event, oldPath: unknown, newPath: unknown) => {
     if (typeof oldPath !== 'string' || typeof newPath !== 'string') {
-      return { status: 'error', code: 'UNKNOWN', message: 'Invalid file paths.' };
+      throw new Error('Invalid file paths.');
     }
     return workspaceService.renameFile(oldPath, newPath);
   });
@@ -136,19 +145,14 @@ function registerIpcHandlers(settingsService: SettingsService, workspaceService:
 
   ipcMain.handle(IPC_CHANNELS.applyWorkspaceEdit, async (_event, edit: unknown) => {
     if (!isWorkspaceEditInput(edit)) {
-      return { status: 'error', code: 'UNKNOWN', message: 'Invalid workspace edit payload.' } as const;
+      throw new Error('Invalid workspace edit payload.');
     }
-    try {
-      return await applyWorkspaceEdit(edit);
-    } catch (err) {
-      console.error('[main] applyWorkspaceEdit failed:', err);
-      return { status: 'error', code: 'UNKNOWN', message: String(err) } as const;
-    }
+    return applyWorkspaceEdit(edit);
   });
 
   ipcMain.handle(IPC_CHANNELS.showDiff, async (_event, input: unknown) => {
     if (!isDiffInput(input)) {
-      return { status: 'error', code: 'UNKNOWN', message: 'showDiff: invalid input - expected { original: string, modified: string }' } as const;
+      throw new Error('showDiff: invalid input - expected { original: string, modified: string }');
     }
     return showDiff(input.original, input.modified);
   });
@@ -1357,6 +1361,130 @@ async function resolveStartupState(): Promise<StartupState> {
   }
 }
 
+function registerPhase9IpcHandlers(
+  localStore: ReturnType<typeof createLocalStore>,
+  memoryService: ReturnType<typeof createMemoryService>,
+  codeIndexer: ReturnType<typeof createCodeIndexer>,
+  getMainWindow: () => Electron.BrowserWindow | null = () => null
+): void {
+  const pendingMemoryProposals = new Map<string, MemoryChangeProposal>();
+  ipcMain.handle(IPC_CHANNELS.listMemories, async (_event, scope: unknown) => {
+    const result = await memoryService.list(scope as MemoryScope);
+    if (result.status === 'ok') return result.entries;
+    throw new Error(result.message ?? 'Unknown memory service error');
+  });
+
+  ipcMain.handle(IPC_CHANNELS.readMemory, async (_event, scope: unknown, filePath: unknown) => {
+    if (typeof filePath !== 'string') {
+      return { status: 'error' as const, code: 'UNKNOWN' as const, message: 'Invalid filePath.' };
+    }
+    return memoryService.read(scope as MemoryScope, filePath);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.proposeMemoryChange, async (_event, edit: unknown) => {
+    if (!isRecord(edit) || typeof edit.filePath !== 'string' || typeof edit.text !== 'string') {
+      throw new TypeError('Invalid edit payload.');
+    }
+    if (!isMemoryScope(edit.scope)) {
+      throw new TypeError('Invalid memory scope.');
+    }
+    // Defense-in-depth: validate path containment within memory directory.
+    // A compromised renderer could attempt to read arbitrary files via path traversal.
+    let validatedPath: string;
+    try {
+      validatedPath = memoryService.resolveValidatedPath(edit.filePath);
+    } catch {
+      return { status: 'error', code: 'FORBIDDEN', message: 'Path outside memory directory.' };
+    }
+    const result = await memoryService.proposeEdit({
+      scope: edit.scope,
+      filePath: validatedPath,
+      text: edit.text
+    });
+    if (result.status === 'ok') return result.proposal;
+    throw new Error(result.message);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.applyMemoryChange, async (_event, proposal: unknown) => {
+    if (!isRecord(proposal) || typeof proposal.filePath !== 'string') {
+      throw new Error('Invalid proposal payload.');
+    }
+    // Defense-in-depth: validate path containment within memory directory.
+    // A compromised renderer could attempt to overwrite arbitrary files.
+    const validatedPath = memoryService.resolveValidatedPath(proposal.filePath);
+    const sensitiveCheck = checkSensitivePath(validatedPath);
+    if (sensitiveCheck.isSensitive) {
+      return { status: 'error', code: 'ACCESS_DENIED', message: `Zapis na wrażliwej ścieżce zabroniony: ${validatedPath}` };
+    }
+    const result = await memoryService.applyEdit({
+      scope: proposal.scope as MemoryScope,
+      filePath: validatedPath,
+      patch: proposal.patch as MemoryChangeProposal['patch'],
+      diff: proposal.diff as string | undefined
+    });
+    if (result.status === 'error' && result.conflict) {
+      pendingMemoryProposals.set(result.conflict.id, {
+        scope: proposal.scope as MemoryScope,
+        filePath: validatedPath,
+        patch: proposal.patch as MemoryChangeProposal['patch'],
+        diff: proposal.diff as string | undefined
+      });
+      const mw = getMainWindow();
+      if (mw) {
+        mw.webContents.send(IPC_CHANNELS.memoryConflictDetected, result.conflict);
+      }
+    }
+    return result;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.memoryConflictResolve, async (_event, resolution: unknown) => {
+    if (!isMemoryConflictResolution(resolution)) {
+      throw new Error('Invalid memory conflict resolution.');
+    }
+    const pending = pendingMemoryProposals.get(resolution.conflictId);
+    if (!pending) {
+      return { status: 'error', code: 'NOT_FOUND', message: 'Nie znaleziono konfliktu do rozwiązania.' };
+    }
+    pendingMemoryProposals.delete(resolution.conflictId);
+    if (resolution.action === 'skip') {
+      return { status: 'ok' };
+    }
+    if (resolution.action === 'edit') {
+      const entry = await memoryService.write(pending.scope, pending.filePath, resolution.text);
+      return { status: 'ok', entry };
+    }
+    const result = await memoryService.applyEdit(pending);
+    if (result.status === 'error' && result.conflict) {
+      pendingMemoryProposals.set(result.conflict.id, pending);
+      const mw = getMainWindow();
+      if (mw) {
+        mw.webContents.send(IPC_CHANNELS.memoryConflictDetected, result.conflict);
+      }
+    }
+    return result;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.indexCodeFile, async (_event, filePath: unknown, scope: unknown) => {
+    if (typeof filePath !== 'string') {
+      throw new Error('Invalid filePath.');
+    }
+    return codeIndexer.indexFile(filePath, scope as MemoryScope | undefined);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.retrieveCode, async (_event, query: unknown) => {
+    if (!isRetrievalQuery(query)) {
+      throw new TypeError('Invalid retrieval query.');
+    }
+    return codeIndexer.retrieve(query);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.rebuildCodeIndex, async (_event, roots: unknown) => {
+    const rootArray = Array.isArray(roots) ? roots as string[] : [];
+    return codeIndexer.rebuildIndex(rootArray);
+  });
+}
+
+
 function createMainWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 1280,
@@ -1551,6 +1679,18 @@ async function start(): Promise<void> {
   });
 
   const mainWindow = createMainWindow();
+  // Phase 9: Memory Service and Code Indexer
+  const phase9Store = createLocalStore(join(app.getPath('userData'), 'agentdeck-local-store.db'));
+  const phase9Memory = createMemoryService({ author: 'agentdeck', baseDir: app.getPath('userData') });
+  const phase9Indexer = createCodeIndexer({
+    store: phase9Store,
+    memoryService: phase9Memory,
+    workspaceRoots: workspaceService.getWorkspaceRoots(),
+    indexVersion: 'phase9-v1'
+  });
+
+  registerPhase9IpcHandlers(phase9Store, phase9Memory, phase9Indexer, () => mainWindow);
+
   registerIpcHandlers(settingsService, workspaceService, mainWindow, identityService, modelGateway);
   registerDevToolsShortcut(mainWindow);
 }

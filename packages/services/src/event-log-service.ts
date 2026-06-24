@@ -28,14 +28,19 @@ export class EventLogService extends EventEmitter {
 
   /**
    * Append a new event log entry.
+   * The message and filePath are sanitized to strip potential secrets before storage.
    * Emits 'update' with the new entry for real-time UI notifications.
    */
   append(entry: Omit<EventLogEntry, 'id' | 'timestamp'>): EventLogEntry {
-    const fullEntry: EventLogEntry = {
+    const base = {
       ...entry,
+      message: sanitizeMessage(entry.message),
       id: generateEventId(),
       timestamp: Date.now()
     };
+    const fullEntry: EventLogEntry = entry.filePath === undefined
+      ? base
+      : { ...base, filePath: sanitizeFilePath(entry.filePath) };
 
     this.entries.push(fullEntry);
 
@@ -50,7 +55,7 @@ export class EventLogService extends EventEmitter {
 
   /**
    * Append a patch-related event with diff data.
-   * The diff is sanitized to strip potential secrets before storage.
+   * The diff, message, and filePath are sanitized to strip potential secrets before storage.
    */
   appendPatchEvent(params: {
     level: EventLogLevel;
@@ -144,45 +149,116 @@ export class EventLogService extends EventEmitter {
 }
 
 /**
+ * Set of regex patterns for detecting secrets in text.
+ * Each pattern has a description for auditability.
+ */
+const SECRET_PATTERNS = {
+  // KEY=VALUE or KEY: VALUE pairs — redact the value portion
+  keyValue: [
+    /(api[_-]?key|apikey)\s*[:=]\s*\S+/gi,
+    /(password|passwd|pwd)\s*[:=]\s*\S+/gi,
+    /(secret|client[_-]?secret|app[_-]?secret)\s*[:=]\s*\S+/gi,
+    /(token|access[_-]?token|refresh[_-]?token|id[_-]?token)\s*[:=]\s*\S+/gi,
+    /(authorization|bearer)\s+\S+/gi,
+    /(private[_-]?key|secret[_-]?key|signing[_-]?key)\s*[:=]\s*\S+/gi,
+    /(connection[_-]?string|conn[_-]?str)\s*[:=]\s*\S+/gi,
+    /(account[_-]?key|storage[_-]?key)\s*[:=]\s*\S+/gi,
+  ],
+  // Standalone secret values (no key prefix) — replace entire match
+  standalone: [
+    // AWS Access Key ID
+    /AKIA[0-9A-Z]{16}/g,
+    // GitHub PAT (classic)
+    /ghp_[A-Za-z0-9]{36}/g,
+    // GitHub PAT (fine-grained)
+    /github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}/g,
+    // OpenAI API key
+    /sk-[A-Za-z0-9]{48}/g,
+    // Generic API key prefix
+    /sk-proj-[A-Za-z0-9]{48,}/g,
+    // JWT (three base64url segments separated by dots)
+    /eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
+    // Azure GUID-style keys (32 hex chars, often with Base64 padding)
+    /[A-Za-z0-9+/]{32,}={0,2}/g,
+    // Google service account private key header marker
+    /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/g,
+    // Generic high-entropy hex strings (40+ chars — likely secrets)
+    /\b[0-9a-f]{40,}\b/gi,
+  ],
+};
+
+/**
  * Sanitize a diff string by redacting lines that may contain secrets.
- * Lines matching common secret patterns (API keys, passwords, tokens, etc.)
- * are replaced with a placeholder to prevent secret leakage into the event log.
+ * Lines matching common secret patterns (API keys, passwords, tokens, JWT,
+ * Azure keys, Google keys, connection strings, etc.) are replaced with
+ * a placeholder to prevent secret leakage into the event log.
  */
 function sanitizeDiff(diff: string): string {
-  // Patterns that match KEY=VALUE or KEY: VALUE pairs
-  const keyValuePatterns = [
-    /(?:api[_-]?key|apikey)\s*[:=]\s*\S+/gi,
-    /(?:password|passwd|pwd)\s*[:=]\s*\S+/gi,
-    /(?:secret|token|access[_-]?token)\s*[:=]\s*\S+/gi,
-    /(?:authorization|bearer)\s+\S+/gi,
-    /(?:private[_-]?key|secret[_-]?key)\s*[:=]\s*\S+/gi,
-  ];
-
-  // Patterns that match standalone secret values (no key prefix)
-  const standalonePatterns: Array<{ pattern: RegExp; prefix: string }> = [
-    { pattern: /AKIA[0-9A-Z]{16}/g, prefix: 'AWS_ACCESS_KEY_ID' }, // AWS access key ID
-    { pattern: /ghp_[A-Za-z0-9]{36}/g, prefix: 'GitHub PAT' }, // GitHub PAT
-    { pattern: /sk-[A-Za-z0-9]{48}/g, prefix: 'API key' }, // OpenAI API key
-  ];
-
   return diff
     .split('\n')
     .map(line => {
       let sanitized = line;
-      // Handle KEY=VALUE patterns
-      for (const pattern of keyValuePatterns) {
-        sanitized = sanitized.replace(pattern, (match) => {
-          const keyPart = match.split(/[:=]/)[0];
-          return `${keyPart}=[REDACTED]`;
+      // Handle KEY=VALUE patterns — preserve key, redact value
+      for (const pattern of SECRET_PATTERNS.keyValue) {
+        sanitized = sanitized.replace(pattern, (_match, key) => {
+          return `${key}=[REDACTED]`;
         });
       }
-      // Handle standalone secret patterns (replace entire match)
-      for (const { pattern } of standalonePatterns) {
+      // Handle standalone secret patterns — replace entire match
+      for (const pattern of SECRET_PATTERNS.standalone) {
         sanitized = sanitized.replace(pattern, '[REDACTED]');
       }
       return sanitized;
     })
     .join('\n');
+}
+
+/**
+ * Sanitize a message string by redacting embedded secrets.
+ * Unlike sanitizeDiff which operates on diff lines, this handles
+ * secrets that may appear inline within arbitrary message text.
+ */
+function sanitizeMessage(message: string): string {
+  let sanitized = message;
+  // Apply all standalone patterns (JWT, AWS keys, GitHub tokens, etc.)
+  for (const pattern of SECRET_PATTERNS.standalone) {
+    sanitized = sanitized.replace(pattern, '[REDACTED]');
+  }
+  // Apply key-value patterns for inline mentions like "token=abc123"
+  for (const pattern of SECRET_PATTERNS.keyValue) {
+    sanitized = sanitized.replace(pattern, (_match, key) => {
+      return `${key}=[REDACTED]`;
+    });
+  }
+  return sanitized;
+}
+
+/**
+ * Sanitize a file path by redacting usernames and sensitive directory names.
+ * Replaces home directory paths and usernames with placeholders.
+ */
+function sanitizeFilePath(filePath: string): string {
+  // Replace Windows user profile paths: C:\\Users\\Username\\... → C:\\Users\\[USER]\\...
+  let sanitized = filePath.replace(
+    /([A-Z]:\\)Users\\[^\\]+\\/gi,
+    '$1Users\\[USER]\\'
+  );
+  // Replace Unix home paths: /home/username/... → /home/[USER]/...
+  sanitized = sanitized.replace(
+    /\/home\/[^/]+\//g,
+    '/home/[USER]/'
+  );
+  // Replace Unix home paths: /Users/username/... (macOS) → /Users/[USER]/...
+  sanitized = sanitized.replace(
+    /\/Users\/[^/]+\//g,
+    '/Users/[USER]/'
+  );
+  // Replace ~ expansion: ~/... → ~[USER]/...
+  sanitized = sanitized.replace(
+    /~[^/]*\//g,
+    '~[USER]/'
+  );
+  return sanitized;
 }
 
 // Singleton instance for the main process

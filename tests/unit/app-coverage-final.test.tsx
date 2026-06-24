@@ -355,6 +355,22 @@ describe('App — final coverage push', () => {
       await act(async () => { render(<App />); });
       const identityBtns = await screen.findAllByRole('button', { name: 'Logged in as testuser' });
       expect(identityBtns.length).toBeGreaterThanOrEqual(1);
+      // Verify no avatar image is rendered (avatar_url is undefined)
+      expect(document.querySelector('.avatar')).not.toBeInTheDocument();
+    });
+
+    it('shows logged-in with avatar', async () => {
+      setAgentDeck(mockPreloadApi({
+        getIdentitySession: vi.fn().mockResolvedValue({ isLoggedIn: true, profile: { login: 'testuser', avatar_url: 'https://example.com/avatar.png' } }),
+        onIdentityChange: vi.fn().mockReturnValue(() => undefined)
+      }));
+      await act(async () => { render(<App />); });
+      const identityBtns = await screen.findAllByRole('button', { name: 'Logged in as testuser' });
+      expect(identityBtns.length).toBeGreaterThanOrEqual(1);
+      // Verify avatar image is rendered
+      const avatarImg = document.querySelector('.avatar') as HTMLImageElement;
+      expect(avatarImg).toBeTruthy();
+      expect(avatarImg).toHaveAttribute('src', 'https://example.com/avatar.png');
     });
 
     it('shows sign-in when not logged in', async () => {
@@ -517,6 +533,41 @@ describe('App — final coverage push', () => {
       await userEvent.click(approveBtn);
       expect(submitApprovalMock).toHaveBeenCalledWith(expect.objectContaining({ callId: 'call-1', approved: true, remember: false }));
     });
+
+    it('denies tool call', async () => {
+      const onToolApprovalRequest = vi.fn().mockReturnValue(() => undefined);
+      const submitApprovalMock = vi.fn().mockResolvedValue({ status: 'ok' });
+      setAgentDeck(mockPreloadApi({ onToolApprovalRequest, submitApproval: submitApprovalMock }));
+      await act(async () => { render(<App />); });
+      await act(async () => {
+        const h = onToolApprovalRequest.mock.calls[0]![0] as (r: unknown) => void;
+        h({ callId: 'call-1', status: 'pending-approval', classification: { name: 'write_file', description: 'Write', riskLevel: 'medium' }, expiresAt: Date.now() + 30000 });
+      });
+      // Find the deny button by its class since Polish chars are tricky
+      const denyBtn = document.querySelector('.approval-btn--deny') as HTMLButtonElement;
+      expect(denyBtn).toBeTruthy();
+      await userEvent.click(denyBtn);
+      expect(submitApprovalMock).toHaveBeenCalledWith(expect.objectContaining({ callId: 'call-1', approved: false }));
+    });
+
+    it('denies tool call with remember checked', async () => {
+      const onToolApprovalRequest = vi.fn().mockReturnValue(() => undefined);
+      const submitApprovalMock = vi.fn().mockResolvedValue({ status: 'ok' });
+      setAgentDeck(mockPreloadApi({ onToolApprovalRequest, submitApproval: submitApprovalMock }));
+      await act(async () => { render(<App />); });
+      await act(async () => {
+        const h = onToolApprovalRequest.mock.calls[0]![0] as (r: unknown) => void;
+        h({ callId: 'call-1', status: 'pending-approval', classification: { name: 'write_file', description: 'Write', riskLevel: 'medium' }, expiresAt: Date.now() + 30000 });
+      });
+      // Check the remember checkbox
+      const checkbox = document.querySelector('.approval-remember input') as HTMLInputElement;
+      expect(checkbox).toBeTruthy();
+      await userEvent.click(checkbox);
+      // Find the deny button
+      const denyBtn = document.querySelector('.approval-btn--deny') as HTMLButtonElement;
+      await userEvent.click(denyBtn);
+      expect(submitApprovalMock).toHaveBeenCalledWith(expect.objectContaining({ callId: 'call-1', approved: false }));
+    });
   });
 
   describe('PatchConflictDialog', () => {
@@ -545,6 +596,30 @@ describe('App — final coverage push', () => {
       expect(await screen.findByText('high-risk')).toBeInTheDocument();
     });
 
+    it('shows high risk', async () => {
+      const onConflictDetected = vi.fn().mockReturnValue(() => undefined);
+      setAgentDeck(mockPreloadApi({ onConflictDetected }));
+      await act(async () => { render(<App />); });
+      await act(async () => {
+        const h = onConflictDetected.mock.calls[0]![0] as (c: Conflict) => void;
+        h(makeConflict({ riskLevel: 'high', kind: 'high-risk' }));
+      });
+      // The badge shows conflictData.kind, not riskLevel
+      expect(await screen.findByText('high-risk')).toBeInTheDocument();
+    });
+
+    it('shows low risk', async () => {
+      const onConflictDetected = vi.fn().mockReturnValue(() => undefined);
+      setAgentDeck(mockPreloadApi({ onConflictDetected }));
+      await act(async () => { render(<App />); });
+      await act(async () => {
+        const h = onConflictDetected.mock.calls[0]![0] as (c: Conflict) => void;
+        h(makeConflict({ riskLevel: 'low', kind: 'patch-conflict' }));
+      });
+      // The badge shows conflictData.kind, not riskLevel
+      expect(await screen.findByText('patch-conflict')).toBeInTheDocument();
+    });
+
     it('resolves with skip', async () => {
       const onConflictDetected = vi.fn().mockReturnValue(() => undefined);
       const resolveMock = vi.fn().mockResolvedValue(undefined);
@@ -570,6 +645,38 @@ describe('App — final coverage push', () => {
         h(makeConflict({ filePath: '' }));
       });
       expect(await screen.findByText('Konflikt patcha')).toBeInTheDocument();
+    });
+
+    it('resolves with edit', async () => {
+      const onConflictDetected = vi.fn().mockReturnValue(() => undefined);
+      const resolveMock = vi.fn().mockResolvedValue(undefined);
+      setAgentDeck(mockPreloadApi({ onConflictDetected, resolveConflict: resolveMock }));
+      await act(async () => { render(<App />); });
+      await act(async () => {
+        const h = onConflictDetected.mock.calls[0]![0] as (c: Conflict) => void;
+        h(makeConflict());
+      });
+      // Find edit button - it's the middle button without special class
+      const editBtn = document.querySelectorAll('.approval-btn')[1] as HTMLButtonElement;
+      expect(editBtn).toBeTruthy();
+      await userEvent.click(editBtn);
+      expect(resolveMock).toHaveBeenCalledWith(expect.objectContaining({ conflictId: 'conflict-1', action: 'edit' }));
+    });
+
+    it('resolves with apply', async () => {
+      const onConflictDetected = vi.fn().mockReturnValue(() => undefined);
+      const resolveMock = vi.fn().mockResolvedValue(undefined);
+      setAgentDeck(mockPreloadApi({ onConflictDetected, resolveConflict: resolveMock }));
+      await act(async () => { render(<App />); });
+      await act(async () => {
+        const h = onConflictDetected.mock.calls[0]![0] as (c: Conflict) => void;
+        h(makeConflict());
+      });
+      // Find apply button by its class
+      const applyBtn = document.querySelector('.approval-btn--approve') as HTMLButtonElement;
+      expect(applyBtn).toBeTruthy();
+      await userEvent.click(applyBtn);
+      expect(resolveMock).toHaveBeenCalledWith(expect.objectContaining({ conflictId: 'conflict-1', action: 'apply' }));
     });
   });
 
@@ -630,9 +737,51 @@ describe('App — final coverage push', () => {
       expect(await screen.findByText('Create a new chat tab to start a conversation with an AI model.')).toBeInTheDocument();
     });
 
+    it('executes ChatTabs onCreate when creating a new chat tab', async () => {
+      const createChatTab = vi.fn().mockResolvedValue({
+        id: 'coverage-tab',
+        title: 'Coverage tab',
+        messages: [],
+        activeModel: 'default',
+        activeProvider: 'ollama' as const,
+        isStreaming: false
+      });
+      const listChatTabs = vi.fn().mockResolvedValue([{
+        id: 'coverage-tab',
+        title: 'Coverage tab',
+        messages: [],
+        activeModel: 'default',
+        activeProvider: 'ollama' as const,
+        isStreaming: false
+      }]);
+      const onChatTabsChange = vi.fn().mockReturnValue(() => undefined);
+      setAgentDeck(mockPreloadApi({ createChatTab, listChatTabs, onChatTabsChange }));
+
+      await act(async () => { render(<App />); });
+      await userEvent.click(screen.getByRole('button', { name: 'Chat' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'New chat tab' }));
+
+      expect(createChatTab).toHaveBeenCalled();
+      expect(listChatTabs).toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Chat' })).toHaveAttribute('aria-pressed', 'true');
+    });
+
     it('disables search without workspace', async () => {
       await act(async () => { render(<App />); });
       expect(screen.getByRole('button', { name: 'Search' })).toBeDisabled();
+    });
+  });
+
+  describe('Editor fallback', () => {
+    it('switches back to editor surface when chat is not active', async () => {
+      const user = userEvent.setup();
+      await act(async () => { render(<App />); });
+
+      await user.click(screen.getByRole('button', { name: 'Chat' }));
+      expect(await screen.findByText('Create a new chat tab to start a conversation with an AI model.')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Explorer' }));
+      expect(await screen.findByRole('tabpanel', { name: 'Editor' })).toBeInTheDocument();
     });
   });
 
@@ -653,6 +802,21 @@ describe('App — final coverage push', () => {
       expect(await screen.findAllByRole('button', { name: 'Logged in as testuser' })).toHaveLength(2);
     });
 
+    it('toggles status bar identity menu when logged in', async () => {
+      const user = userEvent.setup();
+      setAgentDeck(mockPreloadApi({ getIdentitySession: vi.fn().mockResolvedValue({ isLoggedIn: true, profile: { login: 'testuser' } }), onIdentityChange: vi.fn().mockReturnValue(() => undefined) }));
+      await act(async () => { render(<App />); });
+
+      const loggedInButtons = await screen.findAllByRole('button', { name: 'Logged in as testuser' });
+      const statusBarButton = loggedInButtons.find(button => button.querySelector('.login'));
+      expect(statusBarButton).toBeTruthy();
+
+      await user.click(statusBarButton!);
+      expect(await screen.findByRole('menu')).toBeInTheDocument();
+      await user.click(statusBarButton!);
+      expect(await screen.findByRole('menu')).toBeInTheDocument();
+    });
+
     it('shows identity when logged out', async () => {
       await act(async () => { render(<App />); });
       expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
@@ -664,6 +828,38 @@ describe('App — final coverage push', () => {
       await act(async () => { render(<App />); });
       await userEvent.click(screen.getByRole('tab', { name: 'Event Log' }));
       expect(screen.getByRole('tab', { name: 'Event Log' })).toHaveAttribute('aria-selected', 'true');
+    });
+  });
+
+  describe('Output panel', () => {
+    it('renders when selected', async () => {
+      await act(async () => { render(<App />); });
+      await userEvent.click(screen.getByRole('tab', { name: 'Output' }));
+      expect(screen.getByRole('tab', { name: 'Output' })).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByText('No output.')).toBeInTheDocument();
+    });
+  });
+
+  describe('Logged-out identity button', () => {
+    it('renders SVG icon in logged-out button', async () => {
+      await act(async () => { render(<App />); });
+      // The status bar has a logged-out button with aria-label="Sign in" containing the SVG
+      // There are two buttons with aria-label="Sign in" - one in activity bar, one in status bar
+      // Use getAllByRole to get both and verify the SVG icon exists in at least one
+      const identityBtns = await screen.findAllByRole('button', { name: 'Sign in' });
+      expect(identityBtns.length).toBeGreaterThan(0);
+      // Check that at least one button has the SVG icon
+      const btnWithSvg = identityBtns.find(btn => btn.querySelector('.identity-icon'));
+      expect(btnWithSvg).toBeTruthy();
+      const svgIcon = btnWithSvg?.querySelector('.identity-icon') as SVGElement;
+      expect(svgIcon).toHaveAttribute('viewBox', '0 0 16 16');
+      // Explicitly access the SVG element to ensure coverage
+      expect(svgIcon.tagName.toLowerCase()).toBe('svg');
+      // Access SVG children to ensure full coverage
+      const circle = svgIcon.querySelector('circle');
+      const path = svgIcon.querySelector('path');
+      expect(circle).toBeTruthy();
+      expect(path).toBeTruthy();
     });
   });
 

@@ -4,7 +4,7 @@ import tseslint from 'typescript-eslint';
 
 export default [
   {
-    ignores: ['coverage/**', 'dist/**', 'node_modules/**', 'out/**', '.dependency-cruiser.cjs', 'playwright.config.ts']
+    ignores: ['coverage/**', 'dist/**', 'node_modules/**', 'out/**', '.dependency-cruiser.cjs', 'playwright.config.ts', 'vitest.migrations.config.ts']
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

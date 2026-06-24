@@ -14,6 +14,9 @@ export default defineConfig({
       '@agentdeck/services': resolve(rootDir, 'packages/services/src/index.ts'),
       '@agentdeck/shared': resolve(rootDir, 'packages/shared/src/index.ts'),
       '@agentdeck/workbench': resolve(rootDir, 'packages/workbench/src/index.ts'),
+      '@agentdeck/memory-service': resolve(rootDir, 'packages/memory-service/src/index.ts'),
+      '@agentdeck/code-indexer': resolve(rootDir, 'packages/code-indexer/src/index.ts'),
+      'node:sqlite': resolve(rootDir, 'tests/__mocks__/node-sqlite.ts'),
       '@monaco-editor/react': resolve(rootDir, 'tests/__mocks__/monaco-editor-react.tsx'),
       keytar: resolve(rootDir, 'packages/workbench/src/keytar-mock.ts')
     }
@@ -22,7 +25,11 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
+    exclude: ['tests/unit/local-store-migrations.test.ts'],
     setupFiles: ['./tests/setup.ts'],
+    ssr: {
+      noExternal: ['@agentdeck/memory-service', '@agentdeck/code-indexer', '@agentdeck/services']
+    },
     coverage: {
       provider: 'v8',
       reportsDirectory: 'coverage',
@@ -36,6 +43,7 @@ export default defineConfig({
         'packages/shared/src/index.ts',
         'packages/workbench/src/index.ts',
         'packages/workbench/src/main.tsx',
+
         'tests/**',
         '**/*.test.{ts,tsx}',
         '**/*.d.ts',

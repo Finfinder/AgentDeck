@@ -73,9 +73,9 @@ describe('PermissionBroker', () => {
   });
 
   describe('listClassifications', () => {
-    it('should return all 8 tool classifications', () => {
+    it('should return all 10 tool classifications', () => {
       const list = broker.listClassifications();
-      expect(list).toHaveLength(8);
+      expect(list).toHaveLength(10);
     });
   });
 

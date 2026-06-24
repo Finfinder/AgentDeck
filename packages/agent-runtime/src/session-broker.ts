@@ -1,5 +1,62 @@
 import { EventEmitter } from 'node:events';
 
+/**
+ * Sanitize an event message by redacting embedded secrets.
+ * Covers JWTs, AWS keys, GitHub tokens, API keys, connection strings,
+ * private key markers, and high-entropy hex strings.
+ */
+function sanitizeEventMessage(message: string): string {
+  let sanitized = message;
+
+  // Standalone secret patterns — replace entire match
+  const standalonePatterns: RegExp[] = [
+    // AWS Access Key ID
+    /AKIA[0-9A-Z]{16}/g,
+    // GitHub PAT (classic)
+    /ghp_[A-Za-z0-9]{36}/g,
+    // GitHub PAT (fine-grained)
+    /github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}/g,
+    // OpenAI / generic API key
+    /sk-[A-Za-z0-9]{48}/g,
+    /sk-proj-[A-Za-z0-9]{48,}/g,
+    // JWT (three base64url segments)
+    /eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
+    // Private key markers
+    /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/g,
+    // High-entropy hex strings (40+ chars)
+    /\b[0-9a-f]{40,}\b/gi,
+  ];
+
+  for (const pattern of standalonePatterns) {
+    sanitized = sanitized.replace(pattern, '[REDACTED]');
+  }
+
+  // KEY=VALUE patterns — preserve key, redact value
+  const keyValuePatterns: RegExp[] = [
+    /(?:api[_-]?key|apikey)\s*[:=]\s*\S+/gi,
+    /(?:password|passwd|pwd)\s*[:=]\s*\S+/gi,
+    /(?:secret|client[_-]?secret|app[_-]?secret)\s*[:=]\s*\S+/gi,
+    /(?:token|access[_-]?token|refresh[_-]?token|id[_-]?token)\s*[:=]\s*\S+/gi,
+    /(?:authorization|bearer)\s+\S+/gi,
+    /(?:private[_-]?key|secret[_-]?key|signing[_-]?key)\s*[:=]\s*\S+/gi,
+    /(?:connection[_-]?string|conn[_-]?str)\s*[:=]\s*\S+/gi,
+    /(?:account[_-]?key|storage[_-]?key)\s*[:=]\s*\S+/gi,
+  ];
+
+  for (const pattern of keyValuePatterns) {
+    sanitized = sanitized.replace(pattern, (match) => {
+      const separatorIndex = match.search(/[:=]/);
+      if (separatorIndex >= 0) {
+        const keyPart = match.substring(0, separatorIndex);
+        return `${keyPart}=[REDACTED]`;
+      }
+      return '[REDACTED]';
+    });
+  }
+
+  return sanitized;
+}
+
 export type AgentRuntimeTaskStatus = 'pending' | 'running' | 'completed' | 'cancelled' | 'failed';
 
 export type AgentRuntimeWorkerStatus = 'idle' | 'running' | 'retrying' | 'stopping' | 'stopped' | 'crashed';
@@ -579,61 +636,73 @@ export class AgentRuntime extends EventEmitter {
 
     if (worker.status === 'idle') {
       const task = this.tasks.get(worker.taskId);
-      worker.status = 'stopped';
-      worker.stoppedAt = this.now();
-      if (task) {
-        task.status = 'cancelled';
-        task.updatedAt = this.now();
-      }
-
-      this.appendEvent({
-        sessionId: worker.sessionId,
-        taskId: worker.taskId,
-        workerId,
-        type: 'worker-stopped',
-        message: 'Worker stopped before start.'
-      });
-      if (task) {
-        this.appendEvent({
-          sessionId: worker.sessionId,
-          taskId: worker.taskId,
-          type: 'task-cancelled',
-          message: 'Task cancelled before start.'
-        });
-      }
-      this.emit('worker-changed', this.cloneWorker(worker));
-      if (task) {
-        this.emit('task-changed', this.cloneTask(task));
-      }
-      this.emit('session-changed', this.getSessionSnapshot(worker.sessionId));
-
-      return { status: 'ok', value: this.cloneWorker(worker) };
+      return { status: 'ok', value: this.stopIdleWorker(worker, task, worker.id) };
     }
 
     if (worker.status === 'retrying' || worker.status === 'stopping') {
-      const controller = this.abortControllers.get(workerId);
-      if (controller && !controller.signal.aborted) {
-        controller.abort();
-      }
-
-      if (worker.status === 'retrying') {
-        worker.status = 'stopping';
-        worker.stoppedAt = this.now();
-        this.appendEvent({
-          sessionId: worker.sessionId,
-          taskId: worker.taskId,
-          workerId,
-          type: 'worker-stopped',
-          message: 'Worker stop requested during retry.'
-        });
-        this.emit('worker-changed', this.cloneWorker(worker));
-        this.emit('session-changed', this.getSessionSnapshot(worker.sessionId));
-      }
-
-      return { status: 'ok', value: this.cloneWorker(worker) };
+      return { status: 'ok', value: this.stopRetryingOrStoppingWorker(worker) };
     }
 
-    const controller = this.abortControllers.get(workerId);
+    return { status: 'ok', value: this.requestWorkerStop(worker) };
+  }
+
+  private stopIdleWorker(worker: MutableAgentRuntimeWorkerState, task: MutableAgentRuntimeTaskState | undefined, workerId: string): MutableAgentRuntimeWorkerState {
+    worker.status = 'stopped';
+    worker.stoppedAt = this.now();
+    if (task) {
+      task.status = 'cancelled';
+      task.updatedAt = this.now();
+    }
+
+    this.appendEvent({
+      sessionId: worker.sessionId,
+      taskId: worker.taskId,
+      workerId,
+      type: 'worker-stopped',
+      message: 'Worker stopped before start.'
+    });
+    if (task) {
+      this.appendEvent({
+        sessionId: worker.sessionId,
+        taskId: worker.taskId,
+        type: 'task-cancelled',
+        message: 'Task cancelled before start.'
+      });
+    }
+    this.emit('worker-changed', this.cloneWorker(worker));
+    if (task) {
+      this.emit('task-changed', this.cloneTask(task));
+    }
+    this.emit('session-changed', this.getSessionSnapshot(worker.sessionId));
+
+    return worker;
+  }
+
+  private stopRetryingOrStoppingWorker(worker: MutableAgentRuntimeWorkerState): MutableAgentRuntimeWorkerState {
+    const controller = this.abortControllers.get(worker.id);
+    if (controller && !controller.signal.aborted) {
+      controller.abort();
+    }
+
+    if (worker.status === 'retrying') {
+      worker.status = 'stopping';
+      worker.stoppedAt = this.now();
+      this.appendEvent({
+        sessionId: worker.sessionId,
+        taskId: worker.taskId,
+        workerId: worker.id,
+        type: 'worker-stopped',
+        message: 'Worker stop requested during retry.'
+      });
+      this.emit('worker-changed', this.cloneWorker(worker));
+      this.emit('session-changed', this.getSessionSnapshot(worker.sessionId));
+    }
+
+    return worker;
+  }
+
+  private requestWorkerStop(worker: MutableAgentRuntimeWorkerState): MutableAgentRuntimeWorkerState {
+    const controller = this.abortControllers.get(worker.id);
     if (controller && !controller.signal.aborted) {
       controller.abort();
     }
@@ -643,14 +712,14 @@ export class AgentRuntime extends EventEmitter {
     this.appendEvent({
       sessionId: worker.sessionId,
       taskId: worker.taskId,
-      workerId,
+      workerId: worker.id,
       type: 'worker-stopped',
       message: 'Worker stop requested.'
     });
     this.emit('worker-changed', this.cloneWorker(worker));
     this.emit('session-changed', this.getSessionSnapshot(worker.sessionId));
 
-    return { status: 'ok', value: this.cloneWorker(worker) };
+    return worker;
   }
 
   resumeWorker(options: AgentRuntimeResumeOptions): AgentRuntimeResult<AgentRuntimeWorkerState> {
@@ -1047,7 +1116,8 @@ export class AgentRuntime extends EventEmitter {
     const entry: AgentRuntimeEventEntry = {
       id: createId('event', this.now),
       timestamp: this.now(),
-      ...input
+      ...input,
+      message: sanitizeEventMessage(input.message)
     };
     this.events.set(entry.id, entry);
 

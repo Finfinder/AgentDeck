@@ -94,6 +94,16 @@ export const IPC_CHANNELS = {
   conflictResolve: 'agentdeck:v1:conflict:resolve',
   checkSensitivePath: 'agentdeck:v1:permission:check-sensitive',
   getFileHash: 'agentdeck:v1:editor:get-file-hash',
+  // Phase 9: Memory Service and Code Indexer
+  listMemories: 'agentdeck:v1:memory:list',
+  readMemory: 'agentdeck:v1:memory:read',
+  proposeMemoryChange: 'agentdeck:v1:memory:propose-change',
+  applyMemoryChange: 'agentdeck:v1:memory:apply-change',
+  memoryConflictDetected: 'agentdeck:v1:memory:conflict-detected',
+  memoryConflictResolve: 'agentdeck:v1:memory:conflict-resolve',
+  indexCodeFile: 'agentdeck:v1:code-indexer:index-file',
+  retrieveCode: 'agentdeck:v1:code-indexer:retrieve',
+  rebuildCodeIndex: 'agentdeck:v1:code-indexer:rebuild',
   // Event Log
   getEventLog: 'agentdeck:v1:event-log:get',
   eventLogUpdate: 'agentdeck:v1:event-log:update',
@@ -344,7 +354,36 @@ export type IdentitySessionWarning = Readonly<{
   path: string;
 }>;
 
+export type MemoryReadResult =
+  | Readonly<{ status: 'ok'; entry: MemoryEntry; content: string }>
+  | Readonly<{ status: 'error'; code: 'FILE_NOT_FOUND' | 'UNKNOWN'; message: string }>;
+
+export type MemoryEdit = Readonly<{
+  scope: MemoryScope;
+  filePath: string;
+  text: string;
+}>;
+
+export type IndexFileResult =
+  | Readonly<{ status: 'ok'; chunks: readonly IndexChunk[]; stored: boolean }>
+  | Readonly<{ status: 'error'; code: 'INVALID_INPUT' | 'UNKNOWN'; message: string }>;
+
+export type RebuildIndexResult = Readonly<{
+  chunks: readonly IndexChunk[];
+  stats: CodeIndexStats;
+}>;
+
 export type AgentDeckPreloadApi = Readonly<{
+  // Phase 9: Memory Service and Code Indexer
+  listMemories?: (scope?: MemoryScope) => Promise<readonly MemoryEntry[]>;
+  readMemory?: (scope: MemoryScope, filePath: string) => Promise<MemoryReadResult>;
+  proposeMemoryChange?: (edit: MemoryEdit) => Promise<MemoryChangeProposal>;
+  applyMemoryChange?: (proposal: MemoryChangeProposal) => Promise<MemoryApplyResult>;
+  onMemoryConflictDetected?: (handler: (conflict: MemoryConflict) => void) => () => void;
+  resolveMemoryConflict?: (resolution: MemoryConflictResolution) => Promise<void>;
+  indexCodeFile?: (filePath: string, scope?: MemoryScope) => Promise<IndexFileResult>;
+  retrieveCode?: (query: RetrievalQuery) => Promise<readonly RetrievalResult[]>;
+  rebuildCodeIndex?: (roots?: readonly string[]) => Promise<RebuildIndexResult>;
   getStartupState: () => Promise<StartupState>;
   getIdentitySession: () => Promise<IdentitySession>;
   startOAuth: (opts?: unknown) => Promise<IdentitySession>;
@@ -1125,7 +1164,7 @@ export type EventLogEntry = Readonly<{
   level: EventLogLevel;
   source: string;
   message: string;
-  diff?: string;
+  diff?: string | undefined;
   filePath?: string;
   patchId?: string;
 }>;
@@ -1143,6 +1182,108 @@ export type EventLogResult =
   | Readonly<{ status: 'ok'; entries: readonly EventLogEntry[]; total: number }>
   | Readonly<{ status: 'error'; code: 'UNKNOWN'; message: string }>;
 
+export type MemoryScope = 'user' | 'workspace' | 'repo';
+export type MemorySourceKind = 'markdown';
+export type MemoryCreationSource = 'user' | 'agent' | 'system';
+
+export type MemoryEntry = Readonly<{
+  id: string;
+  scope: MemoryScope;
+  filePath: string;
+  title: string;
+  checksum: string;
+  sourceKind: MemorySourceKind;
+  createdSource: MemoryCreationSource;
+  createdAt: number;
+  updatedAt: number;
+  tags?: readonly string[];
+}>;
+
+export type MemoryChangeProposal = Readonly<{
+  scope: MemoryScope;
+  filePath: string;
+  patch: PatchSet;
+  diff?: string | undefined;
+}>;
+
+export type MemoryApplyResult =
+  | Readonly<{ status: 'ok'; entry: MemoryEntry }>
+  | Readonly<{ status: 'ok'; entry: MemoryEntry; autoMerged: true }>
+  | Readonly<{ status: 'error'; code: 'CONFLICT' | 'FILE_NOT_FOUND' | 'ACCESS_DENIED' | 'UNKNOWN'; message: string; conflict?: MemoryConflict }>;
+
+export type MemoryConflictKind = 'memory-conflict' | 'memory-deleted' | 'memory-high-risk';
+
+export type MemoryConflict = Readonly<{
+  id: string;
+  kind: MemoryConflictKind;
+  proposalId: string;
+  filePath: string;
+  description: string;
+  riskLevel: ToolRiskLevel;
+  createdAt: number;
+}>;
+
+export type MemoryConflictResolution =
+  | Readonly<{ conflictId: string; action: 'apply' }>
+  | Readonly<{ conflictId: string; action: 'skip' }>
+  | Readonly<{ conflictId: string; action: 'edit'; text: string }>;
+
+export type RetrievalKind = 'memory' | 'code';
+
+export type RetrievalQuery = Readonly<{
+  text: string;
+  scopes?: readonly MemoryScope[];
+  languages?: readonly string[];
+  folders?: readonly string[];
+  since?: number;
+  maxResults?: number;
+  includeMemory?: boolean;
+  includeCode?: boolean;
+}>;
+
+export type RetrievalResult = Readonly<{
+  kind: RetrievalKind;
+  chunkId: string;
+  filePath: string;
+  text: string;
+  score: number;
+  metadata: Record<string, unknown>;
+  checksum?: string;
+  createdAt?: number;
+}>;
+
+export type IndexChunk = Readonly<{
+  id: string;
+  filePath: string;
+  language: string;
+  scope?: MemoryScope;
+  startLine: number;
+  endLine: number;
+  startCol: number;
+  endCol: number;
+  text: string;
+  checksum: string;
+  createdAt: number;
+  metadata?: Record<string, unknown>;
+}>;
+
+export type EmbeddingMetadata = Readonly<{
+  model: string;
+  dimension: number;
+  indexVersion: string;
+  scope?: MemoryScope;
+  language?: string;
+  folder?: string;
+  updatedAt?: number;
+}>;
+
+export type CodeIndexStats = Readonly<{
+  chunks: number;
+  files: number;
+  languages: Record<string, number>;
+  indexVersion: string;
+}>;
+
 // ?? Phase 7: Permission Broker types ???????????????????????????????????????
 
 export type ToolRiskLevel = 'read-only' | 'low' | 'medium' | 'high' | 'critical';
@@ -1155,7 +1296,9 @@ export type ToolName =
   | 'applyPatch'
   | 'deleteFile'
   | 'renameFile'
-  | 'writeFile';
+  | 'writeFile'
+  | 'proposeMemoryChange'
+  | 'applyMemoryChange';
 
 export type ToolClassification = Readonly<{
   name: ToolName;
@@ -1186,9 +1329,9 @@ export type ToolCallResponse =
   | Readonly<{
       status: 'error';
       callId: string;
-      code: 'TOOL_NOT_FOUND' | 'ACCESS_DENIED' | 'TIMEOUT' | 'WRITE_CONFLICT' | 'UNKNOWN';
+      code: 'TOOL_NOT_FOUND' | 'ACCESS_DENIED' | 'TIMEOUT' | 'WRITE_CONFLICT' | 'INVALID_ARGUMENT' | 'UNKNOWN';
       message: string;
-      conflict?: Conflict;
+      conflict?: Conflict | MemoryConflict;
     }>
   | Readonly<{
       status: 'denied';
@@ -1642,27 +1785,34 @@ export function isAgentRuntimeEventEntry(value: unknown): value is AgentRuntimeE
 }
 
 export function isAgentRuntimeSessionState(value: unknown): value is AgentRuntimeSessionState {
-  if (!isRecord(value)) return false;
-  if (
-    typeof value.id !== 'string' ||
-    typeof value.chatTabId !== 'string' ||
-    typeof value.modelId !== 'string' ||
-    typeof value.agentName !== 'string' ||
-    typeof value.status !== 'string' || !AGENT_RUNTIME_SESSION_STATUSES.has(value.status) ||
-    !isAgentRuntimePermissionScope(value.permissionScope) ||
-    !Array.isArray(value.context) ||
-    !value.context.every(item => typeof item === 'string') ||
-    !Array.isArray(value.eventLog) ||
-    !value.eventLog.every(isAgentRuntimeEventEntry) ||
-    !Array.isArray(value.workers) ||
-    !value.workers.every(isAgentRuntimeWorkerState) ||
-    !Array.isArray(value.tasks) ||
-    !value.tasks.every(isAgentRuntimeTaskState)
-  ) {
+  if (!isRecord(value) || !hasValidSessionCore(value) || !hasValidSessionCollections(value)) {
     return false;
   }
   if (value.resumeToken !== undefined && typeof value.resumeToken !== 'string') return false;
   return true;
+}
+
+function hasValidSessionCore(value: Record<string, unknown>): boolean {
+  return (
+    typeof value.id === 'string' &&
+    typeof value.chatTabId === 'string' &&
+    typeof value.modelId === 'string' &&
+    typeof value.agentName === 'string' &&
+    typeof value.status === 'string' && AGENT_RUNTIME_SESSION_STATUSES.has(value.status) &&
+    isAgentRuntimePermissionScope(value.permissionScope)
+  );
+}
+
+function hasValidSessionCollections(value: Record<string, unknown>): boolean {
+  return (
+    isStringArray(value.context) &&
+    Array.isArray(value.eventLog) &&
+    value.eventLog.every(isAgentRuntimeEventEntry) &&
+    Array.isArray(value.workers) &&
+    value.workers.every(isAgentRuntimeWorkerState) &&
+    Array.isArray(value.tasks) &&
+    value.tasks.every(isAgentRuntimeTaskState)
+  );
 }
 
 export function isAgentRuntimeStartWorkerOptions(value: unknown): value is AgentRuntimeStartWorkerOptions {
@@ -1697,4 +1847,201 @@ export function isAgentRuntimeStartSubagentOptions(value: unknown): value is Age
 
 export function isAgentRuntimeResumeOptions(value: unknown): value is AgentRuntimeResumeOptions {
   return isRecord(value) && typeof value.sessionId === 'string' && typeof value.workerId === 'string';
+}
+
+// ?? Phase 9: Memory Service and Code Indexer guards ?????????????????????????
+
+const MEMORY_SCOPES = new Set<string>(['user', 'workspace', 'repo']);
+const MEMORY_SOURCE_KINDS = new Set<string>(['markdown']);
+const MEMORY_CREATION_SOURCES = new Set<string>(['user', 'agent', 'system']);
+const RETRIEVAL_KINDS = new Set<string>(['memory', 'code']);
+
+export function isMemoryScope(value: unknown): value is MemoryScope {
+  return typeof value === 'string' && MEMORY_SCOPES.has(value);
+}
+
+export function isMemoryEntry(value: unknown): value is MemoryEntry {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.id !== 'string' ||
+    !isMemoryScope(value.scope) ||
+    typeof value.filePath !== 'string' ||
+    typeof value.title !== 'string' ||
+    typeof value.checksum !== 'string' ||
+    typeof value.sourceKind !== 'string' || !MEMORY_SOURCE_KINDS.has(value.sourceKind) ||
+    typeof value.createdSource !== 'string' || !MEMORY_CREATION_SOURCES.has(value.createdSource) ||
+    typeof value.createdAt !== 'number' ||
+    typeof value.updatedAt !== 'number'
+  ) {
+    return false;
+  }
+  if (value.tags !== undefined) {
+    if (!Array.isArray(value.tags)) return false;
+    if (!value.tags.every(t => typeof t === 'string')) return false;
+  }
+  return true;
+}
+
+export function isMemoryChangeProposal(value: unknown): value is MemoryChangeProposal {
+  if (!isRecord(value)) return false;
+  return (
+    isMemoryScope(value.scope) &&
+    typeof value.filePath === 'string' &&
+    isPatchSet(value.patch)
+  );
+}
+
+
+export function isMemoryApplyResult(value: unknown): value is MemoryApplyResult {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') {
+    return isMemoryEntry((value as { entry: unknown }).entry);
+  }
+  return value.status === 'error' && typeof (value as { code: unknown }).code === 'string';
+}
+
+export function isMemoryConflict(value: unknown): value is MemoryConflict {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === 'string' &&
+    typeof value.kind === 'string' &&
+    typeof value.proposalId === 'string' &&
+    typeof value.filePath === 'string' &&
+    typeof value.description === 'string' &&
+    typeof value.riskLevel === 'string' &&
+    typeof value.createdAt === 'number'
+  );
+}
+
+export function isMemoryConflictResolution(value: unknown): value is MemoryConflictResolution {
+  if (!isRecord(value)) return false;
+  if (typeof value.conflictId !== 'string') return false;
+  const action = (value as { action: unknown }).action;
+  if (action === 'edit') return typeof (value as { text: unknown }).text === 'string';
+  return action === 'apply' || action === 'skip';
+}
+
+function hasValidOptionalScopes(value: Record<string, unknown>): boolean {
+  const scopes = value.scopes;
+  return scopes === undefined || (Array.isArray(scopes) && scopes.every(isMemoryScope));
+}
+
+function isStringArray(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
+
+function hasValidOptionalStringArray(value: Record<string, unknown>, key: keyof RetrievalQuery): boolean {
+  return !Object.hasOwn(value, key) || isStringArray(value[key]);
+}
+
+function hasValidOptionalNumber(value: Record<string, unknown>, key: keyof RetrievalQuery): boolean {
+  return !Object.hasOwn(value, key) || typeof value[key] === 'number';
+}
+
+function hasValidOptionalBoolean(value: Record<string, unknown>, key: keyof RetrievalQuery): boolean {
+  return !Object.hasOwn(value, key) || typeof value[key] === 'boolean';
+}
+
+export function isRetrievalQuery(value: unknown): value is RetrievalQuery {
+  if (!isRecord(value) || typeof value.text !== 'string') return false;
+
+  return hasValidOptionalScopes(value)
+    && hasValidOptionalStringArray(value, 'languages')
+    && hasValidOptionalStringArray(value, 'folders')
+    && hasValidOptionalNumber(value, 'since')
+    && hasValidOptionalNumber(value, 'maxResults')
+    && hasValidOptionalBoolean(value, 'includeMemory')
+    && hasValidOptionalBoolean(value, 'includeCode');
+}
+
+export function isRetrievalResult(value: unknown): value is RetrievalResult {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.kind === 'string' && RETRIEVAL_KINDS.has(value.kind) &&
+    typeof value.chunkId === 'string' &&
+    typeof value.filePath === 'string' &&
+    typeof value.text === 'string' &&
+    typeof value.score === 'number' &&
+    isRecord(value.metadata)
+  );
+}
+
+export function isIndexChunk(value: unknown): value is IndexChunk {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.id !== 'string' ||
+    typeof value.filePath !== 'string' ||
+    typeof value.language !== 'string' ||
+    typeof value.startLine !== 'number' ||
+    typeof value.endLine !== 'number' ||
+    typeof value.startCol !== 'number' ||
+    typeof value.endCol !== 'number' ||
+    typeof value.text !== 'string' ||
+    typeof value.checksum !== 'string' ||
+    typeof value.createdAt !== 'number'
+  ) {
+    return false;
+  }
+  if (value.scope !== undefined && !isMemoryScope(value.scope)) return false;
+  if (value.metadata !== undefined && !isRecord(value.metadata)) return false;
+  return true;
+}
+
+export function isEmbeddingMetadata(value: unknown): value is EmbeddingMetadata {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.model !== 'string' ||
+    typeof value.dimension !== 'number' ||
+    typeof value.indexVersion !== 'string'
+  ) {
+    return false;
+  }
+  if (value.scope !== undefined && !isMemoryScope(value.scope)) return false;
+  if (value.language !== undefined && typeof value.language !== 'string') return false;
+  if (value.folder !== undefined && typeof value.folder !== 'string') return false;
+  if (value.updatedAt !== undefined && typeof value.updatedAt !== 'number') return false;
+  return true;
+}
+
+export function isCodeIndexStats(value: unknown): value is CodeIndexStats {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.chunks === 'number' &&
+    typeof value.files === 'number' &&
+    isRecord(value.languages) &&
+    typeof value.indexVersion === 'string'
+  );
+}
+
+export function isMemoryReadResult(value: unknown): value is MemoryReadResult {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') {
+    return isMemoryEntry((value as { entry: unknown }).entry) && typeof (value as { content: unknown }).content === 'string';
+  }
+  return (
+    value.status === 'error' &&
+    typeof (value as { code: unknown }).code === 'string' &&
+    typeof (value as { message: unknown }).message === 'string'
+  );
+}
+
+export function isIndexFileResult(value: unknown): value is IndexFileResult {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') {
+    return Array.isArray(value.chunks) && typeof value.stored === 'boolean';
+  }
+  return (
+    value.status === 'error' &&
+    typeof value.code === 'string' &&
+    typeof value.message === 'string'
+  );
+}
+
+export function isRebuildIndexResult(value: unknown): value is RebuildIndexResult {
+  if (!isRecord(value)) return false;
+  return (
+    Array.isArray((value as { chunks: unknown }).chunks) &&
+    (value as { chunks: unknown[] }).chunks.every(isIndexChunk) &&
+    isCodeIndexStats((value as { stats: unknown }).stats)
+  );
 }

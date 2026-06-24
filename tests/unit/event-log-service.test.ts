@@ -208,21 +208,21 @@ describe('EventLogService', () => {
   });
 
   describe('appendPatchEvent — diff sanitization', () => {
-    it('should redact API keys in diff', () => {
+    it('should redact API keys in diff and preserve the key part', () => {
       const entry = service.appendPatchEvent({
         level: 'info',
         source: 'tool-router',
         message: 'Patch applied',
-        diff: '--- a/.env\n+++ b/.env\n@@ -1 +1 @@\n-API_KEY=sk-abc123secret\n+API_KEY=sk-newsecret',
+        diff: '--- a/.env\n+++ b/.env\n@@ -1 +1 @@\n-API_KEY=***\n+API_KEY=sk-newsecret',
         filePath: '.env',
         patchId: 'patch-1'
       });
-      expect(entry.diff).not.toContain('sk-abc123secret');
+      expect(entry.diff).not.toContain('***');
       expect(entry.diff).not.toContain('sk-newsecret');
-      expect(entry.diff).toContain('[REDACTED]');
+      expect(entry.diff).toContain('API_KEY=[REDACTED]');
     });
 
-    it('should redact passwords in diff', () => {
+    it('should redact passwords in diff and preserve the key part', () => {
       const entry = service.appendPatchEvent({
         level: 'info',
         source: 'tool-router',
@@ -233,20 +233,21 @@ describe('EventLogService', () => {
       });
       expect(entry.diff).not.toContain('super_secret');
       expect(entry.diff).not.toContain('new_secret');
-      expect(entry.diff).toContain('[REDACTED]');
+      expect(entry.diff).toContain('password=[REDACTED]');
     });
 
-    it('should redact GitHub tokens in diff', () => {
+    it('should redact GitHub tokens in diff and preserve the key part', () => {
       const entry = service.appendPatchEvent({
         level: 'info',
         source: 'tool-router',
         message: 'Patch applied',
-        diff: '-token=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef\n+token=ghp_newtoken',
+        diff: '-token=ghp_AB...cdef\n+token=ghp_newtoken',
         filePath: 'config.ts',
         patchId: 'patch-3'
       });
-      expect(entry.diff).not.toContain('ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef');
+      expect(entry.diff).not.toContain('ghp_AB...cdef');
       expect(entry.diff).not.toContain('ghp_newtoken');
+      expect(entry.diff).toContain('token=[REDACTED]');
     });
 
     it('should preserve non-secret diff content', () => {
@@ -275,6 +276,162 @@ describe('EventLogService', () => {
       expect(entry.diff).not.toContain('AKIAIOSFODNN7EXAMPLE');
       // The AWS key pattern is standalone, so the key value is replaced
       expect(entry.diff).toContain('AWS_ACCESS_KEY_ID=[REDACTED]');
+    });
+
+    it('should redact JWT tokens in diff', () => {
+      const entry = service.appendPatchEvent({
+        level: 'info',
+        source: 'tool-router',
+        message: 'Patch applied',
+        diff: '-token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c\n+token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.dGhpcyBpcyBhIGZha2Ugc2lnbmF0dXJl',
+        filePath: '.env',
+        patchId: 'patch-jwt'
+      });
+      expect(entry.diff).not.toContain('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9');
+      expect(entry.diff).not.toContain('eyJhbGciOiJIUzI1NiJ9');
+      expect(entry.diff).toContain('[REDACTED]');
+    });
+
+    it('should redact connection strings with passwords in diff', () => {
+      const entry = service.appendPatchEvent({
+        level: 'info',
+        source: 'tool-router',
+        message: 'Patch applied',
+        diff: '-connection_string=Server=myserver;Password=supersecret123;Database=mydb\n+connection_string=Server=myserver;Password=newpass456;Database=mydb',
+        filePath: 'config.ts',
+        patchId: 'patch-connstr'
+      });
+      expect(entry.diff).not.toContain('supersecret123');
+      expect(entry.diff).not.toContain('newpass456');
+      expect(entry.diff).toContain('[REDACTED]');
+    });
+
+    it('should redact private key markers in diff', () => {
+      const entry = service.appendPatchEvent({
+        level: 'info',
+        source: 'tool-router',
+        message: 'Patch applied',
+        diff: '-private_key=-----BEGIN RSA PRIVATE KEY-----\n+private_key=-----BEGIN RSA PRIVATE KEY-----',
+        filePath: 'keys.pem',
+        patchId: 'patch-privkey'
+      });
+      expect(entry.diff).toContain('[REDACTED]');
+    });
+
+    it('should redact high-entropy hex strings in diff', () => {
+      const entry = service.appendPatchEvent({
+        level: 'info',
+        source: 'tool-router',
+        message: 'Patch applied',
+        diff: '-secret=abcdef1234567890abcdef1234567890abcdef12\n+secret=fedcba0987654321fedcba0987654321fedcba09',
+        filePath: '.env',
+        patchId: 'patch-hex'
+      });
+      expect(entry.diff).not.toContain('abcdef1234567890abcdef1234567890abcdef12');
+      expect(entry.diff).not.toContain('fedcba0987654321fedcba0987654321fedcba09');
+      expect(entry.diff).toContain('[REDACTED]');
+    });
+  });
+
+  describe('append — message sanitization', () => {
+    it('should redact secrets in message text', () => {
+      const entry = service.append({
+        level: 'info',
+        source: 'test',
+        message: 'User set API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456789012345678 in config'
+      });
+      expect(entry.message).not.toContain('sk-abcdefghijklmnopqrstuvwxyz123456789012345678');
+      expect(entry.message).toContain('[REDACTED]');
+    });
+
+    it('should redact JWT in message text', () => {
+      const entry = service.append({
+        level: 'warn',
+        source: 'auth',
+        message: 'Token expired: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c'
+      });
+      expect(entry.message).not.toContain('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9');
+      expect(entry.message).toContain('[REDACTED]');
+    });
+
+    it('should redact GitHub PAT in message text', () => {
+      const entry = service.append({
+        level: 'error',
+        source: 'git',
+        message: 'Auth failed with token=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef'
+      });
+      expect(entry.message).not.toContain('ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef');
+      expect(entry.message).toContain('[REDACTED]');
+    });
+
+    it('should redact password in message text', () => {
+      const entry = service.append({
+        level: 'info',
+        source: 'db',
+        message: 'Connected with password=super_secret_db_pass'
+      });
+      expect(entry.message).not.toContain('super_secret_db_pass');
+      expect(entry.message).toContain('[REDACTED]');
+    });
+
+    it('should preserve non-secret message content', () => {
+      const entry = service.append({
+        level: 'info',
+        source: 'test',
+        message: 'Task completed successfully in session abc123'
+      });
+      expect(entry.message).toBe('Task completed successfully in session abc123');
+    });
+  });
+
+  describe('append — filePath sanitization', () => {
+    it('should redact Windows username in filePath', () => {
+      const entry = service.append({
+        level: 'info',
+        source: 'test',
+        message: 'File saved',
+        filePath: 'C:\\Users\\rafal\\projects\\app\\config.ts'
+      });
+      expect(entry.filePath).toBe('C:\\Users\\[USER]\\projects\\app\\config.ts');
+    });
+
+    it('should redact Unix home directory in filePath', () => {
+      const entry = service.append({
+        level: 'info',
+        source: 'test',
+        message: 'File saved',
+        filePath: '/home/johndoe/projects/app/config.ts'
+      });
+      expect(entry.filePath).toBe('/home/[USER]/projects/app/config.ts');
+    });
+
+    it('should redact macOS home directory in filePath', () => {
+      const entry = service.append({
+        level: 'info',
+        source: 'test',
+        message: 'File saved',
+        filePath: '/Users/janedoe/projects/app/config.ts'
+      });
+      expect(entry.filePath).toBe('/Users/[USER]/projects/app/config.ts');
+    });
+
+    it('should leave filePath undefined when not provided', () => {
+      const entry = service.append({
+        level: 'info',
+        source: 'test',
+        message: 'No file'
+      });
+      expect(entry.filePath).toBeUndefined();
+    });
+
+    it('should not modify paths without user directories', () => {
+      const entry = service.append({
+        level: 'info',
+        source: 'test',
+        message: 'File saved',
+        filePath: '/etc/config/app.yaml'
+      });
+      expect(entry.filePath).toBe('/etc/config/app.yaml');
     });
   });
 });
