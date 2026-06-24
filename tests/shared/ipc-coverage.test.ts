@@ -12,16 +12,38 @@ import {
   isAgentRuntimeWorkerOutput,
   isAgentRuntimeWorkerState,
   isApprovalDecision,
+  isChatMessage,
+  isChatStreamEvent,
+  isChatTabState,
+  isCodeIndexStats,
   isConflict,
   isConflictResolution,
+  isDiffInput,
+  isDiffResult,
+  isDirectoryListing,
   isEditorLanguage,
   isEditorTab,
+  isEmbeddingMetadata,
   isEventLogResult,
   isFileHashResult,
   isFileOperationResult,
+  isFileReadResult,
+  isFileWriteResult,
+  isFsChangeEvent,
   isIdentitySession,
   isIdentitySessionWarning,
+  isIndexChunk,
+  isMemoryApplyResult,
+  isMemoryChangeProposal,
+  isMemoryConflict,
+  isMemoryConflictResolution,
+  isMemoryEntry,
+  isMemoryScope,
+  isModelGatewayConfig,
+  isModelInfo,
   isModelProviderConfig,
+  isModelProviderId,
+  isModelProviderState,
   isPatchResult,
   isPatchSet,
   isPermissionActionKind,
@@ -40,13 +62,25 @@ import {
   isPermissionRequest,
   isPermissionRiskLevel,
   isPermissionRuntimeKind,
+  isRetrievalQuery,
+  isRetrievalResult,
   isSensitivePathCheckResult,
+  isSendMessageResult,
+  isStartupState,
   isString,
+  isTestConnectionResult,
+  isThemeSettings,
+  isToolCall,
   isToolCallRequest,
   isToolCallResponse,
   isToolClassification,
   isToolName,
-  isToolRiskLevel
+  isToolRiskLevel,
+  isWorkspaceEditInput,
+  isWorkspaceEditResult,
+  isWorkspaceModel,
+  isWorkspaceOpenRequest,
+  isWorkspaceSelection
 } from '../../packages/shared/src/ipc';
 
 const permissionGrantScope = (overrides: Partial<PermissionGrantScope> = {}): PermissionGrantScope => ({
@@ -423,6 +457,226 @@ describe('packages/shared ipc coverage type guards', () => {
       revealPattern: null,
       revealNonce: 0
     })).toBe(false);
+  });
+
+  it('validates workspace, editor, file and diff guards', () => {
+    expect(isThemeSettings({ theme: 'dark' })).toBe(true);
+    expect(isThemeSettings({ theme: 'light' })).toBe(true);
+    expect(isThemeSettings({ theme: 'blue' })).toBe(false);
+
+    expect(isWorkspaceOpenRequest({ kind: 'folder' })).toBe(true);
+    expect(isWorkspaceOpenRequest({ kind: 'workspace-file' })).toBe(true);
+    expect(isWorkspaceOpenRequest({ kind: 'file' })).toBe(false);
+
+    expect(isWorkspaceSelection({ status: 'cancelled' })).toBe(true);
+    expect(isWorkspaceSelection({ status: 'selected', kind: 'folder', path: '/ws', name: 'ws' })).toBe(true);
+    expect(isWorkspaceSelection({ status: 'selected', kind: 'workspace-file', path: '/ws/app.code-workspace', name: 'app' })).toBe(true);
+    expect(isWorkspaceSelection({ status: 'selected', kind: 'folder', path: '/ws' })).toBe(false);
+
+    expect(isStartupState({ status: 'ready', appVersion: '1.0.0', services: [{ id: 'workspace-service', label: 'Workspace', status: 'ready' }] })).toBe(true);
+    expect(isStartupState({ status: 'ready', appVersion: '1.0.0', services: [{ id: 'invalid', label: 'Invalid', status: 'ready' }] })).toBe(false);
+    expect(isStartupState({ status: 'error', appVersion: '1.0.0', code: 'INVALID_STARTUP_STATE', message: 'bad' })).toBe(true);
+    expect(isStartupState({ status: 'error', appVersion: '1.0.0', code: 'INVALID', message: 'bad' })).toBe(false);
+
+    expect(isWorkspaceModel({ status: 'ok', filePath: '/ws', kind: 'folder', folders: [{ path: '/ws', name: 'ws' }] })).toBe(true);
+    expect(isWorkspaceModel({ status: 'ok', filePath: '/ws/app.code-workspace', kind: 'workspace-file', folders: [] })).toBe(true);
+    expect(isWorkspaceModel({ status: 'error', code: 'EMPTY_WORKSPACE', message: 'empty' })).toBe(true);
+    expect(isWorkspaceModel({ status: 'ok', filePath: '/ws', kind: 'folder', folders: [{ path: 1 }] })).toBe(false);
+
+    expect(isDirectoryListing({ path: '/ws', entries: [{ name: 'src', path: '/ws/src', kind: 'directory', isSensitive: false }] })).toBe(true);
+    expect(isDirectoryListing({ path: '/ws', entries: [{ name: 'src', path: '/ws/src', kind: 'file', isSensitive: true }] })).toBe(true);
+    expect(isDirectoryListing({ path: '/ws', entries: [{ name: 'src', path: '/ws/src', kind: 'file', isSensitive: 'yes' }] })).toBe(false);
+
+    expect(isFsChangeEvent({ kind: 'add', path: '/ws/a.ts' })).toBe(true);
+    expect(isFsChangeEvent({ kind: 'change', path: '/ws/a.ts' })).toBe(true);
+    expect(isFsChangeEvent({ kind: 'unlink', path: '/ws/a.ts' })).toBe(true);
+    expect(isFsChangeEvent({ kind: 'addDir', path: '/ws/src' })).toBe(true);
+    expect(isFsChangeEvent({ kind: 'unknown', path: '/ws/a.ts' })).toBe(false);
+
+    expect(isFileReadResult({ status: 'ok', content: 'text', encoding: 'utf8' })).toBe(true);
+    expect(isFileReadResult({ status: 'error', code: 'ENCODING_ERROR', message: 'bad encoding' })).toBe(true);
+    expect(isFileReadResult({ status: 'error', code: 'UNKNOWN', message: 'bad' })).toBe(true);
+    expect(isFileReadResult({ status: 'error', code: 'UNKNOWN' })).toBe(false);
+
+    expect(isFileWriteResult({ status: 'ok' })).toBe(true);
+    expect(isFileWriteResult({ status: 'error', code: 'WRITE_CONFLICT', message: 'conflict' })).toBe(true);
+    expect(isFileWriteResult({ status: 'error', code: 'UNKNOWN', message: 'bad' })).toBe(true);
+    expect(isFileWriteResult({ status: 'error', code: 'UNKNOWN' })).toBe(false);
+
+    expect(isWorkspaceEditInput({ operations: [{ filePath: '/ws/a.ts', range: { startLine: 1, startCol: 0, endLine: 2, endCol: 0 }, text: 'x' }] })).toBe(true);
+    expect(isWorkspaceEditInput({ operations: [{ filePath: '/ws/a.ts', text: 'x' }] })).toBe(true);
+    expect(isWorkspaceEditInput({ operations: [{ filePath: '/ws/a.ts', range: { startLine: 1, startCol: 0, endLine: 'bad', endCol: 0 }, text: 'x' }] })).toBe(false);
+    expect(isWorkspaceEditInput({ operations: 'bad' })).toBe(false);
+
+    expect(isWorkspaceEditResult({ status: 'ok' })).toBe(true);
+    expect(isWorkspaceEditResult({ status: 'error', code: 'WRITE_CONFLICT', message: 'conflict' })).toBe(true);
+    expect(isWorkspaceEditResult({ status: 'error', code: 'UNKNOWN' })).toBe(false);
+
+    expect(isDiffInput({ original: 'old', modified: 'new', filePath: '/ws/a.ts' })).toBe(true);
+    expect(isDiffInput({ original: 'old', modified: 'new' })).toBe(true);
+    expect(isDiffInput({ original: 'old' })).toBe(false);
+
+    expect(isDiffResult({ status: 'ok', diff: 'diff' })).toBe(true);
+    expect(isDiffResult({ status: 'error', code: 'UNKNOWN', message: 'bad' })).toBe(true);
+    expect(isDiffResult({ status: 'ok', diff: 1 })).toBe(false);
+  });
+
+  it('validates model gateway, chat, event log and secure config guards', () => {
+    const modelInfo = { id: 'gpt-test', name: 'GPT Test', provider: 'openai-compatible' as const, contextWindow: 8000, supportsTools: true, supportsStreaming: true, supportsEmbeddings: false };
+    const providerState = { id: 'openai-compatible' as const, label: 'OpenAI compatible', status: 'ready' as const, baseUrl: 'https://api.example.test', models: [modelInfo] };
+
+    expect(isModelProviderId('openrouter')).toBe(true);
+    expect(isModelProviderId('ollama')).toBe(true);
+    expect(isModelProviderId('lmstudio')).toBe(true);
+    expect(isModelProviderId('openai-compatible')).toBe(true);
+    expect(isModelProviderId('unknown')).toBe(false);
+
+    expect(isModelInfo(modelInfo)).toBe(true);
+    expect(isModelInfo({ ...modelInfo, provider: 'unknown' })).toBe(false);
+    expect(isModelInfo({ id: 'm', name: 'M', provider: 'ollama', contextWindow: 100, supportsTools: true, supportsStreaming: false, supportsEmbeddings: true })).toBe(true);
+
+    expect(isModelProviderState(providerState)).toBe(true);
+    expect(isModelProviderState({ ...providerState, status: 'checking' })).toBe(true);
+    expect(isModelProviderState({ ...providerState, status: 'invalid' })).toBe(false);
+    expect(isModelProviderState({ ...providerState, models: [{ ...modelInfo, supportsTools: 'yes' }] })).toBe(false);
+
+    expect(isModelGatewayConfig({ providers: [providerState], activeProvider: 'ollama', activeModel: 'default' })).toBe(true);
+    expect(isModelGatewayConfig({ providers: [], activeProvider: 'ollama', activeModel: 'default' })).toBe(true);
+    expect(isModelGatewayConfig({ providers: [], activeProvider: 'unknown', activeModel: 'default' })).toBe(false);
+
+    const toolCall = { id: 'call-1', type: 'function' as const, function: { name: 'readFile', arguments: '{"path":"/ws/a.ts"}' } };
+    expect(isToolCall(toolCall)).toBe(true);
+    expect(isToolCall({ id: 'call-1', type: 'unknown', function: toolCall.function })).toBe(false);
+    expect(isToolCall({ id: 'call-1', type: 'function', function: { name: 'readFile', arguments: 1 } })).toBe(false);
+
+    expect(isChatMessage({ role: 'user', content: 'hello', timestamp: 1 })).toBe(true);
+    expect(isChatMessage({ role: 'assistant', content: 'hi', timestamp: 2, tool_calls: [toolCall], tool_call_id: 'call-1' })).toBe(true);
+    expect(isChatMessage({ role: 'tool', content: 'ok', timestamp: 3, tool_call_id: 1 })).toBe(false);
+
+    expect(isChatTabState({ id: 'tab-1', title: 'Chat', messages: [], activeModel: 'default', activeProvider: 'ollama', isStreaming: false })).toBe(true);
+    expect(isChatTabState({ id: 'tab-1', title: 'Chat', messages: [{ role: 'user', content: 'hello', timestamp: 1 }], activeModel: 'default', activeProvider: 'ollama', isStreaming: true, runtimeSessionId: 's1', runtimeWorkerId: 'w1', error: 'bad' })).toBe(true);
+    expect(isChatTabState({ id: 'tab-1', title: 'Chat', messages: [], activeModel: 'default', activeProvider: 'unknown', isStreaming: false })).toBe(false);
+
+    expect(isChatStreamEvent({ type: 'chunk', content: 'hi' })).toBe(true);
+    expect(isChatStreamEvent({ type: 'tool_use', toolCall })).toBe(true);
+    expect(isChatStreamEvent({ type: 'done' })).toBe(true);
+    expect(isChatStreamEvent({ type: 'error', message: 'bad' })).toBe(true);
+    expect(isChatStreamEvent({ type: 'info', message: 'info' })).toBe(true);
+    expect(isChatStreamEvent({ type: 'unknown' })).toBe(false);
+
+    expect(isSendMessageResult({ status: 'ok' })).toBe(true);
+    expect(isSendMessageResult({ status: 'error', code: 'NETWORK_ERROR', message: 'offline' })).toBe(true);
+    expect(isSendMessageResult({ status: 'error', code: 'UNKNOWN', message: 'bad' })).toBe(true);
+    expect(isSendMessageResult({ status: 'error', code: 'UNKNOWN' })).toBe(false);
+
+    expect(isTestConnectionResult({ status: 'ok', models: [modelInfo] })).toBe(true);
+    expect(isTestConnectionResult({ status: 'error', message: 'bad' })).toBe(true);
+    expect(isTestConnectionResult({ status: 'error', message: 'bad', models: [] })).toBe(true);
+    expect(isTestConnectionResult({ status: 'error' })).toBe(false);
+
+    expect(isModelProviderConfig({ baseUrl: 'http://localhost:11434', hasApiKey: false })).toBe(true);
+    expect(isModelProviderConfig({ baseUrl: 123, hasApiKey: false })).toBe(false);
+  });
+
+  it('validates memory, retrieval, index chunk and code stats guards', () => {
+    const memoryEntry = {
+      id: 'mem-1',
+      scope: 'repo' as const,
+      filePath: '/repo/test.md',
+      title: 'Test',
+      checksum: 'abc',
+      sourceKind: 'markdown' as const,
+      createdSource: 'agent' as const,
+      createdAt: 1,
+      updatedAt: 2,
+      tags: ['test']
+    };
+    const patch = {
+      id: 'patch-1',
+      filePath: '/repo/test.md',
+      baseHash: 'abc',
+      operations: [patchOperation()],
+      author: 'agent',
+      riskLevel: 'low' as const,
+      createdAt: 1
+    };
+    const indexChunk = {
+      id: 'chunk-1',
+      filePath: '/repo/test.ts',
+      language: 'typescript',
+      scope: 'repo' as const,
+      startLine: 1,
+      endLine: 10,
+      startCol: 0,
+      endCol: 100,
+      text: 'export const x = 1;',
+      checksum: 'abc',
+      createdAt: 1,
+      metadata: { symbol: 'x' }
+    };
+
+    expect(isMemoryScope('user')).toBe(true);
+    expect(isMemoryScope('workspace')).toBe(true);
+    expect(isMemoryScope('repo')).toBe(true);
+    expect(isMemoryScope('unknown')).toBe(false);
+
+    expect(isMemoryEntry(memoryEntry)).toBe(true);
+    expect(isMemoryEntry({ ...memoryEntry, tags: undefined })).toBe(true);
+    expect(isMemoryEntry({ ...memoryEntry, scope: 'unknown' })).toBe(false);
+    expect(isMemoryEntry({ ...memoryEntry, tags: ['ok', 1] })).toBe(false);
+
+    expect(isMemoryChangeProposal({ scope: 'repo', filePath: '/repo/test.md', patch })).toBe(true);
+    expect(isMemoryChangeProposal({ scope: 'unknown', filePath: '/repo/test.md', patch })).toBe(false);
+
+    expect(isMemoryApplyResult({ status: 'ok', entry: memoryEntry })).toBe(true);
+    expect(isMemoryApplyResult({ status: 'ok', entry: memoryEntry, autoMerged: true })).toBe(true);
+    expect(isMemoryApplyResult({ status: 'error', code: 'CONFLICT', message: 'conflict' })).toBe(true);
+    expect(isMemoryApplyResult({ status: 'error', code: 'CONFLICT', message: 'conflict', conflict: { id: 'mem-conflict', kind: 'memory-conflict', proposalId: 'proposal-1', filePath: '/repo/test.md', description: 'bad', riskLevel: 'high', createdAt: 1 } })).toBe(true);
+    expect(isMemoryApplyResult({ status: 'error', code: 'CONFLICT' })).toBe(true);
+    expect(isMemoryApplyResult({ status: 'ok' })).toBe(false);
+
+    expect(isMemoryConflict({ id: 'mem-conflict', kind: 'memory-high-risk', proposalId: 'proposal-1', filePath: '/repo/test.md', description: 'bad', riskLevel: 'critical', createdAt: 1 })).toBe(true);
+    expect(isMemoryConflict({ id: 'mem-conflict', kind: 'memory-deleted', proposalId: 'proposal-1', filePath: '/repo/test.md', description: 'deleted', riskLevel: 'read-only', createdAt: 1 })).toBe(true);
+    expect(isMemoryConflict({ id: 'mem-conflict', kind: 'memory-conflict' })).toBe(false);
+
+    expect(isMemoryConflictResolution({ conflictId: 'mem-conflict', action: 'apply' })).toBe(true);
+    expect(isMemoryConflictResolution({ conflictId: 'mem-conflict', action: 'skip' })).toBe(true);
+    expect(isMemoryConflictResolution({ conflictId: 'mem-conflict', action: 'edit', text: 'new' })).toBe(true);
+    expect(isMemoryConflictResolution({ conflictId: 'mem-conflict', action: 'edit' })).toBe(false);
+    expect(isMemoryConflictResolution({ conflictId: 'mem-conflict', action: 'invalid' })).toBe(false);
+
+    expect(isRetrievalQuery({ text: 'read file', scopes: ['repo'], languages: ['typescript'], folders: ['src'], since: 1, maxResults: 5, includeMemory: true, includeCode: false })).toBe(true);
+    expect(isRetrievalQuery({ text: 'read file', scopes: ['unknown'] })).toBe(false);
+    expect(isRetrievalQuery({ text: 'read file', languages: ['ts', 1] })).toBe(false);
+    expect(isRetrievalQuery({ text: 'read file', since: '1' })).toBe(false);
+    expect(isRetrievalQuery({ text: 'read file', maxResults: '5' })).toBe(false);
+    expect(isRetrievalQuery({ text: 'read file', includeMemory: 'yes' })).toBe(false);
+
+    expect(isRetrievalResult({ kind: 'memory', chunkId: 'chunk-1', filePath: '/repo/test.md', text: 'text', score: 0.5, metadata: {}, checksum: 'abc', createdAt: 1 })).toBe(true);
+    expect(isRetrievalResult({ kind: 'code', chunkId: 'chunk-1', filePath: '/repo/test.ts', text: 'code', score: 0.7, metadata: { symbol: 'x' } })).toBe(true);
+    expect(isRetrievalResult({ kind: 'unknown', chunkId: 'chunk-1', filePath: '/repo/test.ts', text: 'code', score: 0.7, metadata: {} })).toBe(false);
+    expect(isRetrievalResult({ kind: 'code', chunkId: 'chunk-1', filePath: '/repo/test.ts', text: 'code', score: 0.7, metadata: 'bad' })).toBe(false);
+
+    expect(isIndexChunk(indexChunk)).toBe(true);
+    expect(isIndexChunk({ ...indexChunk, scope: undefined, metadata: undefined })).toBe(true);
+    expect(isIndexChunk({ ...indexChunk, scope: 'unknown' })).toBe(false);
+    expect(isIndexChunk({ ...indexChunk, metadata: 'bad' })).toBe(false);
+
+    expect(isEmbeddingMetadata({ model: 'test', dimension: 8, indexVersion: 'phase9-v1', scope: 'repo', language: 'typescript', folder: '/repo', updatedAt: 1 })).toBe(true);
+    expect(isEmbeddingMetadata({ model: 'test', dimension: 8, indexVersion: 'phase9-v1' })).toBe(true);
+    expect(isEmbeddingMetadata({ model: 'test', dimension: 8, indexVersion: 'phase9-v1', scope: 'unknown' })).toBe(false);
+    expect(isEmbeddingMetadata({ model: 'test', dimension: 8, indexVersion: 'phase9-v1', language: 1 })).toBe(false);
+
+    expect(isCodeIndexStats({ chunks: 1, files: 1, languages: { typescript: 1 }, indexVersion: 'phase9-v1' })).toBe(true);
+    expect(isCodeIndexStats({ chunks: 1, files: 1, languages: {}, indexVersion: 'phase9-v1' })).toBe(true);
+    expect(isCodeIndexStats({ chunks: 1, files: 1, languages: { typescript: 1 }, indexVersion: 1 })).toBe(false);
+  });
+
+  it('validates event log result aliases', () => {
+    expect(isEventLogResult({ status: 'ok', entries: [], total: 0 })).toBe(true);
+    expect(isEventLogResult({ status: 'error', code: 'UNKNOWN', message: 'failed' })).toBe(true);
+    expect(isEventLogResult({ status: 'error', code: 'UNKNOWN' })).toBe(false);
+    expect(isEventLogResult({ status: 'ok', entries: 'bad', total: 0 })).toBe(false);
   });
 
   it('validates file operation, event log and model provider config guards', () => {

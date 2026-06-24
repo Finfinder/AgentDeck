@@ -28,11 +28,13 @@ export function detectLanguage(filePath: string): string {
 }
 
 export function deterministicChunkId(filePath: string, language: string, startLine: number, text: string): string {
-  return `chunk-${sha256(`${filePath}:${language}:${startLine}:${text}`).slice(0, 24)}`;
+  const chunkInput = [filePath, language, startLine, text].join(':');
+  return `chunk-${sha256(chunkInput).slice(0, 24)}`;
 }
 
 export function deterministicChecksum(language: string, startLine: number, text: string): string {
-  return sha256(`${language}:${startLine}:${text}`);
+  const checksumInput = [language, startLine, text].join(':');
+  return sha256(checksumInput);
 }
 
 export function relativePath(root: string, filePath: string): string {

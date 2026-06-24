@@ -727,12 +727,13 @@ export function App() {
     return dispose;
   }, [agent]);
 
-  const handleMemoryConflictResolve = useCallback(async (_action: 'apply' | 'skip' | 'edit') => {
-    void _action;
+  const handleMemoryConflictResolve = useCallback(async (action: 'apply' | 'skip' | 'edit') => {
     if (!pendingMemoryConflict) return;
 
     try {
-      const resolution: MemoryConflictResolution = { conflictId: pendingMemoryConflict.id, action: 'skip' as const };
+      const resolution = action === 'edit'
+        ? { conflictId: pendingMemoryConflict.id, action, text: '' }
+        : { conflictId: pendingMemoryConflict.id, action };
       await agent.resolveMemoryConflict?.(resolution);
     } catch {
       // silently ignore — conflict may have expired

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 // readdir used dynamically in list()
 
 import type { MemoryApplyResult, MemoryChangeProposal, MemoryEntry, MemoryScope, PatchOperation, PatchSet, ToolRiskLevel } from '@agentdeck/shared';
@@ -50,6 +50,20 @@ export class MemoryService {
     const scopeDir = join(this.baseDir, 'memories', scope);
     await mkdir(scopeDir, { recursive: true });
     return scopeDir;
+  }
+
+  /**
+   * Validates that filePath is contained within the memory base directory.
+   * Prevents path traversal attacks from a compromised renderer.
+   * Returns the resolved absolute path if valid, throws otherwise.
+   */
+  resolveValidatedPath(filePath: string): string {
+    const memoryRoot = resolve(this.baseDir, 'memories');
+    const resolved = resolve(filePath);
+    if (resolved !== memoryRoot && !resolved.startsWith(memoryRoot + sep)) {
+      throw new Error(`Path traversal blocked: ${filePath} is outside memory directory.`);
+    }
+    return resolved;
   }
 
   async read(scope: MemoryScope, filePath: string): Promise<MemoryReadResult> {
@@ -130,6 +144,13 @@ export class MemoryService {
 
       // No conflict — apply directly
       const newContent = this.extractNewContent(proposal.patch);
+      // Guard against empty content from no-op proposals (patch.operations.length === 0)
+      if (!newContent) {
+        // Return existing entry without overwriting with empty content
+        const currentContent = await readFile(proposal.filePath, "utf8");
+        const entry = await this.write(proposal.scope, proposal.filePath, currentContent);
+        return { status: "ok", entry };
+      }
       const entry = await this.write(proposal.scope, proposal.filePath, newContent);
       return { status: "ok", entry };
     } catch (error) {
@@ -177,9 +198,10 @@ export class MemoryService {
 
 
   async write(scope: MemoryScope, filePath: string, content: string): Promise<MemoryEntry> {
+    const redacted = redactSecrets(content);
     await mkdir(dirname(filePath), { recursive: true });
-    await writeFile(filePath, redactSecrets(content), 'utf8');
-    return this.describeEntry(scope, filePath, content);
+    await writeFile(filePath, redacted, 'utf8');
+    return this.describeEntry(scope, filePath, redacted);
   }
 
   describeEntry(scope: MemoryScope, filePath: string, content: string): MemoryEntry {
@@ -283,13 +305,11 @@ function memoryId(scope: MemoryScope, filePath: string): string {
 }
 
 function extractMarkdownTitle(content: string): string {
-  // Safe: bounded quantifier {1,120} and single character class [^\n\r#] — no backtracking risk
   const match = /^#{1,6}\s+([^\n\r#]{1,120})/m.exec(content);
   return match?.[1]?.trim() ?? 'Untitled memory';
 }
 
 function extractMarkdownTags(content: string): string[] {
-  // Safe: bounded quantifier {1,120} and single character class [^\n\r;] — no backtracking risk
   const match = /(?:^|\n)\s*tags\s*:\s*([^\n\r;]{1,120})/i.exec(content);
   if (!match?.[1]) return [];
   return match[1]

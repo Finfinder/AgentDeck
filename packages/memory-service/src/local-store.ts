@@ -435,7 +435,7 @@ export class LocalStore {
 
   listChunks(filters?: SearchEmbeddingFilters): readonly IndexChunk[] {
     const { where, params } = buildChunkFilters(filters);
-    const rows = this.db.prepare(`select * from index_chunks ${where} order by file_path, start_line, id`).all(...(params as unknown as SQLInputValue[])) as ChunkRow[];
+    const rows = this.db.prepare(`select * from index_chunks c where 1=1 ${where} order by c.file_path, c.start_line, c.id`).all(...(params as unknown as SQLInputValue[])) as ChunkRow[];
     return rows.map(rowToIndexChunk);
   }
 
@@ -566,7 +566,8 @@ function buildChunkFilters(filters?: SearchEmbeddingFilters): Readonly<{ where: 
   }
 
   if (filters?.folders !== undefined && filters.folders.length > 0) {
-    clauses.push(`(c.metadata_json is null or c.metadata_json like ?)`);
+    const folderLikes = filters.folders.map(() => `c.metadata_json like ?`).join(' or ');
+    clauses.push(`(c.metadata_json is null or ${folderLikes})`);
     params.push(...filters.folders.map(folder => `%${escapeLike(folder)}%`));
   }
 

@@ -30,18 +30,6 @@ export default defineConfig({
     ssr: {
       noExternal: ['@agentdeck/memory-service', '@agentdeck/code-indexer', '@agentdeck/services']
     },
-    alias: {
-      '@agentdeck/agent-runtime': resolve(rootDir, 'packages/agent-runtime/src/index.ts'),
-      '@agentdeck/permission-broker': resolve(rootDir, 'packages/permission-broker/src/index.ts'),
-      '@agentdeck/services': resolve(rootDir, 'packages/services/src/index.ts'),
-      '@agentdeck/shared': resolve(rootDir, 'packages/shared/src/index.ts'),
-      '@agentdeck/workbench': resolve(rootDir, 'packages/workbench/src/index.ts'),
-      '@agentdeck/memory-service': resolve(rootDir, 'packages/memory-service/src/index.ts'),
-      '@agentdeck/code-indexer': resolve(rootDir, 'packages/code-indexer/src/index.ts'),
-      'node:sqlite': resolve(rootDir, 'tests/__mocks__/node-sqlite.ts'),
-      '@monaco-editor/react': resolve(rootDir, 'tests/__mocks__/monaco-editor-react.tsx'),
-      keytar: resolve(rootDir, 'packages/workbench/src/keytar-mock.ts')
-    },
     coverage: {
       provider: 'v8',
       reportsDirectory: 'coverage',
@@ -57,8 +45,6 @@ export default defineConfig({
         'packages/workbench/src/main.tsx',
         'packages/code-indexer/src/code-indexer.ts',
         'packages/code-indexer/src/utils.ts',
-        'packages/memory-service/src/memory-service.ts',
-        'packages/memory-service/src/local-store.ts',
         'packages/code-indexer/src/chunking.ts',
         'tests/**',
         '**/*.test.{ts,tsx}',

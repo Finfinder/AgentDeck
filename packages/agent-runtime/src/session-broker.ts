@@ -45,9 +45,9 @@ function sanitizeEventMessage(message: string): string {
 
   for (const pattern of keyValuePatterns) {
     sanitized = sanitized.replace(pattern, (match) => {
-      const separatorMatch = match.match(/[:=]/);
-      if (separatorMatch && separatorMatch.index !== undefined) {
-        const keyPart = match.substring(0, separatorMatch.index);
+      const separatorIndex = match.search(/[:=]/);
+      if (separatorIndex >= 0) {
+        const keyPart = match.substring(0, separatorIndex);
         return `${keyPart}=[REDACTED]`;
       }
       return '[REDACTED]';
@@ -636,61 +636,73 @@ export class AgentRuntime extends EventEmitter {
 
     if (worker.status === 'idle') {
       const task = this.tasks.get(worker.taskId);
-      worker.status = 'stopped';
-      worker.stoppedAt = this.now();
-      if (task) {
-        task.status = 'cancelled';
-        task.updatedAt = this.now();
-      }
-
-      this.appendEvent({
-        sessionId: worker.sessionId,
-        taskId: worker.taskId,
-        workerId,
-        type: 'worker-stopped',
-        message: 'Worker stopped before start.'
-      });
-      if (task) {
-        this.appendEvent({
-          sessionId: worker.sessionId,
-          taskId: worker.taskId,
-          type: 'task-cancelled',
-          message: 'Task cancelled before start.'
-        });
-      }
-      this.emit('worker-changed', this.cloneWorker(worker));
-      if (task) {
-        this.emit('task-changed', this.cloneTask(task));
-      }
-      this.emit('session-changed', this.getSessionSnapshot(worker.sessionId));
-
-      return { status: 'ok', value: this.cloneWorker(worker) };
+      return { status: 'ok', value: this.stopIdleWorker(worker, task, worker.id) };
     }
 
     if (worker.status === 'retrying' || worker.status === 'stopping') {
-      const controller = this.abortControllers.get(workerId);
-      if (controller && !controller.signal.aborted) {
-        controller.abort();
-      }
-
-      if (worker.status === 'retrying') {
-        worker.status = 'stopping';
-        worker.stoppedAt = this.now();
-        this.appendEvent({
-          sessionId: worker.sessionId,
-          taskId: worker.taskId,
-          workerId,
-          type: 'worker-stopped',
-          message: 'Worker stop requested during retry.'
-        });
-        this.emit('worker-changed', this.cloneWorker(worker));
-        this.emit('session-changed', this.getSessionSnapshot(worker.sessionId));
-      }
-
-      return { status: 'ok', value: this.cloneWorker(worker) };
+      return { status: 'ok', value: this.stopRetryingOrStoppingWorker(worker) };
     }
 
-    const controller = this.abortControllers.get(workerId);
+    return { status: 'ok', value: this.requestWorkerStop(worker) };
+  }
+
+  private stopIdleWorker(worker: MutableAgentRuntimeWorkerState, task: MutableAgentRuntimeTaskState | undefined, workerId: string): MutableAgentRuntimeWorkerState {
+    worker.status = 'stopped';
+    worker.stoppedAt = this.now();
+    if (task) {
+      task.status = 'cancelled';
+      task.updatedAt = this.now();
+    }
+
+    this.appendEvent({
+      sessionId: worker.sessionId,
+      taskId: worker.taskId,
+      workerId,
+      type: 'worker-stopped',
+      message: 'Worker stopped before start.'
+    });
+    if (task) {
+      this.appendEvent({
+        sessionId: worker.sessionId,
+        taskId: worker.taskId,
+        type: 'task-cancelled',
+        message: 'Task cancelled before start.'
+      });
+    }
+    this.emit('worker-changed', this.cloneWorker(worker));
+    if (task) {
+      this.emit('task-changed', this.cloneTask(task));
+    }
+    this.emit('session-changed', this.getSessionSnapshot(worker.sessionId));
+
+    return worker;
+  }
+
+  private stopRetryingOrStoppingWorker(worker: MutableAgentRuntimeWorkerState): MutableAgentRuntimeWorkerState {
+    const controller = this.abortControllers.get(worker.id);
+    if (controller && !controller.signal.aborted) {
+      controller.abort();
+    }
+
+    if (worker.status === 'retrying') {
+      worker.status = 'stopping';
+      worker.stoppedAt = this.now();
+      this.appendEvent({
+        sessionId: worker.sessionId,
+        taskId: worker.taskId,
+        workerId: worker.id,
+        type: 'worker-stopped',
+        message: 'Worker stop requested during retry.'
+      });
+      this.emit('worker-changed', this.cloneWorker(worker));
+      this.emit('session-changed', this.getSessionSnapshot(worker.sessionId));
+    }
+
+    return worker;
+  }
+
+  private requestWorkerStop(worker: MutableAgentRuntimeWorkerState): MutableAgentRuntimeWorkerState {
+    const controller = this.abortControllers.get(worker.id);
     if (controller && !controller.signal.aborted) {
       controller.abort();
     }
@@ -700,14 +712,14 @@ export class AgentRuntime extends EventEmitter {
     this.appendEvent({
       sessionId: worker.sessionId,
       taskId: worker.taskId,
-      workerId,
+      workerId: worker.id,
       type: 'worker-stopped',
       message: 'Worker stop requested.'
     });
     this.emit('worker-changed', this.cloneWorker(worker));
     this.emit('session-changed', this.getSessionSnapshot(worker.sessionId));
 
-    return { status: 'ok', value: this.cloneWorker(worker) };
+    return worker;
   }
 
   resumeWorker(options: AgentRuntimeResumeOptions): AgentRuntimeResult<AgentRuntimeWorkerState> {

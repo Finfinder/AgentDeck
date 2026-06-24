@@ -364,10 +364,9 @@ export type MemoryEdit = Readonly<{
   text: string;
 }>;
 
-export type IndexFileResult = Readonly<{
-  chunks: readonly IndexChunk[];
-  stored: boolean;
-}>;
+export type IndexFileResult =
+  | Readonly<{ status: 'ok'; chunks: readonly IndexChunk[]; stored: boolean }>
+  | Readonly<{ status: 'error'; code: 'INVALID_INPUT' | 'UNKNOWN'; message: string }>;
 
 export type RebuildIndexResult = Readonly<{
   chunks: readonly IndexChunk[];
@@ -1330,7 +1329,7 @@ export type ToolCallResponse =
   | Readonly<{
       status: 'error';
       callId: string;
-      code: 'TOOL_NOT_FOUND' | 'ACCESS_DENIED' | 'TIMEOUT' | 'WRITE_CONFLICT' | 'UNKNOWN';
+      code: 'TOOL_NOT_FOUND' | 'ACCESS_DENIED' | 'TIMEOUT' | 'WRITE_CONFLICT' | 'INVALID_ARGUMENT' | 'UNKNOWN';
       message: string;
       conflict?: Conflict | MemoryConflict;
     }>
@@ -1876,7 +1875,10 @@ export function isMemoryEntry(value: unknown): value is MemoryEntry {
   ) {
     return false;
   }
-  if (value.tags !== undefined && !Array.isArray(value.tags)) return false;
+  if (value.tags !== undefined) {
+    if (!Array.isArray(value.tags)) return false;
+    if (!value.tags.every(t => typeof t === 'string')) return false;
+  }
   return true;
 }
 
@@ -1905,7 +1907,9 @@ export function isMemoryConflict(value: unknown): value is MemoryConflict {
     typeof value.kind === 'string' &&
     typeof value.proposalId === 'string' &&
     typeof value.filePath === 'string' &&
-    typeof value.description === 'string'
+    typeof value.description === 'string' &&
+    typeof value.riskLevel === 'string' &&
+    typeof value.createdAt === 'number'
   );
 }
 
@@ -1913,7 +1917,8 @@ export function isMemoryConflictResolution(value: unknown): value is MemoryConfl
   if (!isRecord(value)) return false;
   if (typeof value.conflictId !== 'string') return false;
   const action = (value as { action: unknown }).action;
-  return action === 'apply' || action === 'skip' || action === 'edit';
+  if (action === 'edit') return typeof (value as { text: unknown }).text === 'string';
+  return action === 'apply' || action === 'skip';
 }
 
 function hasValidOptionalScopes(value: Record<string, unknown>): boolean {
@@ -2005,5 +2010,38 @@ export function isCodeIndexStats(value: unknown): value is CodeIndexStats {
     typeof value.files === 'number' &&
     isRecord(value.languages) &&
     typeof value.indexVersion === 'string'
+  );
+}
+
+export function isMemoryReadResult(value: unknown): value is MemoryReadResult {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') {
+    return isMemoryEntry((value as { entry: unknown }).entry) && typeof (value as { content: unknown }).content === 'string';
+  }
+  return (
+    value.status === 'error' &&
+    typeof (value as { code: unknown }).code === 'string' &&
+    typeof (value as { message: unknown }).message === 'string'
+  );
+}
+
+export function isIndexFileResult(value: unknown): value is IndexFileResult {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ok') {
+    return Array.isArray(value.chunks) && typeof value.stored === 'boolean';
+  }
+  return (
+    value.status === 'error' &&
+    typeof value.code === 'string' &&
+    typeof value.message === 'string'
+  );
+}
+
+export function isRebuildIndexResult(value: unknown): value is RebuildIndexResult {
+  if (!isRecord(value)) return false;
+  return (
+    Array.isArray((value as { chunks: unknown }).chunks) &&
+    (value as { chunks: unknown[] }).chunks.every(isIndexChunk) &&
+    isCodeIndexStats((value as { stats: unknown }).stats)
   );
 }

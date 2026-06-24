@@ -197,31 +197,36 @@ async function ensureParser(): Promise<void> {
   await parserInitPromise;
 }
 
+interface BlockWithOffset {
+  startLine: number;
+  lines: readonly string[];
+}
+
 function lineBasedChunks(
   filePath: string,
   language: string,
   content: string,
   scope: MemoryScope | undefined,
   createdAt: number,
-  blockFn: (lines: readonly string[]) => readonly string[][],
+  blockFn: (lines: readonly string[]) => readonly BlockWithOffset[],
   folder: string
 ): IndexChunk[] {
   const lines = content.split(/\r?\n/);
   return blockFn(lines)
-    .filter((block) => block.length > 0)
-    .map((block, index) => {
-      const firstLine = block.at(0);
-      const lastLine = block.at(-1);
+    .filter((block) => block.lines.length > 0)
+    .map((block) => {
+      const firstLine = block.lines.at(0);
+      const lastLine = block.lines.at(-1);
       if (firstLine === undefined || lastLine === undefined) {
         throw new Error('Empty chunk block');
       }
 
-      const startLine = indexOfLine(lines, firstLine);
-      const endLine = indexOfLine(lines, lastLine);
-      const text = block.join('\n');
+      const startLine = block.startLine;
+      const endLine = block.startLine + block.lines.length - 1;
+      const text = block.lines.join('\n');
 
       const baseChunk = {
-        id: deterministicChunkId(language, String(index), startLine, text),
+        id: deterministicChunkId(filePath, language, startLine, text),
         filePath,
         language,
         startLine,
@@ -242,87 +247,113 @@ function lineBasedChunks(
     });
 }
 
-function chunkCodeBlocks(lines: readonly string[]): string[][] {
-  const blocks: string[][] = [];
+function chunkCodeBlocks(lines: readonly string[]): BlockWithOffset[] {
+  const blocks: BlockWithOffset[] = [];
   let current: string[] = [];
+  let blockStart = 0;
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] as string;
     if (line.trim() === '') {
       if (current.length > 0) {
-        blocks.push(current);
+        blocks.push({ startLine: blockStart, lines: [...current] });
         current = [];
       }
+      blockStart = i + 1;
       continue;
     }
     current.push(line);
   }
 
-  if (current.length > 0) blocks.push(current);
-  return blocks.length > 0 ? blocks : [lines.length > 0 ? [lines.at(0) as string] : []];
+  if (current.length > 0) {
+    blocks.push({ startLine: blockStart, lines: [...current] });
+  }
+  return blocks.length > 0 ? blocks : [lines.length > 0 ? { startLine: 0, lines: [lines.at(0) as string] } : { startLine: 0, lines: [] }];
 }
 
-function chunkYamlBlocks(lines: readonly string[]): string[][] {
-  const blocks: string[][] = [];
+function chunkYamlBlocks(lines: readonly string[]): BlockWithOffset[] {
+  const blocks: BlockWithOffset[] = [];
   let current: string[] = [];
+  let blockStart = 0;
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] as string;
     if (line.trim() === '' || line.trim().startsWith('#')) {
       if (current.length > 0) {
-        blocks.push(current);
+        blocks.push({ startLine: blockStart, lines: [...current] });
         current = [];
       }
+      blockStart = i + 1;
       continue;
     }
     if (/^\S/.test(line) && current.length > 0) {
-      blocks.push(current);
+      blocks.push({ startLine: blockStart, lines: [...current] });
       current = [];
+      blockStart = i;
     }
     current.push(line);
   }
 
-  if (current.length > 0) blocks.push(current);
-  return blocks.length > 0 ? blocks : [lines.length > 0 ? [lines.at(0) as string] : []];
+  if (current.length > 0) {
+    blocks.push({ startLine: blockStart, lines: [...current] });
+  }
+  return blocks.length > 0 ? blocks : [lines.length > 0 ? { startLine: 0, lines: [lines.at(0) as string] } : { startLine: 0, lines: [] }];
 }
 
-function chunkJsonBlocks(lines: readonly string[]): string[][] {
-  if (lines.length <= 20) return [lines.filter((line) => line.trim().length > 0)];
+function chunkJsonBlocks(lines: readonly string[]): BlockWithOffset[] {
+  if (lines.length <= 20) {
+    const filtered = lines.filter((line) => line.trim().length > 0);
+    return filtered.length > 0 ? [{ startLine: 0, lines: filtered }] : [{ startLine: 0, lines: [] }];
+  }
 
-  const blocks: string[][] = [];
+  const blocks: BlockWithOffset[] = [];
   let current: string[] = [];
   let depth = 0;
+  let blockStart = 0;
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] as string;
     current.push(line);
     depth += countChar(line, '{') + countChar(line, '[') - countChar(line, '}') - countChar(line, ']');
     if (depth <= 0 && current.length > 0) {
-      blocks.push(current.filter((blockLine) => blockLine.trim().length > 0));
+      const filtered = current.filter((blockLine) => blockLine.trim().length > 0);
+      if (filtered.length > 0) {
+        blocks.push({ startLine: blockStart, lines: filtered });
+      }
       current = [];
+      blockStart = i + 1;
     }
   }
 
-  if (current.length > 0) blocks.push(current.filter((line) => line.trim().length > 0));
-  return blocks.length > 0 ? blocks : [Array.from(lines)];
+  if (current.length > 0) {
+    const filtered = current.filter((line) => line.trim().length > 0);
+    if (filtered.length > 0) {
+      blocks.push({ startLine: blockStart, lines: filtered });
+    }
+  }
+  return blocks.length > 0 ? blocks : [{ startLine: 0, lines: Array.from(lines) }];
 }
 
-function chunkMarkdownSections(lines: readonly string[]): string[][] {
-  const blocks: string[][] = [];
+function chunkMarkdownSections(lines: readonly string[]): BlockWithOffset[] {
+  const blocks: BlockWithOffset[] = [];
   let current: string[] = [];
+  let blockStart = 0;
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] as string;
     const isHeading = /^#{1,6}\s+/.test(line);
     if (isHeading && current.length > 0) {
-      blocks.push(current);
+      blocks.push({ startLine: blockStart, lines: [...current] });
       current = [];
+      blockStart = i;
     }
     current.push(line);
   }
 
-  if (current.length > 0) blocks.push(current);
-  return blocks.length > 0 ? blocks : [lines.length > 0 ? [lines.at(0) as string] : []];
-}
-
-function indexOfLine(lines: readonly string[], needle: string): number {
-  return Math.max(lines.indexOf(needle), 0);
+  if (current.length > 0) {
+    blocks.push({ startLine: blockStart, lines: [...current] });
+  }
+  return blocks.length > 0 ? blocks : [lines.length > 0 ? { startLine: 0, lines: [lines.at(0) as string] } : { startLine: 0, lines: [] }];
 }
 
 function countChar(value: string, char: string): number {

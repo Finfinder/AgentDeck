@@ -57,6 +57,7 @@ export {
       isPermissionApprovalResult,
       // Phase 9
       isMemoryEntry,
+      isMemoryReadResult,
       isMemoryChangeProposal,
       isMemoryApplyResult,
       isMemoryConflict,
@@ -64,6 +65,8 @@ export {
       isRetrievalQuery,
       isRetrievalResult,
       isIndexChunk,
+      isIndexFileResult,
+      isRebuildIndexResult,
       isEmbeddingMetadata,
       isCodeIndexStats,
       isMemoryScope

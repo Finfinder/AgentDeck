@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createCodeIndexer } from '@agentdeck/code-indexer';
@@ -18,7 +18,7 @@ describe('CodeIndexer error handling', () => {
   });
 
   afterEach(() => {
-    try { if (existsSync(workDir)) unlinkSync(workDir); } catch { /* ignore */ }
+    try { if (existsSync(workDir)) rmSync(workDir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
   describe('indexFile error paths', () => {

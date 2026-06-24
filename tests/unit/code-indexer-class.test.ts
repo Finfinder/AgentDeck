@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createCodeIndexer } from '@agentdeck/code-indexer';
@@ -22,7 +22,7 @@ describe('CodeIndexer', () => {
 
   afterEach(() => {
     [dbPath, workDir].forEach(p => {
-      try { if (existsSync(p)) unlinkSync(p); } catch { /* ignore */ }
+      try { if (existsSync(p)) rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ }
     });
   });
 

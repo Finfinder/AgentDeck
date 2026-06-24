@@ -208,21 +208,21 @@ describe('EventLogService', () => {
   });
 
   describe('appendPatchEvent — diff sanitization', () => {
-    it('should redact API keys in diff', () => {
+    it('should redact API keys in diff and preserve the key part', () => {
       const entry = service.appendPatchEvent({
         level: 'info',
         source: 'tool-router',
         message: 'Patch applied',
-        diff: '--- a/.env\n+++ b/.env\n@@ -1 +1 @@\n-API_KEY=sk-abc123secret\n+API_KEY=sk-newsecret',
+        diff: '--- a/.env\n+++ b/.env\n@@ -1 +1 @@\n-API_KEY=***\n+API_KEY=sk-newsecret',
         filePath: '.env',
         patchId: 'patch-1'
       });
-      expect(entry.diff).not.toContain('sk-abc123secret');
+      expect(entry.diff).not.toContain('***');
       expect(entry.diff).not.toContain('sk-newsecret');
-      expect(entry.diff).toContain('[REDACTED]');
+      expect(entry.diff).toContain('API_KEY=[REDACTED]');
     });
 
-    it('should redact passwords in diff', () => {
+    it('should redact passwords in diff and preserve the key part', () => {
       const entry = service.appendPatchEvent({
         level: 'info',
         source: 'tool-router',
@@ -233,20 +233,21 @@ describe('EventLogService', () => {
       });
       expect(entry.diff).not.toContain('super_secret');
       expect(entry.diff).not.toContain('new_secret');
-      expect(entry.diff).toContain('[REDACTED]');
+      expect(entry.diff).toContain('password=[REDACTED]');
     });
 
-    it('should redact GitHub tokens in diff', () => {
+    it('should redact GitHub tokens in diff and preserve the key part', () => {
       const entry = service.appendPatchEvent({
         level: 'info',
         source: 'tool-router',
         message: 'Patch applied',
-        diff: '-token=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef\n+token=ghp_newtoken',
+        diff: '-token=ghp_AB...cdef\n+token=ghp_newtoken',
         filePath: 'config.ts',
         patchId: 'patch-3'
       });
-      expect(entry.diff).not.toContain('ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef');
+      expect(entry.diff).not.toContain('ghp_AB...cdef');
       expect(entry.diff).not.toContain('ghp_newtoken');
+      expect(entry.diff).toContain('token=[REDACTED]');
     });
 
     it('should preserve non-secret diff content', () => {

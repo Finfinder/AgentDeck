@@ -22,12 +22,10 @@ function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
 
 // ?? Patch ID generation ???????????????????????????????????????????????????
 
-let patchCounter = 0;
-
 export function generatePatchId(): string {
   const ts = Date.now().toString(36);
-  const counter = (++patchCounter).toString(36);
-  return `patch-${ts}-${counter}`;
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `patch-${ts}-${rand}`;
 }
 
 // ?? File hash computation ???????????????????????????????????????????????=
@@ -92,8 +90,14 @@ export async function checkPatchConflict(patch: PatchSet): Promise<ConflictCheck
 
 // ?? Conflict Broker ?????????????????????????????????????????????????????=
 
+export interface ResolvedConflict {
+  resolution: ConflictResolution;
+  resolvedAt: number;
+}
+
 export class ConflictBroker {
   private readonly conflicts = new Map<string, Conflict>();
+  private readonly resolvedConflicts = new Map<string, ResolvedConflict>();
 
   /**
    * Register a conflict for tracking.
@@ -125,7 +129,18 @@ export class ConflictBroker {
     if (!conflict) return false;
 
     this.conflicts.delete(resolution.conflictId);
+    this.resolvedConflicts.set(resolution.conflictId, {
+      resolution,
+      resolvedAt: Date.now()
+    });
     return true;
+  }
+
+  /**
+   * Get the resolution for a previously resolved conflict.
+   */
+  getResolvedConflict(conflictId: string): ResolvedConflict | undefined {
+    return this.resolvedConflicts.get(conflictId);
   }
 
   /**
@@ -148,7 +163,14 @@ export class ConflictBroker {
   /**
    * Determine the conflict kind for an operation type.
    */
-  static classifyOperationKind(operation: 'delete' | 'rename' | 'binary' | 'multi-file' | 'patch'): ConflictKind {
+  classifyOperationKind(operation: string): ConflictKind {
+    return ConflictBroker.classifyOperationKind(operation);
+  }
+
+  /**
+   * Static version of classifyOperationKind for direct use.
+   */
+  static classifyOperationKind(operation: string): ConflictKind {
     switch (operation) {
       case 'delete': return 'delete';
       case 'rename': return 'rename';
@@ -157,18 +179,20 @@ export class ConflictBroker {
       default: return 'patch-conflict';
     }
   }
-
-  /**
-   * Instance delegate for classifyOperationKind (for consistency with other instance methods).
-   */
-  classifyOperationKind(operation: 'delete' | 'rename' | 'binary' | 'multi-file' | 'patch'): ConflictKind {
-    return ConflictBroker.classifyOperationKind(operation);
-  }
 }
 
-/** Standalone export of classifyOperationKind for direct imports. */
-export function classifyOperationKind(operation: 'delete' | 'rename' | 'binary' | 'multi-file' | 'patch'): ConflictKind {
-  return ConflictBroker.classifyOperationKind(operation);
+/**
+ * Standalone function to determine the conflict kind for an operation type.
+ * Use this for direct imports without instantiating ConflictBroker.
+ */
+export function classifyOperationKind(operation: string): ConflictKind {
+  switch (operation) {
+    case 'delete': return 'delete';
+    case 'rename': return 'rename';
+    case 'binary': return 'binary';
+    case 'multi-file': return 'multi-file';
+    default: return 'patch-conflict';
+  }
 }
 
 // ?? Range overlap detection ???????????????????????????????????????????=
@@ -242,6 +266,7 @@ function validateOperationRanges(
     if (!op.range) continue;
     if (op.range.startLine < 1 || op.range.startLine > diskLines.length) return [op];
     if (op.range.endLine < 1 || op.range.endLine > diskLines.length) return [op];
+    if (op.range.startCol < 1 || op.range.endCol < 1) return [op];
   }
 
   return null;
@@ -263,10 +288,9 @@ function validateContextAnchors(
 function contextBeforeMatches(op: PatchOperation, diskLines: readonly string[]): boolean {
   if (!op.range || !op.contextBefore || op.contextBefore.length === 0) return true;
 
-  const actualBefore = diskLines.slice(
-    op.range.startLine - 1 - op.contextBefore.length,
-    op.range.startLine - 1
-  );
+  const startIndex = Math.max(0, op.range.startLine - 1 - op.contextBefore.length);
+  const actualBefore = diskLines.slice(startIndex, op.range.startLine - 1);
+  if (actualBefore.length !== op.contextBefore.length) return false;
   return arraysEqual(actualBefore, op.contextBefore);
 }
 

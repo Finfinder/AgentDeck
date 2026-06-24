@@ -155,14 +155,14 @@ export class EventLogService extends EventEmitter {
 const SECRET_PATTERNS = {
   // KEY=VALUE or KEY: VALUE pairs — redact the value portion
   keyValue: [
-    /(?:api[_-]?key|apikey)\s*[:=]\s*\S+/gi,
-    /(?:password|passwd|pwd)\s*[:=]\s*\S+/gi,
-    /(?:secret|client[_-]?secret|app[_-]?secret)\s*[:=]\s*\S+/gi,
-    /(?:token|access[_-]?token|refresh[_-]?token|id[_-]?token)\s*[:=]\s*\S+/gi,
-    /(?:authorization|bearer)\s+\S+/gi,
-    /(?:private[_-]?key|secret[_-]?key|signing[_-]?key)\s*[:=]\s*\S+/gi,
-    /(?:connection[_-]?string|conn[_-]?str)\s*[:=]\s*\S+/gi,
-    /(?:account[_-]?key|storage[_-]?key)\s*[:=]\s*\S+/gi,
+    /(api[_-]?key|apikey)\s*[:=]\s*\S+/gi,
+    /(password|passwd|pwd)\s*[:=]\s*\S+/gi,
+    /(secret|client[_-]?secret|app[_-]?secret)\s*[:=]\s*\S+/gi,
+    /(token|access[_-]?token|refresh[_-]?token|id[_-]?token)\s*[:=]\s*\S+/gi,
+    /(authorization|bearer)\s+\S+/gi,
+    /(private[_-]?key|secret[_-]?key|signing[_-]?key)\s*[:=]\s*\S+/gi,
+    /(connection[_-]?string|conn[_-]?str)\s*[:=]\s*\S+/gi,
+    /(account[_-]?key|storage[_-]?key)\s*[:=]\s*\S+/gi,
   ],
   // Standalone secret values (no key prefix) — replace entire match
   standalone: [
@@ -200,14 +200,8 @@ function sanitizeDiff(diff: string): string {
       let sanitized = line;
       // Handle KEY=VALUE patterns — preserve key, redact value
       for (const pattern of SECRET_PATTERNS.keyValue) {
-        sanitized = sanitized.replace(pattern, match => {
-          const separatorMatch = pattern.exec(match);
-          const separatorIndex = separatorMatch?.index;
-          if (separatorIndex !== undefined) {
-            const keyPart = match.substring(0, separatorIndex);
-            return `${keyPart}=[REDACTED]`;
-          }
-          return '[REDACTED]';
+        sanitized = sanitized.replace(pattern, (_match, key) => {
+          return `${key}=[REDACTED]`;
         });
       }
       // Handle standalone secret patterns — replace entire match
@@ -232,14 +226,8 @@ function sanitizeMessage(message: string): string {
   }
   // Apply key-value patterns for inline mentions like "token=abc123"
   for (const pattern of SECRET_PATTERNS.keyValue) {
-    sanitized = sanitized.replace(pattern, match => {
-      const separatorMatch = pattern.exec(match);
-      const separatorIndex = separatorMatch?.index;
-      if (separatorIndex !== undefined) {
-        const keyPart = match.substring(0, separatorIndex);
-        return `${keyPart}=[REDACTED]`;
-      }
-      return '[REDACTED]';
+    sanitized = sanitized.replace(pattern, (_match, key) => {
+      return `${key}=[REDACTED]`;
     });
   }
   return sanitized;
@@ -250,7 +238,7 @@ function sanitizeMessage(message: string): string {
  * Replaces home directory paths and usernames with placeholders.
  */
 function sanitizeFilePath(filePath: string): string {
-  // Replace Windows user profile paths: C:\Users\Username\... → C:\Users\[USER]\...
+  // Replace Windows user profile paths: C:\\Users\\Username\\... → C:\\Users\\[USER]\\...
   let sanitized = filePath.replace(
     /([A-Z]:\\)Users\\[^\\]+\\/gi,
     '$1Users\\[USER]\\'

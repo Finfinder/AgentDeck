@@ -74,4 +74,15 @@ describe('redactSecrets', () => {
     expect(redactSecrets('openai_api_key=sk-dddddddddddddddddddddddddddddddd')).toBe('openai_api_key=[REDACTED]');
     expect(redactSecrets('OpenAI_API_KEY=sk-dddddddddddddddddddddddddddddddd')).toBe('OpenAI_API_KEY=[REDACTED]');
   });
+
+  it('should preserve leading whitespace', () => {
+    expect(redactSecrets('  Hello world')).toBe('  Hello world');
+    expect(redactSecrets('\n\nHello world')).toBe('\n\nHello world');
+    expect(redactSecrets('  \t  const x = 1;')).toBe('  \t  const x = 1;');
+  });
+
+  it('should preserve leading whitespace even after redaction at start', () => {
+    expect(redactSecrets('  OPENAI_API_KEY=sk-dddddddddddddddddddddddddddddddd')).toBe('  OPENAI_API_KEY=[REDACTED]');
+    expect(redactSecrets('\nPASSWORD=value123')).toBe('\nPASSWORD=[REDACTED]');
+  });
 });

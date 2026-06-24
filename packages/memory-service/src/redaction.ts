@@ -17,7 +17,7 @@ export function redactSecrets(value: string): string {
     sanitized = sanitized.replace(pattern, replacement);
   }
 
-  return sanitized.trimStart();
+  return sanitized;
 }
 
 function isSecretKeyName(key: string): boolean {

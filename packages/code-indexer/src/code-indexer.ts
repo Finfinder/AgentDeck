@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { extname, relative } from 'node:path';
+import { extname, join, normalize as pathNormalize, relative } from 'node:path';
 
 import type {
   CodeIndexStats,
@@ -252,7 +252,7 @@ async function collectIndexableFiles(root: string): Promise<Array<{ filePath: st
 
     for (const name of names) {
       if (EXCLUDED_DIRS.has(name)) continue;
-      const fullPath = `${current}/${name}`;
+      const fullPath = join(current, name);
       const info = await stat(fullPath);
       if (info.isDirectory()) {
         await walk(fullPath, scope);
@@ -268,15 +268,11 @@ async function collectIndexableFiles(root: string): Promise<Array<{ filePath: st
 }
 
 function inferScope(root: string): MemoryScope | undefined {
-  const normalizedRoot = normalize(root);
+  const normalizedRoot = pathNormalize(root);
   if (normalizedRoot.endsWith('/repo')) return 'repo';
   if (normalizedRoot.endsWith('/workspace')) return 'workspace';
   if (normalizedRoot.endsWith('/user')) return 'user';
   return undefined;
-}
-
-function normalize(value: string): string {
-  return value.replaceAll('\\', '/').replace(/\/$/, '');
 }
 
 function compareChunks(a: IndexChunk, b: IndexChunk): number {

@@ -1,14 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { existsSync, unlinkSync, mkdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 
 function tempDbPath(): string {
-  const dir = join(
-    tmpdir(),
-    `agentdeck-migration-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  );
+  const randomSuffix = randomUUID().replaceAll('-', '').slice(0, 16);
+  const dir = join(tmpdir(), `agentdeck-migration-${Date.now()}-${randomSuffix}`);
   mkdirSync(dir, { recursive: true });
   return join(dir, 'test.db');
 }
@@ -20,7 +19,7 @@ function cleanupDb(path: string): void {
     /* ignore */
   }
   try {
-    const dir = path.substring(0, path.lastIndexOf('\\'));
+    const dir = dirname(path);
     if (existsSync(dir)) {
       rmSync(dir, { recursive: true, force: true });
     }

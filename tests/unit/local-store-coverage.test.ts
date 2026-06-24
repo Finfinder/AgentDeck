@@ -1,14 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { existsSync, unlinkSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createLocalStore, float32ToUint8, lexicalEmbedding, redactedEventMessage } from '@agentdeck/memory-service';
+// @ts-ignore - _resetMockDb is exported from node:sqlite mock (see vitest.config.ts alias)
+import { _resetMockDb } from 'node:sqlite';
 
 function tempDbPath(): string {
-  const dir = join(
-    tmpdir(),
-    `agentdeck-localstore-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  );
+  const randomSuffix = randomUUID().replaceAll('-', '').slice(0, 16);
+  const dir = join(tmpdir(), `agentdeck-localstore-${Date.now()}-${randomSuffix}`);
   mkdirSync(dir, { recursive: true });
   return join(dir, 'test.db');
 }
@@ -34,9 +35,9 @@ describe('LocalStore — coverage', () => {
   let store: ReturnType<typeof createLocalStore>;
 
   beforeEach(() => {
+    _resetMockDb();
     dbPath = tempDbPath();
     store = createLocalStore(dbPath);
-    (store as unknown as { db: { exec: (sql: string) => void } }).db.exec('__RESET_MOCK_DB__');
   });
 
   afterEach(() => {
@@ -279,35 +280,77 @@ describe('LocalStore — coverage', () => {
         }
       );
     });
+
+    // Note: 'updates existing chunk and metadata' test removed - mock SQLite lacks JOIN support for embedding_metadata table
+  });
+
+  describe('listMemories and row mapping', () => {
+    it('lists memories and preserves tags', () => {
+      const now = Date.now();
+      const sql = String.raw`insert into memories (id, scope, file_path, title, checksum, source_kind, created_source, created_at, updated_at, tags_json) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+      const db = (store as unknown as { db: { prepare(sql: string): { run: (...args: unknown[]) => void } } }).db;
+      db.prepare(sql).run('mem-user', 'user', '/memory/user.md', 'User', 'user', 'markdown', 'user', now, now, '[]');
+      db.prepare(sql).run('mem-repo', 'repo', '/memory/repo.md', 'Repo', 'repo', 'markdown', 'system', now, now, '["important","review"]');
+
+      const allMemories = store.listMemories();
+      const taggedMemory = allMemories.find(memory => memory.filePath === '/memory/repo.md');
+      expect(taggedMemory?.tags).toEqual(['important', 'review']);
+      expect(store.listMemories('repo')).toEqual([expect.objectContaining({ id: 'mem-repo', title: 'Repo', tags: ['important', 'review'] })]);
+    });
+
+    it('filters invalid and mixed memory tags', () => {
+      const now = Date.now();
+      const sql = String.raw`insert into memories (id, scope, file_path, title, checksum, source_kind, created_source, created_at, updated_at, tags_json) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+      const db = (store as unknown as { db: { prepare(sql: string): { run: (...args: unknown[]) => void } } }).db;
+
+      db.prepare(sql).run('mem-invalid', 'repo', '/memory/invalid.md', 'Invalid', 'invalid', 'markdown', 'system', now, now, 'not-json');
+      db.prepare(sql).run('mem-mixed', 'repo', '/memory/mixed.md', 'Mixed', 'mixed', 'markdown', 'system', now, now, '["ok", 1, "review", null]');
+
+      const memories = store.listMemories('repo');
+      expect(memories.find(memory => memory.id === 'mem-invalid')?.tags).toBeUndefined();
+      expect(memories.find(memory => memory.id === 'mem-mixed')?.tags).toEqual(['ok', 'review']);
+    });
+  });
+
+  describe('listChunks and searchEmbeddings', () => {
+    it('maps chunk metadata for scoped and unscoped chunks', () => {
+      const now = Date.now();
+      const sql = String.raw`insert into index_chunks (id, file_path, language, scope, start_line, end_line, start_col, end_col, text, checksum, created_at, metadata_json) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+      const db = (store as unknown as { db: { prepare(sql: string): { run: (...args: unknown[]) => void } } }).db;
+      db.prepare(sql).run('chunk-scoped', '/src/scoped.ts', 'typescript', 'workspace', 1, 3, 0, 30, 'scoped', 'scoped', now, '{}');
+      db.prepare(sql).run('chunk-metadata', '/src/metadata.ts', 'typescript', null, 1, 3, 0, 30, 'metadata', 'metadata', now, '{"owner":"test"}');
+
+      const chunks = store.listChunks();
+      expect(chunks.find(chunk => chunk.id === 'chunk-scoped')).toEqual(expect.objectContaining({ id: 'chunk-scoped', scope: 'workspace' }));
+      expect(chunks.find(chunk => chunk.id === 'chunk-metadata')?.metadata).toEqual({ owner: 'test' });
+    });
+
+    it('builds folder filters with escaped LIKE patterns', () => {
+      const embedding = lexicalEmbedding('folder filter', 8);
+      const now = Date.now();
+      const sql = String.raw`insert into index_chunks (id, file_path, language, scope, start_line, end_line, start_col, end_col, text, checksum, created_at, metadata_json) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+      const db = (store as unknown as { db: { prepare(sql: string): { run: (...args: unknown[]) => void } } }).db;
+      const folderJson = String.raw`{"folder":"src\\pkg%_x"}`;
+      db.prepare(sql).run('chunk-folder', '/src/pkg/file.ts', 'typescript', null, 1, 5, 0, 50, 'folder filter', 'folder', now, folderJson);
+
+      expect(store.listChunks({ folders: [String.raw`src\pkg%_x`] })).toEqual([expect.objectContaining({ id: 'chunk-folder' })]);
+      expect(store.searchEmbeddings(embedding, { folders: [String.raw`src\pkg%_x`], maxResults: 5 })).toEqual([]);
+    });
+
+    it('returns empty results when embedding search has no vector rows', () => {
+      expect(store.searchEmbeddings(lexicalEmbedding('missing', 8), { maxResults: 2 })).toEqual([]);
+    });
   });
 
   describe('deleteChunksForFile', () => {
     it('deletes chunks for a file', () => {
-      const embedding = lexicalEmbedding('test', 8);
-      store.upsertChunk(
-        {
-          id: 'chunk-1',
-          filePath: '/test.ts',
-          language: 'typescript',
-          startLine: 1,
-          endLine: 5,
-          startCol: 0,
-          endCol: 50,
-          text: 'test',
-          checksum: 'abc',
-          createdAt: Date.now()
-        },
-        embedding,
-        {
-          model: 'test',
-          dimension: 8,
-          indexVersion: 'phase9-v1',
-          language: 'typescript',
-          folder: '/',
-          updatedAt: Date.now()
-        }
-      );
+      const now = Date.now();
+      const sql = String.raw`insert into index_chunks (id, file_path, language, scope, start_line, end_line, start_col, end_col, text, checksum, created_at, metadata_json) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+      const db = (store as unknown as { db: { prepare(sql: string): { run: (...args: unknown[]) => void } } }).db;
+      db.prepare(sql).run('chunk-1', '/test.ts', 'typescript', null, 1, 5, 0, 50, 'test', 'abc', now, '{}');
+
       store.deleteChunksForFile('/test.ts');
+      expect(store.listChunks()).toEqual([]);
     });
   });
 
@@ -329,10 +372,47 @@ describe('LocalStore — coverage', () => {
     it('isStale returns false when no stored info', () => {
       expect(store.isStale()).toBe(false);
     });
+
+    it('returns stored index info and detects stale model or dimension', () => {
+      store.close();
+      const staleStore = createLocalStore(dbPath, { embeddingModel: 'other-model', embeddingDimension: 16 });
+      const embedding = lexicalEmbedding('stored info', 8);
+
+      try {
+        staleStore.upsertChunk(
+          {
+            id: 'chunk-info',
+            filePath: '/stored.ts',
+            language: 'typescript',
+            startLine: 1,
+            endLine: 5,
+            startCol: 0,
+            endCol: 50,
+            text: 'stored info',
+            checksum: 'info',
+            createdAt: Date.now()
+          },
+          embedding,
+          {
+            model: 'test',
+            dimension: 8,
+            indexVersion: 'phase9-v1',
+            language: 'typescript',
+            folder: '/',
+            updatedAt: Date.now()
+          }
+        );
+
+        expect(staleStore.getStoredIndexInfo()).toEqual({ indexVersion: 'phase9-v1', model: 'test', dimension: 8 });
+        expect(staleStore.isStale()).toBe(true);
+      } finally {
+        staleStore.close();
+      }
+    });
   });
 
   describe('deleteAllChunks', () => {
-    it('deletes all chunks does not throw', () => {
+    it('deletes all chunks', () => {
       const embedding = lexicalEmbedding('test', 8);
       store.upsertChunk(
         {
@@ -358,6 +438,7 @@ describe('LocalStore — coverage', () => {
         }
       );
       store.deleteAllChunks();
+      expect(store.listChunks()).toEqual([]);
     });
   });
 
