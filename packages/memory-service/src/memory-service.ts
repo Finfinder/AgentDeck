@@ -310,7 +310,7 @@ function extractMarkdownTitle(content: string): string {
 }
 
 function extractMarkdownTags(content: string): string[] {
-  const match = /(?:^|\n)\s*tags\s*:\s*([^\n\r;]{1,120})/i.exec(content);
+  const match = /^\s*tags\s*:\s*([^\n\r;]{1,120})/imi.exec(content);
   if (!match?.[1]) return [];
   return match[1]
     .split(',')
