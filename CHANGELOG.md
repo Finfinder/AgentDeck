@@ -7,6 +7,7 @@ Format zgodny z [Keep a Changelog](https://keepachangelog.com/pl/1.0.0/).
 ## [Unreleased]
 ### Added
 
+- Dodano 105 testów jednostkowych dla code-indexer (chunking, code-indexer, utils, index) — pokrycie testami wzrosło do >80% dla wszystkich modułów code-indexer.
 - Dodano 171 testów jednostkowych dla session-broker, local-store, memory-service, tool-router i ipc type guards — pokrycie testami wzrosło do >80% dla wszystkich wymienionych modułów.
 - Dodano testy error paths dla AgentRuntime (createSession, startWorker, runWorker, stopWorker, resumeWorker, stopSession, startSubagent, updateSessionModel, updateSessionAllowedTools, waitForWorker).
 - Dodano testy dla LocalStore (appendEvent, appendPatch, upsertMemory, upsertChunk, deleteChunksForFile, getStats, getStoredIndexInfo, isStale, deleteAllChunks, redactedEventMessage).

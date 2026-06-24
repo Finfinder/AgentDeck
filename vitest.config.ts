@@ -43,9 +43,7 @@ export default defineConfig({
         'packages/shared/src/index.ts',
         'packages/workbench/src/index.ts',
         'packages/workbench/src/main.tsx',
-        'packages/code-indexer/src/code-indexer.ts',
-        'packages/code-indexer/src/utils.ts',
-        'packages/code-indexer/src/chunking.ts',
+
         'tests/**',
         '**/*.test.{ts,tsx}',
         '**/*.d.ts',
