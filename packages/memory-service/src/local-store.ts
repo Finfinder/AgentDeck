@@ -654,6 +654,7 @@ function escapeLike(value: string): string {
 function generateId(prefix: string): string {
   // Math.random() is acceptable here: used only for non-security unique ID generation
   // (event IDs, memory cache keys). Not used for tokens, keys, or cryptographic operations.
+  // NOSONAR typescript:S2245
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
