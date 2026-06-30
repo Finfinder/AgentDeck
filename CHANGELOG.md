@@ -5,6 +5,14 @@ Wszystkie istotne zmiany w projektu s─ů dokumentowane w tym pliku.
 Format zgodny z [Keep a Changelog](https://keepachangelog.com/pl/1.0.0/).
 
 ## [Unreleased]
+### Changed
+
+- Zaktualizowano electron z 42.4.0 do 42.5.1 — poprawki bezpieczeństwa i aktualizacja Chromium/Node.js.
+- Zaktualizowano @vitejs/plugin-react z 6.0.2 do 6.0.3 — bugfix release.
+- Zaktualizowano @types/node z 25.9.3 do 26.0.1 — aktualizacja typów Node.js 26.
+- Zaktualizowano vite z 8.0.16 do 8.1.0 — bugfix release.
+- Zaktualizowano @playwright/test z 1.60.0 do 1.61.1 — bugfix release.
+
 ### Fixed
 
 - Naprawiono `relativePath` w code-indexer — obsługa Windows-style backslash paths (normalizacja przed `path.relative`).
