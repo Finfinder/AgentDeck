@@ -59,7 +59,7 @@
     "@vitest/coverage-v8": "4.1.9",
     "dependency-cruiser": "17.4.3",
     "dotenv": "^17.4.2",
-    "electron": "42.4.0",
+    "electron": "42.5.1",
     "electron-playwright-helpers": "^2.1.0",
     "electron-vite": "6.0.0-beta.1",
     "eslint": "10.4.1",
